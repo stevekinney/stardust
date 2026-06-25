@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1782424954539,
+      "tag": "0000_numerous_crystal",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1782424963534,
+      "tag": "0001_memory_notes_fts5",
+      "breakpoints": true
+    }
+  ]
+}

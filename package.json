@@ -21,12 +21,13 @@
 		"test:e2e": "playwright install && playwright test",
 		"db:push": "drizzle-kit push",
 		"db:generate": "drizzle-kit generate",
-		"db:migrate": "drizzle-kit migrate",
+		"db:migrate": "tsx scripts/db/migrate.ts",
 		"db:studio": "drizzle-kit studio"
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
 		"@libsql/client": "^0.17.3",
+		"@types/better-sqlite3": "^7.6.13",
 		"@playwright/test": "^1.60.0",
 		"@sveltejs/adapter-node": "^5.5.7",
 		"@sveltejs/kit": "^2.63.0",
@@ -59,10 +60,12 @@
 		"@temporalio/activity": "^1.18.1",
 		"@temporalio/client": "^1.18.1",
 		"@temporalio/worker": "^1.18.1",
-		"@temporalio/workflow": "^1.18.1"
+		"@temporalio/workflow": "^1.18.1",
+		"better-sqlite3": "^12.11.1"
 	},
 	"trustedDependencies": [
 		"@swc/core",
+		"better-sqlite3",
 		"esbuild",
 		"lefthook",
 		"protobufjs"
