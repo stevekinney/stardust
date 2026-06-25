@@ -1,2 +1,2 @@
-<h1>Welcome to SvelteKit</h1>
-<p>Visit <a href="https://svelte.dev/docs/kit">svelte.dev/docs/kit</a> to read the documentation</p>
+<h1>Stardust</h1>
+<p>Agent orchestration POC. Sessions live at <code>/api/sessions/:sessionKey/turn</code>.</p>
