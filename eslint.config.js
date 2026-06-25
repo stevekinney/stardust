@@ -77,7 +77,8 @@ export default defineConfig(
 			'temporal/workflow-no-fs-in-workflow': 'off',
 			'temporal/workflow-no-network-in-workflow': 'off',
 			'temporal/workflow-no-unsafe-package-imports': 'off',
-			'temporal/workflow-no-logger-library-in-workflow': 'off'
+			'temporal/workflow-no-logger-library-in-workflow': 'off',
+			'temporal/workflow-no-worker-import': 'off'
 		}
 	},
 	{

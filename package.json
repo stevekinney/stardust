@@ -27,11 +27,12 @@
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
 		"@libsql/client": "^0.17.3",
-		"@types/better-sqlite3": "^7.6.13",
 		"@playwright/test": "^1.60.0",
 		"@sveltejs/adapter-node": "^5.5.7",
 		"@sveltejs/kit": "^2.63.0",
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
+		"@temporalio/testing": "^1.18.1",
+		"@types/better-sqlite3": "^7.6.13",
 		"@types/node": "^24",
 		"@vitest/browser-playwright": "^4.1.8",
 		"build-temporal-workflow": "^0.4.0",
