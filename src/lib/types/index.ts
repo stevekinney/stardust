@@ -76,6 +76,7 @@ export type SubagentWorkflowInput = {
 	subagentRunId: string;
 	kind: SubagentKind;
 	message: string;
+	finalAnswer?: string;
 	budgetDebit: BudgetLedgerEntry;
 };
 

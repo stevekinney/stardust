@@ -62,9 +62,9 @@ const REQUESTED_SUBAGENT_USAGE: Record<SubagentKind, ModelUsage> = {
 		estimatedCostUsd: 0.0007
 	},
 	critic: {
-		inputTokens: 0,
-		outputTokens: 0,
-		estimatedCostUsd: 0
+		inputTokens: 20,
+		outputTokens: 10,
+		estimatedCostUsd: 0.0002
 	}
 };
 
@@ -145,7 +145,10 @@ function reserveBudgetEntry(input: {
 	return entry;
 }
 
-async function runDelegatedSubagents(input: AgentRunInput): Promise<{
+async function runDelegatedSubagents(
+	input: AgentRunInput,
+	finalAnswer: string
+): Promise<{
 	budgetLedger: BudgetLedgerSnapshot;
 	timelineLanes: RunTimelineLane[];
 	criticAnnotations: CriticAnnotation[];
@@ -211,6 +214,7 @@ async function runDelegatedSubagents(input: AgentRunInput): Promise<{
 					subagentRunId: `${input.runId}:critic`,
 					kind: 'critic',
 					message: input.message,
+					finalAnswer,
 					budgetDebit: criticDebit
 				}
 			]
@@ -369,17 +373,17 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 		});
 	}
 
-	if (input.delegateSubagents === true) {
-		delegationResult = await runDelegatedSubagents(input);
-	}
-
 	await sleep('1ms');
+	const finalAnswer = '(stub — no model in T2)';
+	if (input.delegateSubagents === true) {
+		delegationResult = await runDelegatedSubagents(input, finalAnswer);
+	}
 	status = 'complete';
 	await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
 	return {
 		runId: input.runId,
 		status: 'complete',
-		finalAnswer: '(stub — no model in T2)',
+		finalAnswer,
 		...delegationResult
 	};
 }
