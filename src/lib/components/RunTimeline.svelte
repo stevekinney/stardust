@@ -200,7 +200,7 @@
 								<span
 									class="eng-kind-marker"
 									data-eng-kind-marker
-									data-kind={event.kind}
+									data-eng-kind={event.kind}
 									aria-hidden="true">{kindMarker(event.kind)}</span
 								>
 							{/if}
@@ -596,31 +596,31 @@
 		color: #7c3aed;
 	}
 
-	.eng-kind-marker[data-kind='user_message'] {
+	.eng-kind-marker[data-eng-kind='user_message'] {
 		color: #1d4ed8;
 	}
 
-	.eng-kind-marker[data-kind='assistant_message'] {
+	.eng-kind-marker[data-eng-kind='assistant_message'] {
 		color: #047857;
 	}
 
-	.eng-kind-marker[data-kind='tool_call'] {
+	.eng-kind-marker[data-eng-kind='tool_call'] {
 		color: #b45309;
 	}
 
-	.eng-kind-marker[data-kind='tool_result'] {
+	.eng-kind-marker[data-eng-kind='tool_result'] {
 		color: #6d28d9;
 	}
 
-	.eng-kind-marker[data-kind='approval_request'] {
+	.eng-kind-marker[data-eng-kind='approval_request'] {
 		color: #c2410c;
 	}
 
-	.eng-kind-marker[data-kind='approval_resolution'] {
+	.eng-kind-marker[data-eng-kind='approval_resolution'] {
 		color: #16a34a;
 	}
 
-	.eng-kind-marker[data-kind='lifecycle'] {
+	.eng-kind-marker[data-eng-kind='lifecycle'] {
 		color: #6b7280;
 	}
 

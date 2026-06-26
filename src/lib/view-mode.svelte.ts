@@ -2,7 +2,8 @@ export type ViewMode = 'operator' | 'engineer';
 
 const STORAGE_KEY = 'stardust-view-mode';
 
-class ViewModeStore {
+/** Reactive store that persists the operator/engineer view-mode selection to localStorage. */
+export class ViewModeStore {
 	mode = $state<ViewMode>('operator');
 
 	constructor() {

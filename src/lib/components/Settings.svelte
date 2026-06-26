@@ -25,7 +25,7 @@
 	];
 
 	function loadSettings() {
-		if (typeof localStorage === 'undefined') {
+		if (typeof window === 'undefined') {
 			return { model: MODEL_OPTIONS[0].value, theme: 'system' as Theme, maxBudgetUsd: 5 };
 		}
 		try {
@@ -38,7 +38,7 @@
 	}
 
 	function saveSettings() {
-		if (typeof localStorage === 'undefined') return;
+		if (typeof window === 'undefined') return;
 		localStorage.setItem(SETTINGS_KEY, JSON.stringify({ model, theme, maxBudgetUsd }));
 		applyTheme(theme);
 	}
@@ -54,7 +54,7 @@
 	}
 
 	function clearLocalData() {
-		if (typeof localStorage === 'undefined') return;
+		if (typeof window === 'undefined') return;
 		const confirmed = confirm(
 			'This will clear all locally stored preferences and cached data. Continue?'
 		);
