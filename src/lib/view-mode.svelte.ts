@@ -6,7 +6,7 @@ class ViewModeStore {
 	mode = $state<ViewMode>('operator');
 
 	constructor() {
-		if (typeof localStorage !== 'undefined') {
+		if (typeof window !== 'undefined') {
 			const saved = localStorage.getItem(STORAGE_KEY);
 			if (saved === 'operator' || saved === 'engineer') {
 				this.mode = saved;
@@ -16,7 +16,7 @@ class ViewModeStore {
 
 	set(mode: ViewMode): void {
 		this.mode = mode;
-		if (typeof localStorage !== 'undefined') {
+		if (typeof window !== 'undefined') {
 			localStorage.setItem(STORAGE_KEY, mode);
 		}
 	}
