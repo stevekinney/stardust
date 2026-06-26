@@ -255,5 +255,10 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 		}
 	}
 
+	// Drain any in-flight async update handlers (e.g. submitSteering) before
+	// completing, so a steering update mid-flight at session end does not produce
+	// an unfinished-handler warning.
+	status = 'finalizing';
+	await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
 	status = 'complete';
 }

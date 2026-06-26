@@ -574,6 +574,10 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 				const state = await handle.query(getSessionStateQuery);
 				return state.activeRunId === turn1.runId;
 			});
+
+			// Capture the runId of the first execution before CAN fires.
+			const beforeCanRunId = (await handle.describe()).runId;
+
 			await env.client.workflow
 				.getHandle(`agent-run:${turn1.runId}`)
 				.signal(releaseRunSignal, turn1.runId);
@@ -597,6 +601,11 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 				const state = await handle.query(getSessionStateQuery);
 				return state.completedRunCount === 2;
 			});
+
+			// Verify that Continue-As-New actually fired: the runId must have changed,
+			// proving the boundary was crossed (not just that state survived two runs).
+			const afterCanRunId = (await handle.describe()).runId;
+			expect(afterCanRunId).not.toBe(beforeCanRunId);
 
 			const state: SessionState = await handle.query(getSessionStateQuery);
 			expect(state.completedRunCount).toBe(2);
