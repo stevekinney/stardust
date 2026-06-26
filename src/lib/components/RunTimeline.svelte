@@ -50,6 +50,20 @@
 		const ms = new Date(completedAt).getTime() - new Date(startedAt).getTime();
 		return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 	}
+
+	/** Returns a compact symbol for each transcript event kind, for engineer-view markers. */
+	function kindMarker(kind: string): string {
+		const markers: Record<string, string> = {
+			user_message: '↓',
+			assistant_message: '↑',
+			tool_call: '⚙',
+			tool_result: '→',
+			approval_request: '?',
+			approval_resolution: '✓',
+			lifecycle: '◎'
+		};
+		return markers[kind] ?? '·';
+	}
 </script>
 
 <section class="run-timeline" aria-labelledby="run-timeline-heading">
@@ -132,9 +146,6 @@
 					<dd><code class="eng-url">{temporalWebUrl}</code></dd>
 				</div>
 			</dl>
-			<p class="eng-gap-note">
-				Note: task-queue routing and attempt counts are not yet present in the run projection.
-			</p>
 		</div>
 	{/if}
 
@@ -185,6 +196,14 @@
 							</div>
 						{/if}
 						<div class="step-header">
+							{#if engineerView}
+								<span
+									class="eng-kind-marker"
+									data-eng-kind-marker
+									data-kind={event.kind}
+									aria-hidden="true">{kindMarker(event.kind)}</span
+								>
+							{/if}
 							<span class="kind-badge">{kindLabel(event.kind)}</span>
 							<span class="sequence">#{event.sequence}</span>
 							<time class="timestamp" datetime={event.createdAt}>
@@ -569,11 +588,40 @@
 		font-size: 0.72rem;
 	}
 
-	.eng-gap-note {
-		margin: 0.5rem 0 0;
-		color: color-mix(in srgb, CanvasText 45%, transparent);
-		font-size: 0.75rem;
-		font-style: italic;
+	/* — per-kind engineer markers — */
+	.eng-kind-marker {
+		font-size: 0.8rem;
+		font-family: ui-monospace, monospace;
+		font-weight: 700;
+		color: #7c3aed;
+	}
+
+	.eng-kind-marker[data-kind='user_message'] {
+		color: #1d4ed8;
+	}
+
+	.eng-kind-marker[data-kind='assistant_message'] {
+		color: #047857;
+	}
+
+	.eng-kind-marker[data-kind='tool_call'] {
+		color: #b45309;
+	}
+
+	.eng-kind-marker[data-kind='tool_result'] {
+		color: #6d28d9;
+	}
+
+	.eng-kind-marker[data-kind='approval_request'] {
+		color: #c2410c;
+	}
+
+	.eng-kind-marker[data-kind='approval_resolution'] {
+		color: #16a34a;
+	}
+
+	.eng-kind-marker[data-kind='lifecycle'] {
+		color: #6b7280;
 	}
 
 	.raw-event-btn {

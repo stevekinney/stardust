@@ -191,6 +191,40 @@ describe('RunTimeline', () => {
 		unmount(component);
 	});
 
+	it('hides engineer overlay when engineerView is false (default)', () => {
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection }
+		});
+
+		expect(document.querySelector('[data-engineer-overlay]')).toBeNull();
+
+		unmount(component);
+	});
+
+	it('shows engineer overlay when engineerView is true', () => {
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection, engineerView: true }
+		});
+
+		expect(document.querySelector('[data-engineer-overlay]')).not.toBeNull();
+
+		unmount(component);
+	});
+
+	it('shows raw event buttons on each transcript item when engineerView is true', () => {
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection, engineerView: true }
+		});
+
+		const rawEventBtns = document.querySelectorAll('[data-raw-event]');
+		expect(rawEventBtns.length).toBe(transcript.length);
+
+		unmount(component);
+	});
+
 	it('calls onTemporalWeb when the Temporal Web link is clicked', () => {
 		let clicked = false;
 		const component = mount(RunTimeline, {
