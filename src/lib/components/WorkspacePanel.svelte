@@ -31,17 +31,29 @@
 		createdAt: string;
 	};
 
+	export type WorkspaceDiff = {
+		fromSnapshotId: string;
+		toSnapshotId: string;
+		patch: string;
+		createdAt: string;
+	};
+
 	type Props = {
 		files: WorkspaceFile[];
 		commands: WorkspaceCommand[];
 		snapshots: WorkspaceSnapshot[];
 		artifacts: WorkspaceArtifact[];
+		diffs?: WorkspaceDiff[];
 	};
 
-	let { files, commands, snapshots, artifacts }: Props = $props();
+	let { files, commands, snapshots, artifacts, diffs = [] }: Props = $props();
 
 	const isEmpty = $derived(
-		files.length === 0 && commands.length === 0 && snapshots.length === 0 && artifacts.length === 0
+		files.length === 0 &&
+			commands.length === 0 &&
+			snapshots.length === 0 &&
+			artifacts.length === 0 &&
+			diffs.length === 0
 	);
 
 	function shortSha(sha: string): string {
@@ -151,6 +163,27 @@
 				</ul>
 			</div>
 		{/if}
+
+		{#if diffs.length > 0}
+			<div class="panel-section">
+				<h3>Diffs</h3>
+				<ul class="item-list">
+					{#each diffs as diff (`${diff.fromSnapshotId}..${diff.toSnapshotId}`)}
+						<li class="diff-row">
+							<div class="diff-header">
+								<code class="sha">{shortSha(diff.fromSnapshotId)}</code>
+								<span class="diff-arrow" aria-hidden="true">→</span>
+								<code class="sha">{shortSha(diff.toSnapshotId)}</code>
+								<time class="item-time" datetime={diff.createdAt}>
+									{formatTimestamp(diff.createdAt)}
+								</time>
+							</div>
+							<pre class="diff-patch" data-diff-patch>{diff.patch}</pre>
+						</li>
+					{/each}
+				</ul>
+			</div>
+		{/if}
 	{/if}
 </section>
 
@@ -255,6 +288,37 @@
 		flex: 1;
 		font-size: 0.85rem;
 		color: color-mix(in srgb, CanvasText 70%, transparent);
+	}
+
+	.diff-row {
+		border: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+		border-radius: 5px;
+		padding: 0.4rem 0.6rem;
+		background: Canvas;
+		font-size: 0.85rem;
+	}
+
+	.diff-header {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin-bottom: 0.4rem;
+	}
+
+	.diff-arrow {
+		color: color-mix(in srgb, CanvasText 45%, transparent);
+	}
+
+	.diff-patch {
+		overflow-x: auto;
+		max-height: 10rem;
+		margin: 0;
+		border-radius: 4px;
+		padding: 0.4rem;
+		background: color-mix(in srgb, CanvasText 5%, Canvas);
+		font-size: 0.75rem;
+		line-height: 1.4;
+		white-space: pre;
 	}
 
 	.empty {

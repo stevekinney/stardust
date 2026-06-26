@@ -8,7 +8,8 @@
 
 	let { projection, onTemporalWeb }: Props = $props();
 
-	const { run, transcript, actionMeter, temporalWebUrl, recoveryMarkers } = $derived(projection);
+	const { run, transcript, actionMeter, temporalWebUrl, recoveryMarkers, timelineLanes } =
+		$derived(projection);
 
 	const recoveryPayloads = $derived(new Set(recoveryMarkers));
 
@@ -90,6 +91,37 @@
 			{/each}
 		</dl>
 	</details>
+
+	{#if timelineLanes && timelineLanes.length > 0}
+		<div class="subagent-lanes" data-subagent-lanes>
+			<h3>Subagent Lanes</h3>
+			<ul class="lanes-list">
+				{#each timelineLanes as lane (lane.id)}
+					<li class="lane" data-lane-kind={lane.kind}>
+						<div class="lane-header">
+							<span class="lane-label">{lane.label}</span>
+							<span class="lane-status" data-status={lane.status}>{lane.status}</span>
+						</div>
+						{#if lane.children && lane.children.length > 0}
+							<ul class="subagent-list">
+								{#each lane.children as child (child.id)}
+									<li class="subagent-lane" data-lane-kind={child.kind}>
+										<span class="lane-label">{child.label}</span>
+										<span class="lane-status" data-status={child.status}>{child.status}</span>
+										{#if child.budget}
+											<span class="lane-budget">
+												{child.budget.inputTokens}↑ {child.budget.outputTokens}↓
+											</span>
+										{/if}
+									</li>
+								{/each}
+							</ul>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		</div>
+	{/if}
 
 	<div class="step-timeline">
 		<h3>Step Timeline</h3>
@@ -257,6 +289,82 @@
 		margin: 0;
 		font-size: 0.9rem;
 		font-weight: 700;
+	}
+
+	.subagent-lanes {
+		border-top: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+		padding-top: 0.75rem;
+	}
+
+	.lanes-list,
+	.subagent-list {
+		display: grid;
+		gap: 0.4rem;
+		margin: 0.5rem 0 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.lane {
+		border: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+		border-radius: 6px;
+		padding: 0.5rem 0.75rem;
+		background: Canvas;
+	}
+
+	.subagent-lane {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		align-items: center;
+		padding: 0.35rem 0.6rem;
+		border: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+		border-radius: 5px;
+		background: color-mix(in srgb, CanvasText 3%, Canvas);
+		font-size: 0.85rem;
+	}
+
+	.lane-header {
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
+		margin-bottom: 0.35rem;
+	}
+
+	.lane-label {
+		flex: 1;
+		font-weight: 600;
+		font-size: 0.85rem;
+	}
+
+	.lane-status {
+		padding: 0.1rem 0.4rem;
+		border-radius: 4px;
+		font-size: 0.72rem;
+		font-weight: 700;
+		text-transform: capitalize;
+		background: color-mix(in srgb, CanvasText 8%, transparent);
+	}
+
+	.lane-status[data-status='complete'] {
+		background: #e6f3ed;
+		color: #17603a;
+	}
+
+	.lane-status[data-status='failed'] {
+		background: #fff1f1;
+		color: #7b1d1d;
+	}
+
+	.lane-status[data-status='running'] {
+		background: #eff6ff;
+		color: #1d4ed8;
+	}
+
+	.lane-budget {
+		color: color-mix(in srgb, CanvasText 50%, transparent);
+		font-size: 0.72rem;
+		font-family: ui-monospace, monospace;
 	}
 
 	.step-timeline {

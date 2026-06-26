@@ -34,6 +34,13 @@ export type WorkspaceArtifact = {
 	createdAt: string;
 };
 
+export type WorkspaceDiff = {
+	fromSnapshotId: string;
+	toSnapshotId: string;
+	patch: string;
+	createdAt: string;
+};
+
 const sampleFile: WorkspaceFile = {
 	path: 'src/main.ts',
 	mimeType: 'text/typescript',
@@ -149,6 +156,38 @@ describe('WorkspacePanel', () => {
 				snapshots: [],
 				artifacts: []
 			}
+		});
+
+		expect(document.body.textContent).toContain('No workspace');
+
+		unmount(component);
+	});
+
+	it('renders diffs with SHA pair and patch content', () => {
+		const diff: WorkspaceDiff = {
+			fromSnapshotId: 'aaa111bbb222',
+			toSnapshotId: 'ccc333ddd444',
+			patch: '--- a/main.ts\n+++ b/main.ts\n@@ -1 +1 @@\n-old\n+new',
+			createdAt: '2026-06-26T00:00:30.000Z'
+		};
+		const component = mount(WorkspacePanel, {
+			target: document.body,
+			props: { files: [], commands: [], snapshots: [], artifacts: [], diffs: [diff] }
+		});
+
+		expect(document.body.textContent).toContain('aaa111b'); // shortSha of fromSnapshotId
+		expect(document.body.textContent).toContain('ccc333d'); // shortSha of toSnapshotId
+		const patchEl = document.querySelector('[data-diff-patch]');
+		expect(patchEl).not.toBeNull();
+		expect(patchEl?.textContent).toContain('+new');
+
+		unmount(component);
+	});
+
+	it('shows empty state when diffs is empty and other sections are also empty', () => {
+		const component = mount(WorkspacePanel, {
+			target: document.body,
+			props: { files: [], commands: [], snapshots: [], artifacts: [], diffs: [] }
 		});
 
 		expect(document.body.textContent).toContain('No workspace');

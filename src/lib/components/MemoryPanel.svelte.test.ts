@@ -159,4 +159,29 @@ describe('MemoryPanel', () => {
 
 		unmount(component);
 	});
+
+	it('shows runId provenance when note.runId is set', () => {
+		const component = mount(MemoryPanel, {
+			target: document.body,
+			props: { notes: [actionNote], candidates: [] }
+		});
+
+		const el = document.querySelector('[data-run-id]');
+		expect(el).not.toBeNull();
+		expect(el?.textContent).toContain('run-001');
+
+		unmount(component);
+	});
+
+	it('omits runId provenance when note.runId is null', () => {
+		const component = mount(MemoryPanel, {
+			target: document.body,
+			props: { notes: [sessionNote], candidates: [] }
+		});
+
+		const el = document.querySelector('[data-run-id]');
+		expect(el).toBeNull();
+
+		unmount(component);
+	});
 });

@@ -48,6 +48,9 @@
 									{/each}
 								</div>
 							{/if}
+							{#if note.runId}
+								<span class="note-run-id" data-run-id>run: {note.runId}</span>
+							{/if}
 							<time class="note-time" datetime={note.createdAt}
 								>{formatTimestamp(note.createdAt)}</time
 							>
@@ -71,6 +74,9 @@
 									{/each}
 								</div>
 							{/if}
+							{#if note.runId}
+								<span class="note-run-id" data-run-id>run: {note.runId}</span>
+							{/if}
 							<time class="note-time" datetime={note.createdAt}
 								>{formatTimestamp(note.createdAt)}</time
 							>
@@ -93,6 +99,9 @@
 										<span class="tag">{tag}</span>
 									{/each}
 								</div>
+							{/if}
+							{#if note.runId}
+								<span class="note-run-id" data-run-id>run: {note.runId}</span>
 							{/if}
 							<time class="note-time" datetime={note.createdAt}
 								>{formatTimestamp(note.createdAt)}</time
@@ -204,6 +213,13 @@
 		display: block;
 		color: color-mix(in srgb, CanvasText 45%, transparent);
 		font-size: 0.75rem;
+	}
+
+	.note-run-id {
+		display: block;
+		color: color-mix(in srgb, CanvasText 45%, transparent);
+		font-size: 0.72rem;
+		font-family: ui-monospace, monospace;
 	}
 
 	.tags {

@@ -11,7 +11,8 @@
 		WorkspaceFile,
 		WorkspaceCommand,
 		WorkspaceSnapshot,
-		WorkspaceArtifact
+		WorkspaceArtifact,
+		WorkspaceDiff
 	} from '$lib/components/WorkspacePanel.svelte';
 	import SandboxInspector from '$lib/components/SandboxInspector.svelte';
 	import type {
@@ -78,11 +79,12 @@
 	let sandboxSnaps = $state<SandboxSnapshotRow[]>([]);
 	let sandboxLoading = $state(false);
 
-	// — workspace panel (stub populated from inspector data in future phases) —
+	// — workspace panel state —
 	let workspaceFiles = $state<WorkspaceFile[]>([]);
 	let workspaceCommands = $state<WorkspaceCommand[]>([]);
 	let workspaceSnapshots = $state<WorkspaceSnapshot[]>([]);
 	let workspaceArtifacts = $state<WorkspaceArtifact[]>([]);
+	let workspaceDiffs = $state<WorkspaceDiff[]>([]);
 
 	// — manual inspector fallback —
 	let inspectorSessionKey = $state('');
@@ -156,7 +158,8 @@
 			loadInspector(sessionKey, run.id),
 			loadMemory(sessionKey),
 			loadApprovals(sessionKey),
-			loadSandbox(sessionKey)
+			loadSandbox(sessionKey),
+			loadWorkspace(sessionKey)
 		]);
 	}
 
@@ -181,11 +184,43 @@
 		try {
 			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/memory`);
 			if (!response.ok) return;
-			const body = (await response.json()) as { notes: MemoryNote[] };
+			const body = (await response.json()) as {
+				notes: MemoryNote[];
+				candidates: MemoryCandidate[];
+			};
 			memoryNotes = body.notes;
+			memoryCandidates = body.candidates;
 		} finally {
 			memoryLoading = false;
 		}
+	}
+
+	async function handleApproveCandidate(candidateId: string) {
+		if (!selectedSession) return;
+		const sessionKey = selectedSession.sessionKey;
+		const response = await fetch(
+			`/api/sessions/${encodeURIComponent(sessionKey)}/memory/candidates/${encodeURIComponent(candidateId)}`,
+			{ method: 'POST' }
+		);
+		if (!response.ok) return;
+		await loadMemory(sessionKey);
+	}
+
+	async function handleDiscardCandidate(candidateId: string) {
+		if (!selectedSession) return;
+		const sessionKey = selectedSession.sessionKey;
+		const response = await fetch(
+			`/api/sessions/${encodeURIComponent(sessionKey)}/memory/candidates/${encodeURIComponent(candidateId)}`,
+			{ method: 'DELETE' }
+		);
+		if (!response.ok) return;
+		await loadMemory(sessionKey);
+	}
+
+	function handleEditCandidate(candidateId: string) {
+		// Edit requires a dedicated editor modal (not yet implemented).
+		// Emitting a console warning makes the intent visible in DevTools.
+		console.warn('[MemoryPanel] Edit candidate not yet implemented:', candidateId);
 	}
 
 	async function loadApprovals(sessionKey: string) {
@@ -218,6 +253,27 @@
 		}
 	}
 
+	async function loadWorkspace(sessionKey: string) {
+		try {
+			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/workspace`);
+			if (!response.ok) return;
+			const body = (await response.json()) as {
+				files: WorkspaceFile[];
+				commands: WorkspaceCommand[];
+				snapshots: WorkspaceSnapshot[];
+				artifacts: WorkspaceArtifact[];
+				diffs: WorkspaceDiff[];
+			};
+			workspaceFiles = body.files;
+			workspaceCommands = body.commands;
+			workspaceSnapshots = body.snapshots;
+			workspaceArtifacts = body.artifacts;
+			workspaceDiffs = body.diffs;
+		} catch {
+			// Non-fatal: workspace data may not be available for all sessions
+		}
+	}
+
 	async function handleApprovalResolve(resolution: ApprovalResolutionInput) {
 		const response = await fetch(`/api/approvals/${resolution.approvalId}/resolve`, {
 			method: 'POST',
@@ -244,7 +300,8 @@
 			loadInspector(sessionKey, runId),
 			loadMemory(sessionKey),
 			loadApprovals(sessionKey),
-			loadSandbox(sessionKey)
+			loadSandbox(sessionKey),
+			loadWorkspace(sessionKey)
 		]);
 	}
 
@@ -482,7 +539,13 @@
 				{#if memoryLoading}
 					<p class="muted">Loading memory...</p>
 				{:else}
-					<MemoryPanel notes={memoryNotes} candidates={memoryCandidates} />
+					<MemoryPanel
+						notes={memoryNotes}
+						candidates={memoryCandidates}
+						onApproveCandidate={handleApproveCandidate}
+						onDiscardCandidate={handleDiscardCandidate}
+						onEditCandidate={handleEditCandidate}
+					/>
 				{/if}
 			</section>
 
@@ -492,6 +555,7 @@
 					commands={workspaceCommands}
 					snapshots={workspaceSnapshots}
 					artifacts={workspaceArtifacts}
+					diffs={workspaceDiffs}
 				/>
 			</section>
 

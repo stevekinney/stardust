@@ -132,6 +132,12 @@ const testActivities = {
 		finalAnswer: string;
 	}) {
 		activityState.completedRuns.push(input);
+	},
+	async recordSubagentStarted() {
+		// No-op stub — subagent lane persistence is tested in projection.test.ts.
+	},
+	async recordSubagentCompleted() {
+		// No-op stub — subagent lane persistence is tested in projection.test.ts.
 	}
 };
 

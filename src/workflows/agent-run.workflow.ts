@@ -49,6 +49,22 @@ type ObservabilityActivities = {
 		status: AgentRunResult['status'];
 		finalAnswer: string;
 	}): Promise<void>;
+	recordSubagentStarted(input: {
+		sessionId: string;
+		runId: string;
+		subagentRunId: string;
+		kind: SubagentKind;
+		label: string;
+	}): Promise<void>;
+	recordSubagentCompleted(input: {
+		sessionId: string;
+		runId: string;
+		subagentRunId: string;
+		kind: SubagentKind;
+		label: string;
+		status: 'complete' | 'failed' | 'cancelled';
+		budget?: ModelUsage;
+	}): Promise<void>;
 };
 
 const TASK_QUEUE_TOOLS = 'tools-general';
@@ -163,7 +179,8 @@ function reserveBudgetEntry(input: {
 
 async function runDelegatedSubagents(
 	input: AgentRunInput,
-	finalAnswer: string
+	finalAnswer: string,
+	observability: Pick<ObservabilityActivities, 'recordSubagentStarted' | 'recordSubagentCompleted'>
 ): Promise<{
 	budgetLedger: BudgetLedgerSnapshot;
 	timelineLanes: RunTimelineLane[];
@@ -196,6 +213,31 @@ async function runDelegatedSubagents(
 		kind: 'critic',
 		label: 'Critic'
 	});
+
+	// Emit start events before launching all three subagents in parallel.
+	await Promise.all([
+		observability.recordSubagentStarted({
+			sessionId: input.sessionKey,
+			runId: input.runId,
+			subagentRunId: `${input.runId}:research`,
+			kind: 'research',
+			label: 'Research'
+		}),
+		observability.recordSubagentStarted({
+			sessionId: input.sessionKey,
+			runId: input.runId,
+			subagentRunId: `${input.runId}:code`,
+			kind: 'code',
+			label: 'Code'
+		}),
+		observability.recordSubagentStarted({
+			sessionId: input.sessionKey,
+			runId: input.runId,
+			subagentRunId: `${input.runId}:critic`,
+			kind: 'critic',
+			label: 'Critic'
+		})
+	]);
 
 	const [research, code, critic] = await Promise.all([
 		executeChild(researchSubagentWorkflow, {
@@ -234,6 +276,37 @@ async function runDelegatedSubagents(
 					budgetDebit: criticDebit
 				}
 			]
+		})
+	]);
+
+	// Emit completion events after all three finish.
+	await Promise.all([
+		observability.recordSubagentCompleted({
+			sessionId: input.sessionKey,
+			runId: input.runId,
+			subagentRunId: `${input.runId}:research`,
+			kind: 'research',
+			label: 'Research',
+			status: research.status === 'complete' ? 'complete' : 'failed',
+			budget: research.budgetDebit.usage
+		}),
+		observability.recordSubagentCompleted({
+			sessionId: input.sessionKey,
+			runId: input.runId,
+			subagentRunId: `${input.runId}:code`,
+			kind: 'code',
+			label: 'Code',
+			status: code.status === 'complete' ? 'complete' : 'failed',
+			budget: code.budgetDebit.usage
+		}),
+		observability.recordSubagentCompleted({
+			sessionId: input.sessionKey,
+			runId: input.runId,
+			subagentRunId: `${input.runId}:critic`,
+			kind: 'critic',
+			label: 'Critic',
+			status: critic.status === 'complete' ? 'complete' : 'failed',
+			budget: critic.budgetDebit.usage
 		})
 	]);
 
@@ -412,7 +485,7 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 	await sleep('1ms');
 	const finalAnswer = '(stub — no model in T2)';
 	if (input.delegateSubagents === true) {
-		delegationResult = await runDelegatedSubagents(input, finalAnswer);
+		delegationResult = await runDelegatedSubagents(input, finalAnswer, observabilityActivities);
 	}
 	status = 'complete';
 	await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);

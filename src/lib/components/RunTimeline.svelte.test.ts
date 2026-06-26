@@ -145,6 +145,52 @@ describe('RunTimeline', () => {
 		unmount(component);
 	});
 
+	it('renders subagent lanes section when timelineLanes is present', () => {
+		const projectionWithLanes: RunInspectorProjection = {
+			...projection,
+			timelineLanes: [
+				{
+					id: 'run-001',
+					label: 'Parent run',
+					kind: 'parent',
+					status: 'complete',
+					children: [
+						{
+							id: 'run-001:research',
+							label: 'Research',
+							kind: 'subagent',
+							status: 'complete',
+							budget: { inputTokens: 70, outputTokens: 20, estimatedCostUsd: 0.0007 }
+						}
+					]
+				}
+			]
+		};
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection: projectionWithLanes }
+		});
+
+		const laneSection = document.querySelector('[data-subagent-lanes]');
+		expect(laneSection).not.toBeNull();
+		expect(document.body.textContent).toContain('Research');
+		expect(document.body.textContent).toContain('Parent run');
+
+		unmount(component);
+	});
+
+	it('omits subagent lanes section when timelineLanes is absent', () => {
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection }
+		});
+
+		const laneSection = document.querySelector('[data-subagent-lanes]');
+		expect(laneSection).toBeNull();
+
+		unmount(component);
+	});
+
 	it('calls onTemporalWeb when the Temporal Web link is clicked', () => {
 		let clicked = false;
 		const component = mount(RunTimeline, {
