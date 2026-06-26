@@ -1,34 +1,45 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { ScheduleProjection } from '$lib/types';
+	import type { RunInspectorProjection } from '$lib/server/observability/projection';
+	import type { MemoryNote, MemoryCandidate } from '$lib/server/memory/memory-store';
+	import type { ApprovalCardState, ApprovalResolutionInput } from '$lib/types';
+	import RunTimeline from '$lib/components/RunTimeline.svelte';
+	import MemoryPanel from '$lib/components/MemoryPanel.svelte';
+	import WorkspacePanel from '$lib/components/WorkspacePanel.svelte';
+	import type {
+		WorkspaceFile,
+		WorkspaceCommand,
+		WorkspaceSnapshot,
+		WorkspaceArtifact
+	} from '$lib/components/WorkspacePanel.svelte';
+	import SandboxInspector from '$lib/components/SandboxInspector.svelte';
+	import type {
+		SandboxInfo,
+		SandboxCommandRow,
+		SandboxSnapshotRow
+	} from '$lib/components/SandboxInspector.svelte';
+	import ApprovalCenter from '$lib/components/ApprovalCenter.svelte';
 
-	type RunInspectorProjection = {
-		run: {
-			id: string;
-			sessionId: string;
-			workflowId: string;
-			status: string;
-			model: string | null;
-			finalAnswer: string | null;
-			startedAt: string | null;
-			completedAt: string | null;
-		};
-		temporalWebUrl: string;
-		actionMeter: {
-			total: number;
-			breakdown: Record<string, number>;
-		};
-		transcript: Array<{
-			id: string;
-			kind: string;
-			sequence: number;
-			createdAt: string;
-			payload: unknown;
-		}>;
-		toolInvocations: Array<{ toolName: string; status: string; idempotencyKey: string | null }>;
-		approvalRequests: Array<{ toolName: string; status: string; expiresAt: string }>;
-		idempotencyEntries: Array<{ idempotencyKey: string; status: string }>;
-		recoveryMarkers: string[];
+	type SessionRow = {
+		id: string;
+		sessionKey: string;
+		status: string;
+		workflowId: string;
+		createdAt: string;
+		updatedAt: string;
+	};
+
+	type RunRow = {
+		id: string;
+		sessionId: string;
+		workflowId: string;
+		status: string;
+		model: string | null;
+		finalAnswer: string | null;
+		startedAt: string | null;
+		completedAt: string | null;
+		createdAt: string;
 	};
 
 	type ScheduleForm = {
@@ -38,6 +49,47 @@
 		prompt: string;
 	};
 
+	// — session/run navigation state —
+	let sessions = $state<SessionRow[]>([]);
+	let sessionsLoading = $state(false);
+	let sessionsError = $state<string | null>(null);
+	let selectedSession = $state<SessionRow | null>(null);
+	let sessionRuns = $state<RunRow[]>([]);
+	let runsLoading = $state(false);
+	let selectedRun = $state<RunRow | null>(null);
+
+	// — inspector state —
+	let inspector = $state<RunInspectorProjection | null>(null);
+	let inspectorLoading = $state(false);
+	let inspectorError = $state<string | null>(null);
+
+	// — memory panel state —
+	let memoryNotes = $state<MemoryNote[]>([]);
+	let memoryCandidates = $state<MemoryCandidate[]>([]);
+	let memoryLoading = $state(false);
+
+	// — approval center state —
+	let approvals = $state<ApprovalCardState[]>([]);
+	let approvalsLoading = $state(false);
+
+	// — sandbox inspector state —
+	let sandboxInfo = $state<SandboxInfo | null>(null);
+	let sandboxCmds = $state<SandboxCommandRow[]>([]);
+	let sandboxSnaps = $state<SandboxSnapshotRow[]>([]);
+	let sandboxLoading = $state(false);
+
+	// — workspace panel (stub populated from inspector data in future phases) —
+	let workspaceFiles = $state<WorkspaceFile[]>([]);
+	let workspaceCommands = $state<WorkspaceCommand[]>([]);
+	let workspaceSnapshots = $state<WorkspaceSnapshot[]>([]);
+	let workspaceArtifacts = $state<WorkspaceArtifact[]>([]);
+
+	// — manual inspector fallback —
+	let inspectorSessionKey = $state('');
+	let inspectorRunId = $state('');
+	let inspectorFormError = $state<string | null>(null);
+
+	// — schedules —
 	let schedules = $state<ScheduleProjection[]>([]);
 	let form = $state<ScheduleForm>({
 		name: '',
@@ -45,49 +97,72 @@
 		cronExpression: '0 9 * * *',
 		prompt: ''
 	});
-	let loading = $state(true);
+	let schedulesLoading = $state(true);
 	let saving = $state(false);
-	let errorMessage = $state<string | null>(null);
+	let schedulesError = $state<string | null>(null);
 	let activeScheduleId = $state<string | null>(null);
-	let inspectorSessionKey = $state('');
-	let inspectorRunId = $state('');
-	let inspectorLoading = $state(false);
-	let inspectorErrorMessage = $state<string | null>(null);
-	let inspector = $state<RunInspectorProjection | null>(null);
 
 	const sortedSchedules = $derived(
 		[...schedules].sort((first, second) => first.name.localeCompare(second.name))
 	);
 
 	onMount(() => {
+		void loadSessions();
 		void loadSchedules();
 	});
 
-	async function loadSchedules() {
-		loading = true;
-		errorMessage = null;
+	// ── session navigation ──────────────────────────────────────────────────
+
+	async function loadSessions() {
+		sessionsLoading = true;
+		sessionsError = null;
 		try {
-			const response = await fetch('/api/schedules');
+			const response = await fetch('/api/sessions');
 			if (!response.ok) throw new Error(await response.text());
-			const body = (await response.json()) as { schedules: ScheduleProjection[] };
-			schedules = body.schedules;
+			const body = (await response.json()) as { sessions: SessionRow[] };
+			sessions = body.sessions;
 		} catch (caught) {
-			errorMessage = messageFromCaught(caught, 'Failed to load schedules');
+			sessionsError = messageFromCaught(caught, 'Failed to load sessions');
 		} finally {
-			loading = false;
+			sessionsLoading = false;
 		}
 	}
 
-	async function loadRunInspector() {
-		const sessionKey = inspectorSessionKey.trim();
-		const runId = inspectorRunId.trim();
-		if (!sessionKey || !runId) {
-			inspectorErrorMessage = 'Session key and run id are required.';
-			return;
+	async function selectSession(session: SessionRow) {
+		selectedSession = session;
+		selectedRun = null;
+		inspector = null;
+		sessionRuns = [];
+		runsLoading = true;
+		try {
+			const response = await fetch(`/api/sessions/${encodeURIComponent(session.sessionKey)}/runs`);
+			if (!response.ok) throw new Error(await response.text());
+			const body = (await response.json()) as { runs: RunRow[] };
+			sessionRuns = body.runs.sort(
+				(a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+			);
+		} finally {
+			runsLoading = false;
 		}
+	}
 
+	async function selectRun(run: RunRow, sessionKey: string) {
+		selectedRun = run;
+		inspector = null;
 		inspectorLoading = true;
-		inspectorErrorMessage = null;
+		inspectorError = null;
+
+		await Promise.all([
+			loadInspector(sessionKey, run.id),
+			loadMemory(sessionKey),
+			loadApprovals(sessionKey),
+			loadSandbox(sessionKey)
+		]);
+	}
+
+	async function loadInspector(sessionKey: string, runId: string) {
+		inspectorLoading = true;
+		inspectorError = null;
 		try {
 			const response = await fetch(
 				`/api/sessions/${encodeURIComponent(sessionKey)}/runs/${encodeURIComponent(runId)}/inspector`
@@ -95,15 +170,108 @@
 			if (!response.ok) throw new Error(await response.text());
 			inspector = (await response.json()) as RunInspectorProjection;
 		} catch (caught) {
-			inspectorErrorMessage = messageFromCaught(caught, 'Failed to load run inspector');
+			inspectorError = messageFromCaught(caught, 'Failed to load run inspector');
 		} finally {
 			inspectorLoading = false;
 		}
 	}
 
+	async function loadMemory(sessionKey: string) {
+		memoryLoading = true;
+		try {
+			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/memory`);
+			if (!response.ok) return;
+			const body = (await response.json()) as { notes: MemoryNote[] };
+			memoryNotes = body.notes;
+		} finally {
+			memoryLoading = false;
+		}
+	}
+
+	async function loadApprovals(sessionKey: string) {
+		approvalsLoading = true;
+		try {
+			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/approvals`);
+			if (!response.ok) return;
+			const body = (await response.json()) as { approvals: ApprovalCardState[] };
+			approvals = body.approvals;
+		} finally {
+			approvalsLoading = false;
+		}
+	}
+
+	async function loadSandbox(sessionKey: string) {
+		sandboxLoading = true;
+		try {
+			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/sandbox`);
+			if (!response.ok) return;
+			const body = (await response.json()) as {
+				sandbox: SandboxInfo | null;
+				commands: SandboxCommandRow[];
+				snapshots: SandboxSnapshotRow[];
+			};
+			sandboxInfo = body.sandbox;
+			sandboxCmds = body.commands;
+			sandboxSnaps = body.snapshots;
+		} finally {
+			sandboxLoading = false;
+		}
+	}
+
+	async function handleApprovalResolve(resolution: ApprovalResolutionInput) {
+		const response = await fetch(`/api/approvals/${resolution.approvalId}/resolve`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify(resolution)
+		});
+		if (!response.ok) throw new Error(await response.text());
+		if (selectedSession) {
+			await loadApprovals(selectedSession.sessionKey);
+		}
+	}
+
+	// ── manual inspector fallback ────────────────────────────────────────────
+
+	async function loadRunInspectorManual() {
+		const sessionKey = inspectorSessionKey.trim();
+		const runId = inspectorRunId.trim();
+		if (!sessionKey || !runId) {
+			inspectorFormError = 'Session key and run id are required.';
+			return;
+		}
+		inspectorFormError = null;
+		await Promise.all([
+			loadInspector(sessionKey, runId),
+			loadMemory(sessionKey),
+			loadApprovals(sessionKey),
+			loadSandbox(sessionKey)
+		]);
+	}
+
+	function openTemporalWeb(url: string) {
+		window.open(url, '_blank', 'noreferrer');
+	}
+
+	// ── schedules ───────────────────────────────────────────────────────────
+
+	async function loadSchedules() {
+		schedulesLoading = true;
+		schedulesError = null;
+		try {
+			const response = await fetch('/api/schedules');
+			if (!response.ok) throw new Error(await response.text());
+			const body = (await response.json()) as { schedules: ScheduleProjection[] };
+			schedules = body.schedules;
+		} catch (caught) {
+			schedulesError = messageFromCaught(caught, 'Failed to load schedules');
+		} finally {
+			schedulesLoading = false;
+		}
+	}
+
 	async function createSchedule() {
 		saving = true;
-		errorMessage = null;
+		schedulesError = null;
 		try {
 			const response = await fetch('/api/schedules', {
 				method: 'POST',
@@ -118,14 +286,9 @@
 			if (!response.ok) throw new Error(await response.text());
 			const body = (await response.json()) as { schedule: ScheduleProjection };
 			upsertSchedule(body.schedule);
-			form = {
-				name: '',
-				description: '',
-				cronExpression: form.cronExpression,
-				prompt: ''
-			};
+			form = { name: '', description: '', cronExpression: form.cronExpression, prompt: '' };
 		} catch (caught) {
-			errorMessage = messageFromCaught(caught, 'Failed to create schedule');
+			schedulesError = messageFromCaught(caught, 'Failed to create schedule');
 		} finally {
 			saving = false;
 		}
@@ -154,13 +317,13 @@
 
 	async function deleteSchedule(scheduleId: string) {
 		activeScheduleId = scheduleId;
-		errorMessage = null;
+		schedulesError = null;
 		try {
 			const response = await fetch(`/api/schedules/${scheduleId}`, { method: 'DELETE' });
 			if (!response.ok) throw new Error(await response.text());
-			schedules = schedules.filter((schedule) => schedule.temporalScheduleId !== scheduleId);
+			schedules = schedules.filter((s) => s.temporalScheduleId !== scheduleId);
 		} catch (caught) {
-			errorMessage = messageFromCaught(caught, 'Failed to delete schedule');
+			schedulesError = messageFromCaught(caught, 'Failed to delete schedule');
 		} finally {
 			activeScheduleId = null;
 		}
@@ -168,13 +331,13 @@
 
 	async function runScheduleAction(scheduleId: string, action: 'trigger' | 'pause' | 'resume') {
 		activeScheduleId = scheduleId;
-		errorMessage = null;
+		schedulesError = null;
 		try {
 			const response = await fetch(`/api/schedules/${scheduleId}/${action}`, { method: 'POST' });
 			if (!response.ok) throw new Error(await response.text());
 			return response;
 		} catch (caught) {
-			errorMessage = messageFromCaught(caught, `Failed to ${action} schedule`);
+			schedulesError = messageFromCaught(caught, `Failed to ${action} schedule`);
 			return null;
 		} finally {
 			activeScheduleId = null;
@@ -183,32 +346,25 @@
 
 	function upsertSchedule(nextSchedule: ScheduleProjection) {
 		const index = schedules.findIndex(
-			(schedule) => schedule.temporalScheduleId === nextSchedule.temporalScheduleId
+			(s) => s.temporalScheduleId === nextSchedule.temporalScheduleId
 		);
 		if (index === -1) {
 			schedules = [...schedules, nextSchedule];
 			return;
 		}
-
-		schedules = schedules.map((schedule, scheduleIndex) =>
-			scheduleIndex === index ? nextSchedule : schedule
-		);
+		schedules = schedules.map((s, i) => (i === index ? nextSchedule : s));
 	}
 
 	function messageFromCaught(caught: unknown, fallback: string) {
 		return caught instanceof Error && caught.message ? caught.message : fallback;
 	}
 
-	function formatScheduleDate(value: string | null) {
+	function formatDate(value: string | null) {
 		return value ? new Date(value).toLocaleString() : 'None';
 	}
 
-	function formatPayload(value: unknown) {
-		return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-	}
-
-	function openTemporalWeb(url: string) {
-		window.open(url, '_blank', 'noreferrer');
+	function formatStatus(status: string) {
+		return status.replace(/_/g, ' ');
 	}
 </script>
 
@@ -216,34 +372,161 @@
 	<title>Stardust Operations Console</title>
 </svelte:head>
 
-<main class="schedule-manager">
+<main class="console">
 	<header class="page-header">
 		<div>
 			<p class="eyebrow">Stardust</p>
 			<h1>Operations Console</h1>
 		</div>
-		<button type="button" class="secondary" onclick={loadSchedules} disabled={loading}>
-			Refresh
-		</button>
+		<div class="header-actions">
+			<button type="button" class="secondary" onclick={loadSessions} disabled={sessionsLoading}>
+				Refresh Sessions
+			</button>
+			<button type="button" class="secondary" onclick={loadSchedules} disabled={schedulesLoading}>
+				Refresh Schedules
+			</button>
+		</div>
 	</header>
 
-	{#if errorMessage}
-		<p class="error">{errorMessage}</p>
-	{/if}
-
-	<section class="create-panel" aria-labelledby="run-inspector-heading">
+	<!-- ── Sessions and Run Navigation ─────────────────────────────────────── -->
+	<section class="panel" aria-labelledby="sessions-heading">
 		<div class="section-heading">
 			<div>
-				<h2 id="run-inspector-heading">Run Inspector</h2>
-				<p class="muted">SQLite rehydration, Temporal Web links, and action meter.</p>
+				<h2 id="sessions-heading">Sessions</h2>
+				<p class="muted">Select a session then a run to inspect it.</p>
+			</div>
+		</div>
+
+		{#if sessionsError}
+			<p class="error">{sessionsError}</p>
+		{/if}
+
+		{#if sessionsLoading}
+			<p class="muted">Loading sessions...</p>
+		{:else if sessions.length === 0}
+			<p class="muted">No sessions found. Start a session using the turn endpoint.</p>
+		{:else}
+			<div class="session-list">
+				{#each sessions as session (session.id)}
+					<button
+						type="button"
+						class="session-row"
+						class:selected={selectedSession?.id === session.id}
+						onclick={() => void selectSession(session)}
+					>
+						<span class="session-key">{session.sessionKey}</span>
+						<span class="session-meta">
+							<span class="status-pill" data-status={session.status}>
+								{formatStatus(session.status)}
+							</span>
+							<span class="session-date">{formatDate(session.updatedAt)}</span>
+						</span>
+					</button>
+				{/each}
+			</div>
+		{/if}
+
+		{#if selectedSession}
+			<div class="runs-panel">
+				<h3>Runs for {selectedSession.sessionKey}</h3>
+				{#if runsLoading}
+					<p class="muted">Loading runs...</p>
+				{:else if sessionRuns.length === 0}
+					<p class="muted">No runs found for this session.</p>
+				{:else}
+					<ul class="run-list">
+						{#each sessionRuns as run (run.id)}
+							<li>
+								<button
+									type="button"
+									class="run-row"
+									class:selected={selectedRun?.id === run.id}
+									onclick={() => void selectRun(run, selectedSession!.sessionKey)}
+								>
+									<code class="run-id">{run.id.slice(0, 16)}…</code>
+									<span class="status-pill" data-status={run.status}>
+										{formatStatus(run.status)}
+									</span>
+									{#if run.model}
+										<span class="run-model">{run.model}</span>
+									{/if}
+									<span class="run-date">{formatDate(run.startedAt)}</span>
+								</button>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</div>
+		{/if}
+	</section>
+
+	<!-- ── Inspector Panels ───────────────────────────────────────────────── -->
+	{#if inspectorLoading}
+		<div class="panel">
+			<p class="muted">Loading inspector...</p>
+		</div>
+	{:else if inspectorError}
+		<div class="panel">
+			<p class="error">{inspectorError}</p>
+		</div>
+	{:else if inspector}
+		<div class="inspector-layout">
+			<section class="panel">
+				<RunTimeline
+					projection={inspector}
+					onTemporalWeb={() => openTemporalWeb(inspector!.temporalWebUrl)}
+				/>
+			</section>
+
+			<section class="panel">
+				{#if memoryLoading}
+					<p class="muted">Loading memory...</p>
+				{:else}
+					<MemoryPanel notes={memoryNotes} candidates={memoryCandidates} />
+				{/if}
+			</section>
+
+			<section class="panel">
+				<WorkspacePanel
+					files={workspaceFiles}
+					commands={workspaceCommands}
+					snapshots={workspaceSnapshots}
+					artifacts={workspaceArtifacts}
+				/>
+			</section>
+
+			<section class="panel">
+				{#if sandboxLoading}
+					<p class="muted">Loading sandbox...</p>
+				{:else}
+					<SandboxInspector sandbox={sandboxInfo} commands={sandboxCmds} snapshots={sandboxSnaps} />
+				{/if}
+			</section>
+
+			<section class="panel">
+				{#if approvalsLoading}
+					<p class="muted">Loading approvals...</p>
+				{:else}
+					<ApprovalCenter {approvals} onResolve={handleApprovalResolve} />
+				{/if}
+			</section>
+		</div>
+	{/if}
+
+	<!-- ── Manual Inspector Fallback ──────────────────────────────────────── -->
+	<section class="panel" aria-labelledby="manual-inspector-heading">
+		<div class="section-heading">
+			<div>
+				<h2 id="manual-inspector-heading">Manual Run Inspector</h2>
+				<p class="muted">Enter a session key and run ID to inspect directly.</p>
 			</div>
 			{#if inspector}
 				<button
 					type="button"
-					class="temporal-link"
+					class="temporal-link secondary"
 					onclick={() => openTemporalWeb(inspector!.temporalWebUrl)}
 				>
-					Temporal Web
+					Temporal Web ↗
 				</button>
 			{/if}
 		</div>
@@ -252,7 +535,7 @@
 			class="inspector-form"
 			onsubmit={(event) => {
 				event.preventDefault();
-				void loadRunInspector();
+				void loadRunInspectorManual();
 			}}
 		>
 			<label>
@@ -264,74 +547,21 @@
 				<input bind:value={inspectorRunId} required autocomplete="off" />
 			</label>
 			<button type="submit" disabled={inspectorLoading}>
-				{inspectorLoading ? 'Loading' : 'Inspect Run'}
+				{inspectorLoading ? 'Loading…' : 'Inspect Run'}
 			</button>
 		</form>
 
-		{#if inspectorErrorMessage}
-			<p class="error">{inspectorErrorMessage}</p>
-		{/if}
-
-		{#if inspector}
-			<div class="inspector-grid">
-				<div class="metric">
-					<span>Status</span>
-					<strong>{inspector.run.status}</strong>
-				</div>
-				<div class="metric">
-					<span>Workflow</span>
-					<strong>{inspector.run.workflowId}</strong>
-				</div>
-				<div class="metric">
-					<span>Actions</span>
-					<strong>{inspector.actionMeter.total}</strong>
-				</div>
-			</div>
-
-			<details open>
-				<summary>Action Meter Breakdown</summary>
-				<dl class="breakdown-list">
-					{#each Object.entries(inspector.actionMeter.breakdown) as [label, count] (label)}
-						<div>
-							<dt>{label}</dt>
-							<dd>{count}</dd>
-						</div>
-					{/each}
-				</dl>
-			</details>
-
-			<details open>
-				<summary>Transcript Rehydrated From SQLite</summary>
-				<div class="timeline">
-					{#each inspector.transcript as event (event.id)}
-						<article class="timeline-event">
-							<div>
-								<strong>{event.kind}</strong>
-								<span>#{event.sequence} · {formatScheduleDate(event.createdAt)}</span>
-							</div>
-							<pre>{formatPayload(event.payload)}</pre>
-						</article>
-					{:else}
-						<p class="muted">No transcript events recorded for this run.</p>
-					{/each}
-				</div>
-			</details>
-
-			<details>
-				<summary>Recovery and Idempotency</summary>
-				<ul class="ledger-list">
-					{#each inspector.idempotencyEntries as entry (entry.idempotencyKey)}
-						<li>{entry.idempotencyKey}: {entry.status}</li>
-					{:else}
-						<li>No idempotency entries recorded.</li>
-					{/each}
-				</ul>
-			</details>
+		{#if inspectorFormError}
+			<p class="error">{inspectorFormError}</p>
 		{/if}
 	</section>
 
-	<section class="create-panel" aria-labelledby="create-schedule-heading">
+	<!-- ── Create Schedule ────────────────────────────────────────────────── -->
+	<section class="panel" aria-labelledby="create-schedule-heading">
 		<h2 id="create-schedule-heading">Create Schedule</h2>
+		{#if schedulesError}
+			<p class="error">{schedulesError}</p>
+		{/if}
 		<form
 			onsubmit={(event) => {
 				event.preventDefault();
@@ -354,14 +584,15 @@
 				Prompt
 				<textarea bind:value={form.prompt} required rows="4"></textarea>
 			</label>
-			<button type="submit" disabled={saving}>{saving ? 'Creating' : 'Create Schedule'}</button>
+			<button type="submit" disabled={saving}>{saving ? 'Creating…' : 'Create Schedule'}</button>
 		</form>
 	</section>
 
+	<!-- ── Schedules List ─────────────────────────────────────────────────── -->
 	<section aria-labelledby="schedule-list-heading">
 		<h2 id="schedule-list-heading">Schedules</h2>
 
-		{#if loading}
+		{#if schedulesLoading}
 			<p class="muted">Loading schedules...</p>
 		{:else if sortedSchedules.length === 0}
 			<p class="muted">No schedules configured.</p>
@@ -385,11 +616,11 @@
 							</div>
 							<div>
 								<dt>Next Run</dt>
-								<dd>{formatScheduleDate(schedule.nextRunAt)}</dd>
+								<dd>{formatDate(schedule.nextRunAt)}</dd>
 							</div>
 							<div>
 								<dt>Last Run</dt>
-								<dd>{formatScheduleDate(schedule.lastRunAt)}</dd>
+								<dd>{formatDate(schedule.lastRunAt)}</dd>
 							</div>
 						</dl>
 						<p class="prompt">{schedule.prompt}</p>
@@ -458,10 +689,12 @@
 		font: inherit;
 	}
 
-	.schedule-manager {
+	.console {
 		width: min(1120px, calc(100vw - 40px));
 		margin: 0 auto;
 		padding: 32px 0 48px;
+		display: grid;
+		gap: 24px;
 	}
 
 	.page-header {
@@ -469,7 +702,12 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 16px;
-		margin-bottom: 24px;
+	}
+
+	.header-actions {
+		display: flex;
+		gap: 8px;
+		flex-wrap: wrap;
 	}
 
 	.eyebrow {
@@ -494,22 +732,240 @@
 	}
 
 	h2 {
-		margin-bottom: 16px;
+		margin-bottom: 12px;
 		font-size: 1.1rem;
 	}
 
-	.create-panel,
+	.panel {
+		border: 1px solid #d7dde2;
+		border-radius: 8px;
+		padding: 20px;
+		background: #ffffff;
+	}
+
+	.section-heading {
+		display: flex;
+		align-items: start;
+		justify-content: space-between;
+		gap: 16px;
+		margin-bottom: 16px;
+	}
+
+	.section-heading h2,
+	.section-heading p {
+		margin-bottom: 0;
+	}
+
+	/* Sessions navigation */
+	.session-list {
+		display: grid;
+		gap: 6px;
+	}
+
+	.session-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		width: 100%;
+		padding: 10px 14px;
+		border: 1px solid #d7dde2;
+		border-radius: 6px;
+		background: #f9fafb;
+		color: inherit;
+		font: inherit;
+		font-size: 0.9rem;
+		cursor: pointer;
+		text-align: left;
+	}
+
+	.session-row.selected,
+	.run-row.selected {
+		border-color: #174c77;
+		background: #eff6ff;
+	}
+
+	.session-key {
+		font-family: ui-monospace, monospace;
+		font-size: 0.85rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.session-meta {
+		display: flex;
+		gap: 8px;
+		align-items: center;
+		flex-shrink: 0;
+	}
+
+	.session-date,
+	.run-date {
+		color: #5e6f80;
+		font-size: 0.78rem;
+	}
+
+	.status-pill {
+		display: inline-block;
+		padding: 0.15rem 0.5rem;
+		border-radius: 999px;
+		font-size: 0.72rem;
+		font-weight: 700;
+		text-transform: capitalize;
+		background: color-mix(in srgb, #1d252c 10%, transparent);
+	}
+
+	.status-pill[data-status='active'],
+	.status-pill[data-status='complete'] {
+		background: #e6f3ed;
+		color: #17603a;
+	}
+
+	.status-pill[data-status='failed'] {
+		background: #fff1f1;
+		color: #7b1d1d;
+	}
+
+	.status-pill[data-status='running'],
+	.status-pill[data-status='waiting_approval'] {
+		background: #eff6ff;
+		color: #1d4ed8;
+	}
+
+	.status-pill[data-status='idle'],
+	.status-pill[data-status='pending'] {
+		background: #f3f4f6;
+		color: #374151;
+	}
+
+	.runs-panel {
+		margin-top: 16px;
+		padding-top: 16px;
+		border-top: 1px solid #e7ebef;
+	}
+
+	.runs-panel h3 {
+		font-size: 0.9rem;
+		margin-bottom: 10px;
+		color: #40505f;
+	}
+
+	.run-list {
+		display: grid;
+		gap: 4px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.run-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		width: 100%;
+		padding: 8px 12px;
+		border: 1px solid #d7dde2;
+		border-radius: 5px;
+		background: #f9fafb;
+		color: inherit;
+		font: inherit;
+		font-size: 0.85rem;
+		cursor: pointer;
+		text-align: left;
+	}
+
+	.run-id {
+		font-family: ui-monospace, monospace;
+		font-size: 0.8rem;
+	}
+
+	.run-model {
+		font-family: ui-monospace, monospace;
+		font-size: 0.75rem;
+		color: #5e6f80;
+	}
+
+	/* Inspector panels layout */
+	.inspector-layout {
+		display: grid;
+		gap: 16px;
+	}
+
+	/* Schedule list */
+	.schedule-list {
+		display: grid;
+		gap: 12px;
+	}
+
 	.schedule-row {
+		display: grid;
+		gap: 14px;
+		padding: 18px;
 		border: 1px solid #d7dde2;
 		border-radius: 8px;
 		background: #ffffff;
 	}
 
-	.create-panel {
-		padding: 20px;
-		margin-bottom: 28px;
+	.schedule-summary {
+		display: flex;
+		align-items: start;
+		justify-content: space-between;
+		gap: 16px;
 	}
 
+	.schedule-summary h3 {
+		margin-bottom: 4px;
+		font-size: 1rem;
+	}
+
+	.schedule-summary p,
+	.prompt {
+		margin-bottom: 0;
+		color: #40505f;
+	}
+
+	.schedule-summary span {
+		border-radius: 999px;
+		padding: 4px 10px;
+		background: #e6f3ed;
+		color: #17603a;
+		font-size: 0.8rem;
+		font-weight: 800;
+		text-transform: capitalize;
+		flex-shrink: 0;
+	}
+
+	.schedule-summary span.paused {
+		background: #fff3d7;
+		color: #775000;
+	}
+
+	dl {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 12px;
+		margin: 0;
+	}
+
+	dt {
+		color: #5e6f80;
+		font-size: 0.8rem;
+		font-weight: 800;
+		text-transform: uppercase;
+	}
+
+	dd {
+		margin: 3px 0 0;
+		overflow-wrap: anywhere;
+	}
+
+	.prompt {
+		border-top: 1px solid #e7ebef;
+		padding-top: 12px;
+	}
+
+	/* Forms */
 	form {
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -546,116 +1002,9 @@
 	.inspector-form {
 		grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
 		align-items: end;
-		margin-bottom: 16px;
 	}
 
-	.section-heading {
-		display: flex;
-		align-items: start;
-		justify-content: space-between;
-		gap: 16px;
-		margin-bottom: 16px;
-	}
-
-	.section-heading h2,
-	.section-heading p {
-		margin-bottom: 0;
-	}
-
-	.temporal-link {
-		border: 1px solid #174c77;
-		border-radius: 6px;
-		padding: 9px 12px;
-		color: #174c77;
-		font-weight: 800;
-		text-decoration: none;
-		white-space: nowrap;
-	}
-
-	.inspector-grid {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 12px;
-		margin: 16px 0;
-	}
-
-	.metric {
-		border: 1px solid #d7dde2;
-		border-radius: 6px;
-		padding: 12px;
-		background: #f9fafb;
-	}
-
-	.metric span {
-		display: block;
-		color: #5e6f80;
-		font-size: 0.78rem;
-		font-weight: 800;
-		text-transform: uppercase;
-	}
-
-	.metric strong {
-		display: block;
-		margin-top: 4px;
-		overflow-wrap: anywhere;
-		font-size: 1rem;
-	}
-
-	details {
-		border-top: 1px solid #e7ebef;
-		padding-top: 12px;
-		margin-top: 12px;
-	}
-
-	summary {
-		cursor: pointer;
-		font-weight: 800;
-	}
-
-	.breakdown-list {
-		margin-top: 12px;
-	}
-
-	.timeline {
-		display: grid;
-		gap: 10px;
-		margin-top: 12px;
-	}
-
-	.timeline-event {
-		border: 1px solid #d7dde2;
-		border-radius: 6px;
-		padding: 12px;
-		background: #ffffff;
-	}
-
-	.timeline-event div {
-		display: flex;
-		flex-wrap: wrap;
-		justify-content: space-between;
-		gap: 8px;
-	}
-
-	.timeline-event span {
-		color: #5e6f80;
-		font-size: 0.85rem;
-	}
-
-	pre {
-		overflow-x: auto;
-		margin: 10px 0 0;
-		border-radius: 6px;
-		padding: 10px;
-		background: #17202a;
-		color: #f6f7f8;
-		font-size: 0.82rem;
-	}
-
-	.ledger-list {
-		margin: 12px 0 0;
-		padding-left: 20px;
-	}
-
+	/* Buttons */
 	button {
 		min-height: 40px;
 		border: 1px solid #174c77;
@@ -687,83 +1036,15 @@
 		cursor: wait;
 	}
 
-	.error {
-		border-left: 4px solid #9b2c2c;
-		padding: 12px 14px;
-		background: #fff1f1;
-		color: #7b1d1d;
-	}
-
-	.muted {
-		color: #5e6f80;
-	}
-
-	.schedule-list {
-		display: grid;
-		gap: 12px;
-	}
-
-	.schedule-row {
-		display: grid;
-		gap: 14px;
-		padding: 18px;
-	}
-
-	.schedule-summary {
-		display: flex;
-		align-items: start;
-		justify-content: space-between;
-		gap: 16px;
-	}
-
-	.schedule-summary h3 {
-		margin-bottom: 4px;
-		font-size: 1rem;
-	}
-
-	.schedule-summary p,
-	.prompt {
-		margin-bottom: 0;
-		color: #40505f;
-	}
-
-	.schedule-summary span {
-		border-radius: 999px;
-		padding: 4px 10px;
-		background: #e6f3ed;
-		color: #17603a;
-		font-size: 0.8rem;
+	.temporal-link {
+		padding: 9px 12px;
+		border: 1px solid #174c77;
+		border-radius: 6px;
+		color: #174c77;
 		font-weight: 800;
-		text-transform: capitalize;
-	}
-
-	.schedule-summary span.paused {
-		background: #fff3d7;
-		color: #775000;
-	}
-
-	dl {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 12px;
-		margin: 0;
-	}
-
-	dt {
-		color: #5e6f80;
-		font-size: 0.8rem;
-		font-weight: 800;
-		text-transform: uppercase;
-	}
-
-	dd {
-		margin: 3px 0 0;
-		overflow-wrap: anywhere;
-	}
-
-	.prompt {
-		border-top: 1px solid #e7ebef;
-		padding-top: 12px;
+		text-decoration: none;
+		white-space: nowrap;
+		font-size: 0.85rem;
 	}
 
 	.actions {
@@ -772,8 +1053,22 @@
 		gap: 8px;
 	}
 
+	/* Messages */
+	.error {
+		border-left: 4px solid #9b2c2c;
+		padding: 12px 14px;
+		background: #fff1f1;
+		color: #7b1d1d;
+		margin: 0;
+	}
+
+	.muted {
+		color: #5e6f80;
+		margin: 0;
+	}
+
 	@media (max-width: 760px) {
-		.schedule-manager {
+		.console {
 			width: min(100vw - 24px, 1120px);
 			padding-top: 20px;
 		}
@@ -786,7 +1081,6 @@
 
 		form,
 		.inspector-form,
-		.inspector-grid,
 		dl {
 			grid-template-columns: 1fr;
 		}
@@ -798,10 +1092,6 @@
 
 		button {
 			width: 100%;
-		}
-
-		.temporal-link {
-			text-align: center;
 		}
 	}
 </style>
