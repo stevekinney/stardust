@@ -4,8 +4,14 @@ import type {
 	ApprovalCardState,
 	ApprovalResolution,
 	ApprovalResolutionInput,
+	BudgetLedgerEntry,
+	BudgetLedgerSnapshot,
+	CriticAnnotation,
+	ModelUsage,
 	RecordApprovalRequestInput,
 	RecordApprovalResolutionInput,
+	RunTimelineLane,
+	SubagentKind,
 	ToolCallInput,
 	ToolExecutionInput,
 	ToolExecutionResult,
@@ -14,12 +20,16 @@ import type {
 import {
 	allHandlersFinished,
 	condition,
+	executeChild,
 	proxyActivities,
 	setHandler,
 	sleep
 } from '@temporalio/workflow';
 import { ApplicationFailure } from '@temporalio/common';
 import { getAgentRunStateQuery, resolveApprovalUpdate } from './approval-contracts';
+import { codeSubagentWorkflow } from './subagents/code-subagent.workflow';
+import { criticSubagentWorkflow } from './subagents/critic-subagent.workflow';
+import { researchSubagentWorkflow } from './subagents/research-subagent.workflow';
 
 type PolicyActivities = {
 	evaluateToolCallPolicy(input: { call: ToolCallInput }): Promise<ToolPolicyDecision>;
@@ -35,6 +45,28 @@ const TASK_QUEUE_TOOLS = 'tools-general';
 const TASK_QUEUE_SANDBOX = 'tools-sandbox';
 const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
 const HANDLER_FINISH_TIMEOUT_MS = 60_000;
+const DEFAULT_BUDGET_LIMIT: ModelUsage = {
+	inputTokens: 120,
+	outputTokens: 50,
+	estimatedCostUsd: 0.0012
+};
+const REQUESTED_SUBAGENT_USAGE: Record<SubagentKind, ModelUsage> = {
+	research: {
+		inputTokens: 70,
+		outputTokens: 20,
+		estimatedCostUsd: 0.0007
+	},
+	code: {
+		inputTokens: 70,
+		outputTokens: 20,
+		estimatedCostUsd: 0.0007
+	},
+	critic: {
+		inputTokens: 0,
+		outputTokens: 0,
+		estimatedCostUsd: 0
+	}
+};
 
 const policyActivities = proxyActivities<PolicyActivities>({
 	taskQueue: TASK_QUEUE_TOOLS,
@@ -52,12 +84,161 @@ function createApprovalId(runId: string, toolCallId: string): string {
 	return `${runId}:${toolCallId}:approval`;
 }
 
+function createEmptyUsage(): ModelUsage {
+	return {
+		inputTokens: 0,
+		outputTokens: 0,
+		estimatedCostUsd: 0
+	};
+}
+
+function roundCost(value: number): number {
+	return Number(value.toFixed(8));
+}
+
+function createBudgetLedger(limit: ModelUsage): BudgetLedgerSnapshot {
+	return {
+		limit,
+		used: createEmptyUsage(),
+		remaining: { ...limit },
+		entries: []
+	};
+}
+
+function addUsage(left: ModelUsage, right: ModelUsage): ModelUsage {
+	return {
+		inputTokens: left.inputTokens + right.inputTokens,
+		outputTokens: left.outputTokens + right.outputTokens,
+		estimatedCostUsd: roundCost(left.estimatedCostUsd + right.estimatedCostUsd)
+	};
+}
+
+function subtractUsage(left: ModelUsage, right: ModelUsage): ModelUsage {
+	return {
+		inputTokens: left.inputTokens - right.inputTokens,
+		outputTokens: left.outputTokens - right.outputTokens,
+		estimatedCostUsd: roundCost(left.estimatedCostUsd - right.estimatedCostUsd)
+	};
+}
+
+function reserveBudgetEntry(input: {
+	ledger: BudgetLedgerSnapshot;
+	runId: string;
+	kind: SubagentKind;
+	label: string;
+}): BudgetLedgerEntry {
+	const requested = REQUESTED_SUBAGENT_USAGE[input.kind];
+	const usage: ModelUsage = {
+		inputTokens: Math.min(requested.inputTokens, input.ledger.remaining.inputTokens),
+		outputTokens: Math.min(requested.outputTokens, input.ledger.remaining.outputTokens),
+		estimatedCostUsd: Math.min(requested.estimatedCostUsd, input.ledger.remaining.estimatedCostUsd)
+	};
+	const entry: BudgetLedgerEntry = {
+		workflowId: `agent-run:${input.runId}:${input.kind}`,
+		laneId: `${input.runId}:${input.kind}`,
+		label: input.label,
+		usage
+	};
+	input.ledger.used = addUsage(input.ledger.used, usage);
+	input.ledger.remaining = subtractUsage(input.ledger.remaining, usage);
+	input.ledger.entries.push(entry);
+	return entry;
+}
+
+async function runDelegatedSubagents(input: AgentRunInput): Promise<{
+	budgetLedger: BudgetLedgerSnapshot;
+	timelineLanes: RunTimelineLane[];
+	criticAnnotations: CriticAnnotation[];
+}> {
+	const budgetLedger = createBudgetLedger(input.budget ?? DEFAULT_BUDGET_LIMIT);
+	const parentLane: RunTimelineLane = {
+		id: input.runId,
+		label: 'Parent run',
+		kind: 'parent',
+		status: 'running',
+		budget: createEmptyUsage(),
+		children: []
+	};
+	const researchDebit = reserveBudgetEntry({
+		ledger: budgetLedger,
+		runId: input.runId,
+		kind: 'research',
+		label: 'Research'
+	});
+	const codeDebit = reserveBudgetEntry({
+		ledger: budgetLedger,
+		runId: input.runId,
+		kind: 'code',
+		label: 'Code'
+	});
+	const criticDebit = reserveBudgetEntry({
+		ledger: budgetLedger,
+		runId: input.runId,
+		kind: 'critic',
+		label: 'Critic'
+	});
+
+	const [research, code, critic] = await Promise.all([
+		executeChild(researchSubagentWorkflow, {
+			workflowId: `agent-run:${input.runId}:research`,
+			args: [
+				{
+					parentRunId: input.runId,
+					subagentRunId: `${input.runId}:research`,
+					kind: 'research',
+					message: input.message,
+					budgetDebit: researchDebit
+				}
+			]
+		}),
+		executeChild(codeSubagentWorkflow, {
+			workflowId: `agent-run:${input.runId}:code`,
+			args: [
+				{
+					parentRunId: input.runId,
+					subagentRunId: `${input.runId}:code`,
+					kind: 'code',
+					message: input.message,
+					budgetDebit: codeDebit
+				}
+			]
+		}),
+		executeChild(criticSubagentWorkflow, {
+			workflowId: `agent-run:${input.runId}:critic`,
+			args: [
+				{
+					parentRunId: input.runId,
+					subagentRunId: `${input.runId}:critic`,
+					kind: 'critic',
+					message: input.message,
+					budgetDebit: criticDebit
+				}
+			]
+		})
+	]);
+
+	parentLane.status = 'complete';
+	parentLane.children = [research.timelineLane, code.timelineLane, critic.timelineLane];
+	return {
+		budgetLedger,
+		timelineLanes: [parentLane],
+		criticAnnotations: critic.annotations ?? []
+	};
+}
+
 /** Stub: no-tool model path. Yields control briefly so the parent session can accept concurrent turns. */
 export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunResult> {
 	let status: 'running' | 'waiting_approval' | 'complete' | 'cancelled' | 'failed' = 'running';
 	let pendingApproval: ApprovalCardState | null = null;
 	let approvalResolution: ApprovalResolutionInput | null = null;
 	let recordedApprovalResolution: ApprovalResolution | null = null;
+	let delegationResult:
+		| {
+				budgetLedger: BudgetLedgerSnapshot;
+				timelineLanes: RunTimelineLane[];
+				criticAnnotations: CriticAnnotation[];
+		  }
+		| undefined;
 
 	void setHandler(getAgentRunStateQuery, () => ({
 		runId: input.runId,
@@ -188,12 +369,17 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 		});
 	}
 
+	if (input.delegateSubagents === true) {
+		delegationResult = await runDelegatedSubagents(input);
+	}
+
 	await sleep('1ms');
 	status = 'complete';
 	await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
 	return {
 		runId: input.runId,
 		status: 'complete',
-		finalAnswer: '(stub — no model in T2)'
+		finalAnswer: '(stub — no model in T2)',
+		...delegationResult
 	};
 }
