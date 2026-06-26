@@ -42,6 +42,11 @@ function statusFromTemporal(
 export class SchedulesProjectionRepository {
 	constructor(private readonly database: DatabaseClient) {}
 
+	async list(): Promise<ScheduleProjection[]> {
+		const rows = await this.database.select().from(schedules);
+		return rows.map(toScheduleProjection);
+	}
+
 	async upsert(input: UpsertScheduleProjectionInput): Promise<ScheduleProjection> {
 		const now = new Date().toISOString();
 		const lastRunAt = isoDate(input.descriptionFromTemporal?.info.recentActions.at(-1)?.takenAt);
@@ -91,12 +96,22 @@ export class SchedulesProjectionRepository {
 		const existing = await this.findByScheduleId(scheduleId);
 		if (!existing) throw new Error(`Schedule projection is missing: ${scheduleId}`);
 
+		return this.upsertFromTemporal(description, existing);
+	}
+
+	async upsertFromTemporal(
+		description: ScheduleDescription,
+		fallback?: ScheduleProjection
+	): Promise<ScheduleProjection> {
+		const scheduleId = description.scheduleId;
 		return this.upsert({
 			scheduleId,
-			name: existing.name,
-			description: existing.description ?? undefined,
-			cronExpression: existing.cronExpression,
-			prompt: existing.prompt,
+			name: memoString(description.memo, 'name') ?? fallback?.name ?? scheduleId,
+			description:
+				memoString(description.memo, 'description') ?? fallback?.description ?? undefined,
+			cronExpression:
+				memoString(description.memo, 'cronExpression') ?? fallback?.cronExpression ?? '',
+			prompt: memoString(description.memo, 'prompt') ?? fallback?.prompt ?? '',
 			descriptionFromTemporal: description
 		});
 	}
@@ -109,4 +124,13 @@ export class SchedulesProjectionRepository {
 			.limit(1);
 		return rows[0] ? toScheduleProjection(rows[0]) : null;
 	}
+
+	async deleteByScheduleId(scheduleId: string): Promise<void> {
+		await this.database.delete(schedules).where(eq(schedules.temporalScheduleId, scheduleId));
+	}
+}
+
+function memoString(memo: Record<string, unknown> | undefined, key: string): string | undefined {
+	const value = memo?.[key];
+	return typeof value === 'string' && value.trim() ? value : undefined;
 }

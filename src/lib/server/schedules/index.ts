@@ -1,2 +1,9 @@
 export { SchedulesProjectionRepository } from './projection';
-export { createTemporalSchedule, triggerTemporalSchedule } from '../temporal/schedule-client';
+export {
+	createTemporalSchedule,
+	deleteTemporalSchedule,
+	pauseTemporalSchedule,
+	reconcileTemporalSchedules,
+	resumeTemporalSchedule,
+	triggerTemporalSchedule
+} from '../temporal/schedule-client';
