@@ -41,10 +41,19 @@ const activityState: {
 	requests: RecordApprovalRequestInput[];
 	resolutions: RecordApprovalResolutionInput[];
 	executions: Array<ToolExecutionInput & { approved?: boolean }>;
+	startedRuns: Array<{ sessionId: string; runId: string; message: string }>;
+	completedRuns: Array<{
+		sessionId: string;
+		runId: string;
+		status: 'complete' | 'failed' | 'cancelled';
+		finalAnswer: string;
+	}>;
 } = {
 	requests: [],
 	resolutions: [],
-	executions: []
+	executions: [],
+	startedRuns: [],
+	completedRuns: []
 };
 
 function terminalStateForAction(
@@ -112,6 +121,17 @@ const testActivities = {
 			outcome: 'success',
 			content: { ok: true }
 		};
+	},
+	async recordRunStarted(input: { sessionId: string; runId: string; message: string }) {
+		activityState.startedRuns.push(input);
+	},
+	async recordRunCompleted(input: {
+		sessionId: string;
+		runId: string;
+		status: 'complete' | 'failed' | 'cancelled';
+		finalAnswer: string;
+	}) {
+		activityState.completedRuns.push(input);
 	}
 };
 
@@ -130,6 +150,8 @@ describe('agentRunWorkflow approvals', () => {
 		activityState.requests = [];
 		activityState.resolutions = [];
 		activityState.executions = [];
+		activityState.startedRuns = [];
+		activityState.completedRuns = [];
 	});
 
 	async function runWithWorkers<T>(callback: () => Promise<T>): Promise<T> {
@@ -322,14 +344,20 @@ describe('agentRunWorkflow subagents', () => {
 	});
 
 	it('runs the advisory critic child against the shared budget without rewriting the answer', async () => {
-		const worker = await Worker.create({
+		const orchestrator = await Worker.create({
 			connection: env.nativeConnection,
 			namespace: 'default',
 			taskQueue: TASK_QUEUE_ORCHESTRATOR,
 			workflowsPath: fileURLToPath(new URL('./index.ts', import.meta.url))
 		});
+		const tools = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_TOOLS,
+			activities: testActivities
+		});
 
-		await worker.runUntil(async () => {
+		const task = orchestrator.runUntil(async () => {
 			const runId = `subagents-${Date.now()}`;
 			const result: AgentRunResult = await env.client.workflow.execute('agentRunWorkflow', {
 				taskQueue: TASK_QUEUE_ORCHESTRATOR,
@@ -407,5 +435,7 @@ describe('agentRunWorkflow subagents', () => {
 				})
 			]);
 		});
+		const toolsTask = tools.runUntil(task.catch(() => undefined));
+		await Promise.all([task, toolsTask]);
 	});
 });

@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
+import { eq } from 'drizzle-orm';
 import {
 	createRegistry,
 	defineTool,
@@ -27,6 +28,9 @@ import {
 	SANDBOX_SNAPSHOT_TOOL,
 	SHELL_EXEC_TOOL
 } from '../policy/risk';
+import type { DatabaseClient } from '../db/client';
+import { toolInvocations } from '../db/schema';
+import { executeWithIdempotency } from '../observability/idempotency';
 import {
 	assertSideEffectAllowed,
 	fenceUntrustedOutput,
@@ -293,9 +297,12 @@ function buildToolStubResult(toolName: string, argumentsValue: unknown) {
 
 export async function executeRegisteredTool(input: {
 	call: ToolCallInput;
+	sessionId?: string;
+	runId?: string;
 	workspacePath?: string;
 	fetcher?: typeof fetch;
 	approved?: boolean;
+	database?: DatabaseClient;
 }): Promise<ToolExecutionResult> {
 	const decision = validateToolCall(getConfiguredTools(), input.call);
 	if (decision.status === 'denied') {
@@ -323,7 +330,7 @@ export async function executeRegisteredTool(input: {
 		};
 	}
 
-	try {
+	async function executeAllowedTool(): Promise<ToolExecutionResult> {
 		let content: unknown;
 		switch (input.call.name) {
 			case 'web.fetch':
@@ -398,7 +405,65 @@ export async function executeRegisteredTool(input: {
 			outcome: 'success',
 			content: input.call.name === 'web.fetch' ? fenceUntrustedOutput(content) : content
 		});
+	}
+
+	try {
+		if (input.database && input.sessionId && input.runId) {
+			const createdAt = new Date().toISOString();
+			await input.database
+				.insert(toolInvocations)
+				.values({
+					id: `${input.runId}:${input.call.id}`,
+					sessionId: input.sessionId,
+					runId: input.runId,
+					toolCallId: input.call.id,
+					toolName: input.call.name,
+					args: JSON.stringify(input.call.arguments),
+					argsHash: input.call.id,
+					idempotencyKey: input.call.idempotencyKey ?? null,
+					status: 'running',
+					risk: decision.tool.metadata.risk,
+					taskQueue: decision.tool.metadata.taskQueue,
+					startedAt: createdAt,
+					createdAt
+				})
+				.onConflictDoNothing();
+		}
+
+		const result =
+			input.call.idempotencyKey && input.database && input.runId
+				? await executeWithIdempotency({
+						database: input.database,
+						idempotencyKey: input.call.idempotencyKey,
+						runId: input.runId,
+						toolCallId: input.call.id,
+						execute: executeAllowedTool
+					})
+				: await executeAllowedTool();
+
+		if (input.database && input.call.id) {
+			await input.database
+				.update(toolInvocations)
+				.set({
+					status: result.outcome === 'success' ? 'complete' : 'failed',
+					resultInline: JSON.stringify(result.content),
+					completedAt: new Date().toISOString()
+				})
+				.where(eq(toolInvocations.toolCallId, input.call.id));
+		}
+
+		return result;
 	} catch (error) {
+		if (input.database && input.call.id) {
+			await input.database
+				.update(toolInvocations)
+				.set({
+					status: 'failed',
+					resultInline: JSON.stringify(error instanceof Error ? error.message : String(error)),
+					completedAt: new Date().toISOString()
+				})
+				.where(eq(toolInvocations.toolCallId, input.call.id));
+		}
 		return {
 			callId: input.call.id,
 			toolName: input.call.name,

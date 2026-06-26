@@ -16,6 +16,7 @@
 		"lint": "eslint .",
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
+		"chaos": "tsx scripts/devtools/chaos.ts",
 		"test:unit": "vitest",
 		"test": "bun run test:unit -- --run && bun run test:e2e",
 		"test:e2e": "env -u FORCE_COLOR -u NO_COLOR playwright install && env -u FORCE_COLOR -u NO_COLOR playwright test",

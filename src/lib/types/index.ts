@@ -197,6 +197,7 @@ export type ToolCallInput = {
 	id: string;
 	name: string;
 	arguments: unknown;
+	idempotencyKey?: string;
 };
 
 export type ToolPolicyDecision =
@@ -206,6 +207,8 @@ export type ToolPolicyDecision =
 
 export type ToolExecutionInput = {
 	call: ToolCallInput;
+	sessionId?: string;
+	runId?: string;
 	workspacePath?: string;
 };
 
@@ -217,6 +220,8 @@ export type ToolExecutionResult = {
 	metadata?: {
 		truncated?: boolean;
 		originalCharacters?: number;
+		idempotencyKey?: string;
+		idempotencyReplayed?: boolean;
 	};
 };
 
