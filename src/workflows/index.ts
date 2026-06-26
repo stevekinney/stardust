@@ -4,3 +4,4 @@
 
 export { agentRunWorkflow } from './agent-run.workflow';
 export { agentSessionWorkflow } from './agent-session.workflow';
+export { scheduledAgentWorkflow } from './scheduled-agent.workflow';
