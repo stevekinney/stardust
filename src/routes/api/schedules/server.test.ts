@@ -1,12 +1,45 @@
 import { describe, expect, it, vi } from 'vitest';
-import { POST } from './+server';
-import { createTemporalSchedule } from '$lib/server/schedules';
+import { GET, POST } from './+server';
+import { createTemporalSchedule, reconcileTemporalSchedules } from '$lib/server/schedules';
 
 vi.mock('$lib/server/schedules', () => ({
-	createTemporalSchedule: vi.fn()
+	createTemporalSchedule: vi.fn(),
+	reconcileTemporalSchedules: vi.fn()
 }));
 
 describe('schedules create route', () => {
+	it('reconciles schedules and returns the projection list', async () => {
+		vi.mocked(reconcileTemporalSchedules).mockResolvedValueOnce([
+			{
+				id: 'schedule-001',
+				temporalScheduleId: 'schedule-001',
+				targetSessionKey: 'scheduled:schedule-001',
+				name: 'Daily digest',
+				description: null,
+				cronExpression: '0 9 * * *',
+				prompt: 'Write the daily digest.',
+				status: 'active',
+				lastRunAt: null,
+				nextRunAt: '2026-01-02T09:00:00.000Z',
+				createdAt: '2026-01-01T00:00:00.000Z',
+				updatedAt: '2026-01-01T00:00:00.000Z'
+			}
+		]);
+
+		const response = await GET({} as Parameters<typeof GET>[0]);
+
+		expect(response.status).toBe(200);
+		expect(reconcileTemporalSchedules).toHaveBeenCalled();
+		expect(await response.json()).toEqual({
+			schedules: [
+				expect.objectContaining({
+					temporalScheduleId: 'schedule-001',
+					nextRunAt: '2026-01-02T09:00:00.000Z'
+				})
+			]
+		});
+	});
+
 	it('creates a schedule and returns the projection', async () => {
 		vi.mocked(createTemporalSchedule).mockResolvedValueOnce({
 			id: 'schedule-001',

@@ -1,6 +1,6 @@
 import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { createTemporalSchedule } from '$lib/server/schedules';
+import { createTemporalSchedule, reconcileTemporalSchedules } from '$lib/server/schedules';
 
 function readRequiredString(body: Record<string, unknown>, key: string): string {
 	const value = body[key];
@@ -28,4 +28,9 @@ export const POST: RequestHandler = async ({ request }) => {
 	});
 
 	return json({ schedule }, { status: 201 });
+};
+
+export const GET: RequestHandler = async () => {
+	const schedules = await reconcileTemporalSchedules();
+	return json({ schedules });
 };

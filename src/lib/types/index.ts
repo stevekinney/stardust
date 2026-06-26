@@ -62,6 +62,11 @@ export type TriggerScheduleResult = {
 	targetSessionKey: string;
 };
 
+export type DeleteScheduleResult = {
+	scheduleId: string;
+	deleted: true;
+};
+
 export type ModelUsage = {
 	inputTokens: number;
 	outputTokens: number;

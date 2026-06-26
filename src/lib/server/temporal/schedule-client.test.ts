@@ -8,7 +8,15 @@ import { join } from 'path';
 import type { Client, ScheduleDescription } from '@temporalio/client';
 import * as schema from '../db/schema';
 import { SchedulesProjectionRepository } from '../schedules/projection';
-import { createTemporalSchedule, triggerTemporalSchedule } from './schedule-client';
+import {
+	createTemporalSchedule,
+	deleteTemporalSchedule,
+	pauseTemporalSchedule,
+	reconcileTemporalSchedules,
+	resumeTemporalSchedule,
+	triggerTemporalSchedule
+} from './schedule-client';
+import { TASK_QUEUE_ORCHESTRATOR } from './task-queues';
 
 const TEST_DB_DIR = join(tmpdir(), 'stardust-t10-schedule-client-test');
 const TEST_DB_PATH = join(TEST_DB_DIR, 'test.db');
@@ -86,6 +94,9 @@ describe('schedule client', () => {
 					type: 'startWorkflow',
 					workflowId: 'scheduled-agent:schedule-fixed',
 					args: [{ scheduleId: 'schedule-fixed', prompt: 'Write the daily digest.' }]
+				}),
+				memo: expect.objectContaining({
+					cronExpression: '0 9 * * *'
 				})
 			})
 		);
@@ -150,5 +161,139 @@ describe('schedule client', () => {
 				nextRunAt: '2026-01-02T09:00:00.000Z'
 			}
 		});
+	});
+
+	it('pauses a Temporal Schedule and refreshes projection state', async () => {
+		await repository.upsert({
+			scheduleId: 'schedule-fixed',
+			name: 'Daily digest',
+			cronExpression: '0 9 * * *',
+			prompt: 'Write the daily digest.'
+		});
+
+		const pause = vi.fn(async () => undefined);
+		const describe = vi.fn(async () => createDescription({ state: { paused: true } }));
+		const getHandle = vi.fn(() => ({ pause, describe }));
+		const temporalClient = { schedule: { getHandle } } as unknown as Pick<Client, 'schedule'>;
+
+		const schedule = await pauseTemporalSchedule('schedule-fixed', {
+			temporalClient,
+			schedulesRepository: repository
+		});
+
+		expect(getHandle).toHaveBeenCalledWith('schedule-fixed');
+		expect(pause).toHaveBeenCalledWith('Paused from Stardust schedule manager');
+		expect(schedule.status).toBe('paused');
+	});
+
+	it('resumes a Temporal Schedule and refreshes projection state', async () => {
+		await repository.upsert({
+			scheduleId: 'schedule-fixed',
+			name: 'Daily digest',
+			cronExpression: '0 9 * * *',
+			prompt: 'Write the daily digest.',
+			descriptionFromTemporal: createDescription({ state: { paused: true } })
+		});
+
+		const unpause = vi.fn(async () => undefined);
+		const describe = vi.fn(async () => createDescription({ state: { paused: false } }));
+		const getHandle = vi.fn(() => ({ unpause, describe }));
+		const temporalClient = { schedule: { getHandle } } as unknown as Pick<Client, 'schedule'>;
+
+		const schedule = await resumeTemporalSchedule('schedule-fixed', {
+			temporalClient,
+			schedulesRepository: repository
+		});
+
+		expect(getHandle).toHaveBeenCalledWith('schedule-fixed');
+		expect(unpause).toHaveBeenCalledWith('Resumed from Stardust schedule manager');
+		expect(schedule.status).toBe('active');
+	});
+
+	it('deletes a Temporal Schedule and removes the projection row', async () => {
+		await repository.upsert({
+			scheduleId: 'schedule-fixed',
+			name: 'Daily digest',
+			cronExpression: '0 9 * * *',
+			prompt: 'Write the daily digest.'
+		});
+
+		const deleteSchedule = vi.fn(async () => undefined);
+		const getHandle = vi.fn(() => ({ delete: deleteSchedule }));
+		const temporalClient = { schedule: { getHandle } } as unknown as Pick<Client, 'schedule'>;
+
+		const result = await deleteTemporalSchedule('schedule-fixed', {
+			temporalClient,
+			schedulesRepository: repository
+		});
+
+		expect(getHandle).toHaveBeenCalledWith('schedule-fixed');
+		expect(deleteSchedule).toHaveBeenCalled();
+		expect(result).toEqual({ scheduleId: 'schedule-fixed', deleted: true });
+		expect(await repository.findByScheduleId('schedule-fixed')).toBeNull();
+	});
+
+	it('reconciles projection drift from Temporal schedules', async () => {
+		await repository.upsert({
+			scheduleId: 'schedule-fixed',
+			name: 'Stale name',
+			cronExpression: '0 8 * * *',
+			prompt: 'Old prompt.'
+		});
+		await repository.upsert({
+			scheduleId: 'schedule-deleted',
+			name: 'Deleted locally stale schedule',
+			cronExpression: '0 7 * * *',
+			prompt: 'Remove me.'
+		});
+
+		const temporalDescription = createDescription({
+			action: {
+				type: 'startWorkflow',
+				workflowType: 'scheduledAgentWorkflow',
+				workflowId: 'scheduled-agent:schedule-fixed',
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				args: [{ scheduleId: 'schedule-fixed', prompt: 'Write the daily digest.' }]
+			},
+			memo: {
+				name: 'Daily digest',
+				description: 'Summarize the previous day',
+				cronExpression: '0 9 * * *',
+				prompt: 'Write the daily digest.'
+			},
+			info: {
+				recentActions: [],
+				nextActionTimes: [new Date('2026-01-02T09:00:00.000Z')],
+				numActionsTaken: 0,
+				numActionsMissedCatchupWindow: 0,
+				numActionsSkippedOverlap: 0,
+				createdAt: new Date('2025-12-31T00:00:00.000Z'),
+				lastUpdatedAt: undefined,
+				runningActions: []
+			}
+		});
+		const describe = vi.fn(async () => temporalDescription);
+		const getHandle = vi.fn(() => ({ describe }));
+		async function* list() {
+			yield { scheduleId: 'schedule-fixed' };
+		}
+		const temporalClient = { schedule: { getHandle, list } } as unknown as Pick<Client, 'schedule'>;
+
+		const schedules = await reconcileTemporalSchedules({
+			temporalClient,
+			schedulesRepository: repository
+		});
+
+		expect(getHandle).toHaveBeenCalledWith('schedule-fixed');
+		expect(schedules).toHaveLength(1);
+		expect(schedules[0]).toMatchObject({
+			temporalScheduleId: 'schedule-fixed',
+			name: 'Daily digest',
+			description: 'Summarize the previous day',
+			cronExpression: '0 9 * * *',
+			prompt: 'Write the daily digest.',
+			nextRunAt: '2026-01-02T09:00:00.000Z'
+		});
+		expect(await repository.findByScheduleId('schedule-deleted')).toBeNull();
 	});
 });
