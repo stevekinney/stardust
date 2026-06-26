@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { mkdirSync } from 'fs';
 import { dirname, resolve } from 'path';
+import { DATABASE_URL } from '../config';
 import * as schema from './schema';
 
 function resolveDbPath(url: string): string {
@@ -10,10 +11,7 @@ function resolveDbPath(url: string): string {
 }
 
 function createClient() {
-	const url = process.env.DATABASE_URL;
-	if (!url) throw new Error('DATABASE_URL is not set');
-
-	const dbPath = resolveDbPath(url);
+	const dbPath = resolveDbPath(DATABASE_URL);
 	mkdirSync(dirname(dbPath), { recursive: true });
 
 	const sqlite = new Database(dbPath);
