@@ -6,7 +6,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as schema from '../db/schema';
-import { MemoryStore } from './memory-store';
+import { MemoryStore, createEmptyEmbedding } from './memory-store';
 import { retrieveMemory } from './retrieval';
 
 const TEST_DB_DIR = join(tmpdir(), 'stardust-t7-memory-test');
@@ -31,6 +31,16 @@ afterAll(() => {
 });
 
 describe('MemoryStore', () => {
+	it('creates the local vector embedding seam when sqlite-vec is unavailable', () => {
+		const row = sqlite
+			.prepare(
+				`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_note_embeddings'`
+			)
+			.get();
+
+		expect(row).toBeTruthy();
+	});
+
 	it('stores the session, durable, and action-sensitive layers in memory_notes', async () => {
 		await store.createNote({
 			id: 'memory-session-layer',
@@ -155,6 +165,85 @@ describe('MemoryStore', () => {
 
 		expect(ftsOnly).toHaveLength(2);
 		expect(vectorFused[0]?.id).toBe('memory-vector-high');
+	});
+
+	it('fuses FTS5 and vector results with reciprocal-rank fusion', async () => {
+		await store.createNote({
+			id: 'memory-hybrid-target',
+			sessionId: 'session-hybrid',
+			layer: 'durable',
+			content: 'I prefer pnpm.'
+		});
+		await store.createNote({
+			id: 'memory-hybrid-distractor',
+			sessionId: 'session-hybrid',
+			layer: 'durable',
+			content: 'Package manager decisions can wait until release planning.'
+		});
+
+		const queryEmbedding = createEmptyEmbedding();
+		queryEmbedding[0] = 1;
+		const targetEmbedding = createEmptyEmbedding();
+		targetEmbedding[0] = 1;
+		const distractorEmbedding = createEmptyEmbedding();
+		distractorEmbedding[1] = 1;
+
+		await store.upsertEmbedding({
+			noteId: 'memory-hybrid-target',
+			embedding: targetEmbedding,
+			model: 'test-embedding-model'
+		});
+		await store.upsertEmbedding({
+			noteId: 'memory-hybrid-distractor',
+			embedding: distractorEmbedding,
+			model: 'test-embedding-model'
+		});
+
+		const ftsOnly = await retrieveMemory({
+			store,
+			sessionId: 'session-hybrid',
+			query: 'package manager',
+			limit: 2
+		});
+		const hybrid = await retrieveMemory({
+			store,
+			sessionId: 'session-hybrid',
+			query: 'package manager',
+			queryEmbedding,
+			limit: 2
+		});
+
+		expect(ftsOnly[0]?.id).toBe('memory-hybrid-distractor');
+		expect(hybrid[0]?.id).toBe('memory-hybrid-target');
+		expect(hybrid.map((result) => result.id)).toContain('memory-hybrid-distractor');
+	});
+
+	it('stores notes when embedding generation fails and falls back to FTS-only retrieval', async () => {
+		const note = await store.createNote({
+			id: 'memory-embedding-fallback',
+			sessionId: 'session-embedding-fallback',
+			layer: 'durable',
+			content: 'Use Bun when installing dependencies.'
+		});
+
+		await expect(
+			store.upsertEmbedding({
+				noteId: note.id,
+				embedding: [1, 2, 3],
+				model: 'broken-test-model'
+			})
+		).rejects.toThrow('Expected embedding to have 384 dimensions');
+
+		const results = await retrieveMemory({
+			store,
+			sessionId: 'session-embedding-fallback',
+			query: 'bun dependencies',
+			queryEmbedding: createEmptyEmbedding(),
+			limit: 3
+		});
+
+		expect(await store.findById(note.id)).toMatchObject({ id: note.id });
+		expect(results[0]?.id).toBe(note.id);
 	});
 });
 

@@ -4,3 +4,4 @@
 
 export { agentRunWorkflow } from './agent-run.workflow';
 export { agentSessionWorkflow } from './agent-session.workflow';
+export { memoryCompactionWorkflow } from './memory-compaction.workflow';

@@ -122,6 +122,48 @@ export type ToolExecutionResult = {
 	};
 };
 
+export type CompactMemoryInput = {
+	sessionId: string;
+	fromTranscriptCursor: number;
+	reason: 'threshold' | 'manual';
+};
+
+export type LoadedMemoryCompactionInput = {
+	sessionId: string;
+	fromTranscriptCursor: number;
+	toTranscriptCursor: number;
+	transcript: string[];
+	existingMemoryRefs: string[];
+};
+
+export type MemoryCompactionCandidate = {
+	layer: 'session' | 'durable' | 'action_sensitive';
+	content: string;
+	tags?: string[];
+	reason?: string | null;
+};
+
+export type MemoryCompactionSummary = {
+	summary: string;
+	candidates: MemoryCompactionCandidate[];
+};
+
+export type PersistMemoryCompactionInput = LoadedMemoryCompactionInput & MemoryCompactionSummary;
+
+export type CompactMemoryResult = {
+	sessionId: string;
+	summaryNoteId: string;
+	candidateIds: string[];
+	memoryRefs: string[];
+	transcriptCursor: number;
+};
+
+export type MemoryCompactionActivities = {
+	loadMemoryCompactionInput(input: CompactMemoryInput): Promise<LoadedMemoryCompactionInput>;
+	summarizeMemoryCompaction(input: LoadedMemoryCompactionInput): Promise<MemoryCompactionSummary>;
+	persistMemoryCompaction(input: PersistMemoryCompactionInput): Promise<CompactMemoryResult>;
+};
+
 // Task queue name constants — kept here (not in src/lib/server) so Workflow code can import them.
 export const TASK_QUEUE_ORCHESTRATOR = 'agent-orchestrator';
 export const TASK_QUEUE_MODEL = 'model-calls';

@@ -15,6 +15,13 @@
       "when": 1782424963534,
       "tag": "0001_memory_notes_fts5",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1782424973534,
+      "tag": "0002_memory_note_embeddings",
+      "breakpoints": true
     }
   ]
 }
