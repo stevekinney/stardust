@@ -57,12 +57,17 @@
 		"vitest-browser-svelte": "^2.1.1"
 	},
 	"dependencies": {
+		"@anthropic-ai/sdk": "^0.71.2",
 		"@lostgradient/cinder": "^0.4.0",
 		"@temporalio/activity": "^1.18.1",
 		"@temporalio/client": "^1.18.1",
+		"@temporalio/common": "^1.18.1",
 		"@temporalio/worker": "^1.18.1",
 		"@temporalio/workflow": "^1.18.1",
-		"better-sqlite3": "^12.11.1"
+		"armorer": "file:/Users/stevekinney/Developer/armorer",
+		"better-sqlite3": "^12.11.1",
+		"conversationalist": "file:/Users/stevekinney/Developer/agent-bureau/packages/conversationalist",
+		"zod": "^4.3.6"
 	},
 	"trustedDependencies": [
 		"@swc/core",
@@ -70,5 +75,9 @@
 		"esbuild",
 		"lefthook",
 		"protobufjs"
-	]
+	],
+	"overrides": {
+		"interoperability": "file:/Users/stevekinney/Developer/agent-bureau/packages/interoperability",
+		"lifecycle": "file:/Users/stevekinney/Developer/agent-bureau/packages/lifecycle"
+	}
 }
