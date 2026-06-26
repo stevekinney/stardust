@@ -191,6 +191,84 @@ describe('RunTimeline', () => {
 		unmount(component);
 	});
 
+	it('hides engineer overlay when engineerView is false (default)', () => {
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection }
+		});
+
+		expect(document.querySelector('[data-engineer-overlay]')).toBeNull();
+
+		unmount(component);
+	});
+
+	it('shows engineer overlay when engineerView is true', () => {
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection, engineerView: true }
+		});
+
+		expect(document.querySelector('[data-engineer-overlay]')).not.toBeNull();
+
+		unmount(component);
+	});
+
+	it('shows raw event buttons on each transcript item when engineerView is true', () => {
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection, engineerView: true }
+		});
+
+		const rawEventBtns = document.querySelectorAll('[data-raw-event]');
+		expect(rawEventBtns.length).toBe(transcript.length);
+
+		unmount(component);
+	});
+
+	it('renders per-kind markers for each transcript item when engineerView is true', () => {
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection, engineerView: true }
+		});
+
+		const kindMarkers = document.querySelectorAll('[data-eng-kind-marker]');
+		expect(kindMarkers.length).toBe(transcript.length);
+
+		// Verify known kind-to-symbol mappings via data-eng-kind (not data-kind, which belongs
+		// to the <li> elements only so that [data-kind] count stays unambiguous).
+		const userMsgMarker = document.querySelector(
+			'[data-eng-kind-marker][data-eng-kind="user_message"]'
+		);
+		expect(userMsgMarker?.textContent).toBe('↓');
+
+		const toolCallMarker = document.querySelector(
+			'[data-eng-kind-marker][data-eng-kind="tool_call"]'
+		);
+		expect(toolCallMarker?.textContent).toBe('⚙');
+
+		const lifecycleMarker = document.querySelector(
+			'[data-eng-kind-marker][data-eng-kind="lifecycle"]'
+		);
+		expect(lifecycleMarker?.textContent).toBe('◎');
+
+		unmount(component);
+	});
+
+	it('[data-kind] count is exactly the transcript length even when engineerView is true', () => {
+		// Regression guard: the engineer-view markers use data-eng-kind (not data-kind) so
+		// querySelectorAll('[data-kind]') always returns one element per transcript event,
+		// regardless of which view is active.
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection, engineerView: true }
+		});
+
+		const items = document.querySelectorAll('[data-kind]');
+		expect(items.length).toBe(transcript.length);
+
+		unmount(component);
+	});
+
 	it('calls onTemporalWeb when the Temporal Web link is clicked', () => {
 		let clicked = false;
 		const component = mount(RunTimeline, {

@@ -78,7 +78,9 @@ export default defineConfig(
 			'temporal/workflow-no-network-in-workflow': 'off',
 			'temporal/workflow-no-unsafe-package-imports': 'off',
 			'temporal/workflow-no-logger-library-in-workflow': 'off',
-			'temporal/workflow-no-worker-import': 'off'
+			'temporal/workflow-no-worker-import': 'off',
+			// SSR tests intentionally manipulate globalThis to simulate a window-less environment.
+			'temporal/workflow-no-unsafe-global-mutation': 'off'
 		}
 	},
 	{

@@ -4,6 +4,12 @@ import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
 
 export default defineConfig({
+	// Cinder ships raw .svelte.ts TypeScript source files. Vite's pre-bundler can't
+	// process them as plain JS, so we exclude the package from optimization and let
+	// vite-plugin-svelte handle it on-demand through the full transform pipeline.
+	optimizeDeps: {
+		exclude: ['@lostgradient/cinder']
+	},
 	plugins: [
 		sveltekit({
 			compilerOptions: {
