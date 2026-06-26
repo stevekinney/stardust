@@ -30,6 +30,52 @@ export type AgentRunResult = {
 	finalAnswer: string;
 };
 
+export type ModelUsage = {
+	inputTokens: number;
+	outputTokens: number;
+	estimatedCostUsd: number;
+};
+
+export type ModelToolSchema = {
+	identity: {
+		name: string;
+		namespace?: string;
+		version?: string;
+	};
+	display: {
+		description: string;
+		title?: string;
+	};
+	input: Record<string, unknown>;
+};
+
+export type ModelCallInput = {
+	sessionId: string;
+	runId: string;
+	model: string;
+	tools?: ModelToolSchema[];
+	maxTokens?: number;
+	systemPrompt?: string;
+};
+
+export type NormalizedToolCall = {
+	id: string;
+	name: string;
+	input: unknown;
+};
+
+export type NormalizedModelMessage = {
+	text: string;
+	toolCalls: NormalizedToolCall[];
+};
+
+export type ModelCallResult = {
+	runId: string;
+	model: string;
+	message: NormalizedModelMessage;
+	usage: ModelUsage;
+};
+
 // Task queue name constants — kept here (not in src/lib/server) so Workflow code can import them.
 export const TASK_QUEUE_ORCHESTRATOR = 'agent-orchestrator';
 export const TASK_QUEUE_MODEL = 'model-calls';
