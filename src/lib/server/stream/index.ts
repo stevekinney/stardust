@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, gt, lte } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import type { DatabaseClient } from '../db/client';
 import { runs, streamEvents, transcriptEvents } from '../db/schema';
 
@@ -140,6 +141,45 @@ export async function trimCompletedRunStream(
 		.delete(streamEvents)
 		.where(and(eq(streamEvents.runId, runId), lte(streamEvents.id, maxId)));
 	return runEvents.length;
+}
+
+/**
+ * Persists a tool-execution result to both the canonical transcript and the
+ * live stream bus so the context builder can reconstruct it on the next model
+ * call and the UI can render the tool result card.
+ */
+export async function persistToolResult(
+	database: DatabaseClient,
+	input: {
+		sessionId: string;
+		runId: string;
+		callId: string;
+		content: unknown;
+		isError?: boolean;
+	}
+): Promise<void> {
+	const now = new Date().toISOString();
+	const id = `${input.runId}:tool-result:${randomUUID()}`;
+	const resultPayload = JSON.stringify({
+		callId: input.callId,
+		content: input.content,
+		isError: input.isError ?? false
+	});
+	await appendTranscriptEvent(database, {
+		id,
+		sessionId: input.sessionId,
+		runId: input.runId,
+		kind: 'tool_result',
+		payload: resultPayload,
+		createdAt: now
+	});
+	await publishStreamEvent(database, {
+		sessionId: input.sessionId,
+		runId: input.runId,
+		kind: 'tool.result',
+		payload: resultPayload,
+		createdAt: now
+	});
 }
 
 export function encodeServerSentEvents(replay: StreamReplay): string {

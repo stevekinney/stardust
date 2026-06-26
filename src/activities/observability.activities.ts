@@ -2,7 +2,11 @@ import { eq } from 'drizzle-orm';
 import { db } from '../lib/server/db/client';
 import { runs, sessions } from '../lib/server/db/schema';
 import type { ModelUsage, SubagentKind } from '../lib/types';
-import { appendTranscriptEvent, publishStreamEvent } from '../lib/server/stream';
+import {
+	appendTranscriptEvent,
+	persistToolResult as runPersistToolResult,
+	publishStreamEvent
+} from '../lib/server/stream';
 
 type RunCompletionStatus = 'complete' | 'failed' | 'cancelled';
 
@@ -119,6 +123,21 @@ export async function recordSubagentCompleted(input: {
 		}),
 		createdAt: now
 	});
+}
+
+/**
+ * Persists a tool execution result to both the canonical transcript and the
+ * live stream bus. Called by the workflow after each tool execution so the
+ * context builder can reconstruct tool result context for subsequent model calls.
+ */
+export async function persistToolResult(input: {
+	sessionId: string;
+	runId: string;
+	callId: string;
+	content: unknown;
+	isError?: boolean;
+}): Promise<void> {
+	await runPersistToolResult(db, input);
 }
 
 export async function recordRunCompleted(input: {
