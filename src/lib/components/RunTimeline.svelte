@@ -1,17 +1,36 @@
 <script lang="ts">
+	import Drawer from '@lostgradient/cinder/drawer';
 	import type { RunInspectorProjection } from '$lib/server/observability/projection';
 
 	type Props = {
 		projection: RunInspectorProjection;
 		onTemporalWeb?: () => void;
+		/** When true, engineer-layer details are shown additively over the operator surface. */
+		engineerView?: boolean;
 	};
 
-	let { projection, onTemporalWeb }: Props = $props();
+	let { projection, onTemporalWeb, engineerView = false }: Props = $props();
 
-	const { run, transcript, actionMeter, temporalWebUrl, recoveryMarkers, timelineLanes } =
-		$derived(projection);
+	const {
+		run,
+		transcript,
+		actionMeter,
+		temporalWebUrl,
+		recoveryMarkers,
+		timelineLanes,
+		toolInvocations
+	} = $derived(projection);
 
 	const recoveryPayloads = $derived(new Set(recoveryMarkers));
+
+	// — raw event drawer state (engineer view only) —
+	let rawEventDrawerOpen = $state(false);
+	let rawEventSelected = $state<RunInspectorProjection['transcript'][number] | null>(null);
+
+	function openRawEvent(event: RunInspectorProjection['transcript'][number]) {
+		rawEventSelected = event;
+		rawEventDrawerOpen = true;
+	}
 
 	function kindLabel(kind: string): string {
 		return kind.replace(/_/g, ' ');
@@ -92,6 +111,33 @@
 		</dl>
 	</details>
 
+	{#if engineerView}
+		<div class="engineer-overlay" data-engineer-overlay>
+			<h3>Engineer Details</h3>
+			<dl class="eng-meta">
+				<div>
+					<dt>Run ID</dt>
+					<dd><code>{run.id}</code></dd>
+				</div>
+				<div>
+					<dt>Workflow ID</dt>
+					<dd><code>{run.workflowId}</code></dd>
+				</div>
+				<div>
+					<dt>Tool invocations</dt>
+					<dd>{toolInvocations.length}</dd>
+				</div>
+				<div>
+					<dt>Temporal Web</dt>
+					<dd><code class="eng-url">{temporalWebUrl}</code></dd>
+				</div>
+			</dl>
+			<p class="eng-gap-note">
+				Note: task-queue routing and attempt counts are not yet present in the run projection.
+			</p>
+		</div>
+	{/if}
+
 	{#if timelineLanes && timelineLanes.length > 0}
 		<div class="subagent-lanes" data-subagent-lanes>
 			<h3>Subagent Lanes</h3>
@@ -150,12 +196,50 @@
 									? event.payload
 									: JSON.stringify(event.payload, null, 2)}</pre>
 						{/if}
+						{#if engineerView}
+							<button
+								type="button"
+								class="raw-event-btn"
+								data-raw-event
+								onclick={() => openRawEvent(event)}
+							>
+								Raw event ↗
+							</button>
+						{/if}
 					</li>
 				{/each}
 			</ol>
 		{/if}
 	</div>
 </section>
+
+{#if engineerView}
+	<Drawer bind:open={rawEventDrawerOpen} title="Raw Event" side="right" size="lg">
+		{#if rawEventSelected}
+			<div class="raw-event-content">
+				<dl class="raw-event-meta">
+					<div>
+						<dt>ID</dt>
+						<dd><code>{rawEventSelected.id}</code></dd>
+					</div>
+					<div>
+						<dt>Kind</dt>
+						<dd>{rawEventSelected.kind}</dd>
+					</div>
+					<div>
+						<dt>Sequence</dt>
+						<dd>#{rawEventSelected.sequence}</dd>
+					</div>
+					<div>
+						<dt>Created at</dt>
+						<dd>{rawEventSelected.createdAt}</dd>
+					</div>
+				</dl>
+				<pre class="raw-payload">{JSON.stringify(rawEventSelected.payload, null, 2)}</pre>
+			</div>
+		{/if}
+	</Drawer>
+{/if}
 
 <style>
 	.run-timeline {
@@ -450,5 +534,94 @@
 
 	.empty {
 		margin-top: 0.5rem;
+	}
+
+	/* — engineer overlay — */
+	.engineer-overlay {
+		border-top: 2px solid #7c3aed;
+		padding-top: 0.75rem;
+		background: color-mix(in srgb, #7c3aed 4%, Canvas);
+		border-radius: 4px;
+		padding: 0.75rem;
+	}
+
+	.eng-meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem 1.5rem;
+		margin: 0.5rem 0 0;
+	}
+
+	.eng-meta dt {
+		color: color-mix(in srgb, CanvasText 55%, transparent);
+		font-size: 0.72rem;
+		font-weight: 700;
+		text-transform: uppercase;
+	}
+
+	.eng-meta dd {
+		margin: 0;
+		font-size: 0.85rem;
+	}
+
+	.eng-url {
+		word-break: break-all;
+		font-size: 0.72rem;
+	}
+
+	.eng-gap-note {
+		margin: 0.5rem 0 0;
+		color: color-mix(in srgb, CanvasText 45%, transparent);
+		font-size: 0.75rem;
+		font-style: italic;
+	}
+
+	.raw-event-btn {
+		margin-top: 0.35rem;
+		padding: 0.1rem 0.4rem;
+		border: 1px solid #7c3aed;
+		border-radius: 4px;
+		color: #7c3aed;
+		font-size: 0.7rem;
+		font-weight: 600;
+		background: transparent;
+		cursor: pointer;
+	}
+
+	.raw-event-btn:hover {
+		background: color-mix(in srgb, #7c3aed 8%, transparent);
+	}
+
+	.raw-event-content {
+		display: grid;
+		gap: 1rem;
+		padding: 1rem;
+	}
+
+	.raw-event-meta {
+		display: grid;
+		gap: 0.5rem;
+		margin: 0;
+	}
+
+	.raw-event-meta dt {
+		color: color-mix(in srgb, CanvasText 55%, transparent);
+		font-size: 0.72rem;
+		font-weight: 700;
+		text-transform: uppercase;
+	}
+
+	.raw-event-meta dd {
+		margin: 0;
+		font-size: 0.85rem;
+	}
+
+	.raw-payload {
+		overflow: auto;
+		padding: 0.75rem;
+		border-radius: 4px;
+		background: color-mix(in srgb, CanvasText 5%, Canvas);
+		font-size: 0.75rem;
+		line-height: 1.5;
 	}
 </style>

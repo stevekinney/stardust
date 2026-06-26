@@ -1,9 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import Button from '@lostgradient/cinder/button';
+	import Segment from '@lostgradient/cinder/segment';
+	import SegmentedControl from '@lostgradient/cinder/segmented-control';
 	import type { ScheduleProjection } from '$lib/types';
 	import type { RunInspectorProjection } from '$lib/server/observability/projection';
 	import type { MemoryNote, MemoryCandidate } from '$lib/server/memory/memory-store';
 	import type { ApprovalCardState, ApprovalResolutionInput } from '$lib/types';
+	import { viewMode } from '$lib/view-mode.svelte';
 	import RunTimeline from '$lib/components/RunTimeline.svelte';
 	import MemoryPanel from '$lib/components/MemoryPanel.svelte';
 	import WorkspacePanel from '$lib/components/WorkspacePanel.svelte';
@@ -21,6 +25,9 @@
 		SandboxSnapshotRow
 	} from '$lib/components/SandboxInspector.svelte';
 	import ApprovalCenter from '$lib/components/ApprovalCenter.svelte';
+	import Settings from '$lib/components/Settings.svelte';
+
+	let settingsOpen = $state(false);
 
 	type SessionRow = {
 		id: string;
@@ -436,14 +443,43 @@
 			<h1>Operations Console</h1>
 		</div>
 		<div class="header-actions">
-			<button type="button" class="secondary" onclick={loadSessions} disabled={sessionsLoading}>
-				Refresh Sessions
-			</button>
-			<button type="button" class="secondary" onclick={loadSchedules} disabled={schedulesLoading}>
-				Refresh Schedules
-			</button>
+			<SegmentedControl
+				id="view-mode-control"
+				label="View mode"
+				hideLabel
+				density="toolbar"
+				value={viewMode.mode}
+				onchange={(value) => {
+					if (value === 'operator' || value === 'engineer') viewMode.set(value);
+				}}
+			>
+				<Segment value="operator">Operator</Segment>
+				<Segment value="engineer">Engineer</Segment>
+			</SegmentedControl>
+			<Button
+				variant="ghost"
+				size="sm"
+				label="Refresh Sessions"
+				onclick={loadSessions}
+				disabled={sessionsLoading}
+			/>
+			<Button
+				variant="ghost"
+				size="sm"
+				label="Refresh Schedules"
+				onclick={loadSchedules}
+				disabled={schedulesLoading}
+			/>
+			<Button
+				variant="secondary"
+				size="sm"
+				label="Settings"
+				onclick={() => (settingsOpen = true)}
+			/>
 		</div>
 	</header>
+
+	<Settings bind:open={settingsOpen} />
 
 	<!-- ── Sessions and Run Navigation ─────────────────────────────────────── -->
 	<section class="panel" aria-labelledby="sessions-heading">
@@ -532,6 +568,7 @@
 				<RunTimeline
 					projection={inspector}
 					onTemporalWeb={() => openTemporalWeb(inspector!.temporalWebUrl)}
+					engineerView={viewMode.isEngineer}
 				/>
 			</section>
 
