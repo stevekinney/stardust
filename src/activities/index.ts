@@ -3,5 +3,6 @@
 export * from './model.activities';
 export * from './memory.activities';
 export * from './policy.activities';
+export * from './sandbox.activities';
 export * from './schedule.activities';
 export * from './tool.activities';
