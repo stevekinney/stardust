@@ -28,7 +28,7 @@ import {
 	setHandler
 } from '@temporalio/workflow';
 import { ApplicationFailure } from '@temporalio/common';
-import { getAgentRunStateQuery, resolveApprovalUpdate } from './approval-contracts';
+import { getAgentRunStateQuery, resolveApprovalUpdate, steeringSignal } from './approval-contracts';
 import { codeSubagentWorkflow } from './subagents/code-subagent.workflow';
 import { criticSubagentWorkflow } from './subagents/critic-subagent.workflow';
 import { researchSubagentWorkflow } from './subagents/research-subagent.workflow';
@@ -614,11 +614,21 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 		  }
 		| undefined;
 
+	/**
+	 * Steering messages queued by the session via steeringSignal.
+	 * Drained at each model boundary and included in the model call context.
+	 */
+	const steeringBuffer: string[] = [];
+
 	void setHandler(getAgentRunStateQuery, () => ({
 		runId: input.runId,
 		status,
 		pendingApproval
 	}));
+
+	void setHandler(steeringSignal, (message: string) => {
+		steeringBuffer.push(message);
+	});
 
 	void setHandler(resolveApprovalUpdate, async (resolution: ApprovalResolutionInput) => {
 		if (!pendingApproval) {
@@ -679,13 +689,16 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 			break;
 		}
 
+		// Drain any steering messages queued since the last model call.
+		const pendingSteering = steeringBuffer.splice(0);
 		const modelResult = await modelActivities.callModel({
 			sessionId: input.sessionKey,
 			runId: input.runId,
 			model: input.model ?? DEFAULT_MODEL,
 			tools: input.tools,
 			systemPrompt: input.systemPrompt,
-			maxTokens: 4096
+			maxTokens: 4096,
+			...(pendingSteering.length > 0 ? { steeringMessages: pendingSteering } : {})
 		});
 		modelCallCount++;
 		totalUsage = addUsage(totalUsage, modelResult.usage);
@@ -752,7 +765,9 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 	}
 
 	// ── Session memory candidate ──────────────────────────────────────────────
-	// Non-fatal: write failure does not fail the run.
+	// Construct a deterministic ref for this run's memory candidate. The write is
+	// non-fatal: if it fails the ref is still returned so the session can track it.
+	const memoryRef = `${input.sessionKey}:run:${input.runId}`;
 	await memoryActivities
 		.writeMemoryCandidate({
 			sessionId: input.sessionKey,
@@ -770,6 +785,7 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 		runId: input.runId,
 		status: 'complete',
 		finalAnswer,
+		memoryRefs: [memoryRef],
 		...delegationResult
 	});
 }
