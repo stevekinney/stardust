@@ -114,6 +114,30 @@ describe('MemoryPanel', () => {
 		unmount(component);
 	});
 
+	it('fires onEditCandidate with candidate id when Edit is clicked', () => {
+		const edited: string[] = [];
+		const component = mount(MemoryPanel, {
+			target: document.body,
+			props: {
+				notes: [],
+				candidates: [candidate],
+				onEditCandidate: (id: string) => {
+					edited.push(id);
+				}
+			}
+		});
+
+		const editButton = Array.from(document.querySelectorAll('button')).find(
+			(button) => button.textContent?.trim() === 'Edit'
+		);
+		editButton?.click();
+		flushSync();
+
+		expect(edited).toEqual(['cand-001']);
+
+		unmount(component);
+	});
+
 	it('fires onDiscardCandidate with candidate id when Discard is clicked', () => {
 		const discarded: string[] = [];
 		const component = mount(MemoryPanel, {

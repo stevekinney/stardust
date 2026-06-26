@@ -68,6 +68,7 @@
 	let memoryNotes = $state<MemoryNote[]>([]);
 	let memoryCandidates = $state<MemoryCandidate[]>([]);
 	let memoryLoading = $state(false);
+	let editCandidateNotice = $state<string | null>(null);
 
 	// — approval center state —
 	let approvals = $state<ApprovalCardState[]>([]);
@@ -217,10 +218,9 @@
 		await loadMemory(sessionKey);
 	}
 
-	function handleEditCandidate(candidateId: string) {
-		// Edit requires a dedicated editor modal (not yet implemented).
-		// Emitting a console warning makes the intent visible in DevTools.
-		console.warn('[MemoryPanel] Edit candidate not yet implemented:', candidateId);
+	function handleEditCandidate() {
+		editCandidateNotice =
+			'Editing memory candidates is not yet available. Use Approve or Discard to action this candidate.';
 	}
 
 	async function loadApprovals(sessionKey: string) {
@@ -536,6 +536,9 @@
 			</section>
 
 			<section class="panel">
+				{#if editCandidateNotice}
+					<p class="notice" role="status">{editCandidateNotice}</p>
+				{/if}
 				{#if memoryLoading}
 					<p class="muted">Loading memory...</p>
 				{:else}
@@ -1129,6 +1132,15 @@
 	.muted {
 		color: #5e6f80;
 		margin: 0;
+	}
+
+	.notice {
+		border-left: 4px solid #92400e;
+		padding: 10px 14px;
+		background: #fffbeb;
+		color: #78350f;
+		margin: 0 0 0.75rem;
+		font-size: 0.875rem;
 	}
 
 	@media (max-width: 760px) {

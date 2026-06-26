@@ -84,7 +84,7 @@ export type SubagentWorkflowResult = {
 	parentRunId: string;
 	subagentRunId: string;
 	kind: SubagentKind;
-	status: 'complete';
+	status: 'complete' | 'failed' | 'cancelled';
 	finalAnswer: string;
 	budgetDebit: BudgetLedgerEntry;
 	timelineLane: RunTimelineLane;

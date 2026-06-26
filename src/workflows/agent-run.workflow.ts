@@ -287,7 +287,7 @@ async function runDelegatedSubagents(
 			subagentRunId: `${input.runId}:research`,
 			kind: 'research',
 			label: 'Research',
-			status: research.status === 'complete' ? 'complete' : 'failed',
+			status: research.status,
 			budget: research.budgetDebit.usage
 		}),
 		observability.recordSubagentCompleted({
@@ -296,7 +296,7 @@ async function runDelegatedSubagents(
 			subagentRunId: `${input.runId}:code`,
 			kind: 'code',
 			label: 'Code',
-			status: code.status === 'complete' ? 'complete' : 'failed',
+			status: code.status,
 			budget: code.budgetDebit.usage
 		}),
 		observability.recordSubagentCompleted({
@@ -305,7 +305,7 @@ async function runDelegatedSubagents(
 			subagentRunId: `${input.runId}:critic`,
 			kind: 'critic',
 			label: 'Critic',
-			status: critic.status === 'complete' ? 'complete' : 'failed',
+			status: critic.status,
 			budget: critic.budgetDebit.usage
 		})
 	]);
