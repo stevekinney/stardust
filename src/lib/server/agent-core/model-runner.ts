@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { toAnthropic } from 'armorer/adapters/anthropic';
+import { toAnthropicTools } from 'armorer/adapters/anthropic';
 import type { AnthropicTool } from 'armorer/adapters/anthropic';
 import type { JsonObject, SerializedToolDefinition } from 'armorer/core';
 import { ApplicationFailure } from '@temporalio/common';
@@ -63,10 +63,10 @@ export function formatToolsForAnthropic(tools: ModelToolSchema[] = []): Anthropi
 		name: tool.identity.name,
 		description: tool.display.description,
 		aliases: [],
-		schema: tool.input as JsonObject
+		input: tool.input as JsonObject
 	}));
 
-	return toAnthropic(serializedTools);
+	return toAnthropicTools(serializedTools);
 }
 
 function createAnthropicProvider(apiKey: string): ModelProviderClient {

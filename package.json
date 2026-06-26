@@ -64,9 +64,9 @@
 		"@temporalio/common": "^1.18.1",
 		"@temporalio/worker": "^1.18.1",
 		"@temporalio/workflow": "^1.18.1",
-		"armorer": "file:/Users/stevekinney/Developer/armorer",
+		"armorer": "^0.8.1",
 		"better-sqlite3": "^12.11.1",
-		"conversationalist": "file:/Users/stevekinney/Developer/agent-bureau/packages/conversationalist",
+		"conversationalist": "^0.2.0",
 		"zod": "^4.3.6"
 	},
 	"trustedDependencies": [
@@ -78,6 +78,6 @@
 	],
 	"overrides": {
 		"interoperability": "file:/Users/stevekinney/Developer/agent-bureau/packages/interoperability",
-		"lifecycle": "file:/Users/stevekinney/Developer/agent-bureau/packages/lifecycle"
+		"lifecycle": "^1.0.4"
 	}
 }
