@@ -22,6 +22,9 @@ export type AgentRunInput = {
 	sessionKey: string;
 	runId: string;
 	message: string;
+	toolCalls?: ToolCallInput[];
+	workspacePath?: string;
+	approvalTtlMs?: number;
 };
 
 export type AgentRunResult = {
@@ -152,6 +155,70 @@ export type ToolExecutionResult = {
 		truncated?: boolean;
 		originalCharacters?: number;
 	};
+};
+
+export type ApprovalTerminalState = 'approved' | 'denied' | 'remembered' | 'cancelled' | 'expired';
+
+export type ApprovalAction =
+	| 'approve'
+	| 'approve_with_edits'
+	| 'deny'
+	| 'remember'
+	| 'cancel'
+	| 'expire';
+
+export type ApprovalRequest = {
+	approvalId: string;
+	sessionId: string;
+	runId: string;
+	toolCall: ToolCallInput;
+	tool: ToolManifestEntry;
+	policyVersion: string;
+	proposedArguments: unknown;
+	argsHash: string;
+	expiresAt: string;
+	createdAt: string;
+};
+
+export type ApprovalResolutionInput = {
+	approvalId: string;
+	action: Exclude<ApprovalAction, 'expire'>;
+	editedArguments?: unknown;
+	reason?: string;
+	remember?: boolean;
+	actor?: 'user';
+};
+
+export type ApprovalResolution = {
+	approvalId: string;
+	action: ApprovalAction;
+	terminalState: ApprovalTerminalState;
+	canonicalArguments: unknown;
+	proposedArguments: unknown;
+	editedArguments?: unknown;
+	reason?: string;
+	remember: boolean;
+	actor: 'system' | 'user';
+	resolvedAt: string;
+};
+
+export type ApprovalCardState = ApprovalRequest & {
+	status: 'pending' | ApprovalTerminalState;
+	resolution?: ApprovalResolution;
+};
+
+export type RecordApprovalRequestInput = Omit<ApprovalRequest, 'argsHash' | 'createdAt'> & {
+	createdAt?: string;
+};
+
+export type RecordApprovalResolutionInput = {
+	approvalId: string;
+	action: ApprovalAction;
+	editedArguments?: unknown;
+	reason?: string;
+	remember?: boolean;
+	actor: 'system' | 'user';
+	resolvedAt?: string;
 };
 
 // Task queue name constants — kept here (not in src/lib/server) so Workflow code can import them.

@@ -87,6 +87,32 @@ export const auditEvents = sqliteTable('audit_events', {
 	createdAt: text('created_at').notNull().default(new Date(0).toISOString())
 });
 
+// ── approval_requests ─────────────────────────────────────────────────────────
+// Durable projection of a human approval wait owned by AgentRunWorkflow.
+export const approvalRequests = sqliteTable('approval_requests', {
+	id: text('id').primaryKey(),
+	sessionId: text('session_id').notNull(),
+	runId: text('run_id').notNull(),
+	toolCallId: text('tool_call_id').notNull(),
+	toolName: text('tool_name').notNull(),
+	status: text('status', {
+		enum: ['pending', 'approved', 'denied', 'remembered', 'cancelled', 'expired']
+	})
+		.notNull()
+		.default('pending'),
+	proposedArgs: text('proposed_args').notNull(), // JSON
+	canonicalArgs: text('canonical_args'), // JSON
+	argsHash: text('args_hash').notNull(),
+	editedArgs: text('edited_args'), // JSON
+	reason: text('reason'),
+	remember: integer('remember', { mode: 'boolean' }).notNull().default(false),
+	policyVersion: text('policy_version').notNull(),
+	expiresAt: text('expires_at').notNull(),
+	resolvedAt: text('resolved_at'),
+	createdAt: text('created_at').notNull().default(new Date(0).toISOString()),
+	updatedAt: text('updated_at').notNull().default(new Date(0).toISOString())
+});
+
 // ── memory_notes ──────────────────────────────────────────────────────────────
 // Durable + action-sensitive memory. FTS5 mirror in memory_notes_fts (virtual, see migration).
 export const memoryNotes = sqliteTable('memory_notes', {
