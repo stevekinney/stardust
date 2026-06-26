@@ -5,6 +5,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TASK_QUEUE_ORCHESTRATOR } from '@src/lib/types';
 import { submitTurnUpdate } from '@src/workflows/session-contracts';
 
+const testActivities = {
+	async noop(): Promise<void> {}
+};
+
 // Required export — temporal/replay-history-smoke-test-hook verifies this exists.
 export async function runReplayHistorySmokeTest(): Promise<void> {
 	const env = await TestWorkflowEnvironment.createTimeSkipping();
@@ -12,7 +16,8 @@ export async function runReplayHistorySmokeTest(): Promise<void> {
 		connection: env.nativeConnection,
 		namespace: 'default',
 		taskQueue: TASK_QUEUE_ORCHESTRATOR,
-		workflowsPath: fileURLToPath(new URL('../workflows/index.ts', import.meta.url))
+		workflowsPath: fileURLToPath(new URL('../workflows/index.ts', import.meta.url)),
+		activities: testActivities
 	});
 
 	try {
@@ -58,7 +63,8 @@ describe('Workflow replay histories', () => {
 			connection: env.nativeConnection,
 			namespace: 'default',
 			taskQueue: TASK_QUEUE_ORCHESTRATOR,
-			workflowsPath: fileURLToPath(new URL('../workflows/index.ts', import.meta.url))
+			workflowsPath: fileURLToPath(new URL('../workflows/index.ts', import.meta.url)),
+			activities: testActivities
 		});
 	});
 

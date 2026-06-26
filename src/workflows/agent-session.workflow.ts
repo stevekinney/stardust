@@ -4,7 +4,7 @@ import type {
 	SubmitTurnInput,
 	SubmitTurnResult
 } from '@src/lib/types';
-import { condition, executeChild, setHandler, uuid4 } from '@temporalio/workflow';
+import { condition, executeChild, setHandler } from '@temporalio/workflow';
 import { agentRunWorkflow } from './agent-run.workflow';
 import { getSessionStateQuery, submitTurnUpdate } from './session-contracts';
 
@@ -17,6 +17,7 @@ export async function agentSessionWorkflow(input: { sessionKey: string }): Promi
 	const queue: QueuedTurn[] = [];
 	let activeRunId: string | null = null;
 	let completedRunCount = 0;
+	let submittedTurnCount = 0;
 
 	void setHandler(
 		getSessionStateQuery,
@@ -30,8 +31,8 @@ export async function agentSessionWorkflow(input: { sessionKey: string }): Promi
 	);
 
 	void setHandler(submitTurnUpdate, (turn: SubmitTurnInput): SubmitTurnResult => {
-		// uuid4() is Temporal-provided and deterministic — NOT cryptographically secure.
-		const runId = uuid4();
+		submittedTurnCount++;
+		const runId = `${sessionKey}-run-${submittedTurnCount}`;
 		queue.push({ runId, message: turn.message });
 		return { accepted: true, runId };
 	});
