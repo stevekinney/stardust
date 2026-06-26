@@ -3,7 +3,7 @@ import type {
 	ApprovalResolution,
 	ApprovalResolutionInput
 } from '@src/lib/types';
-import { defineQuery, defineUpdate } from '@temporalio/workflow';
+import { defineQuery, defineSignal, defineUpdate } from '@temporalio/workflow';
 
 export type AgentRunState = {
 	runId: string;
@@ -16,3 +16,10 @@ export const resolveApprovalUpdate = defineUpdate<ApprovalResolution, [ApprovalR
 );
 
 export const getAgentRunStateQuery = defineQuery<AgentRunState, []>('getAgentRunState');
+
+/**
+ * Signal: inject a steering message into the active run's steering buffer.
+ * The run drains this buffer at the next model boundary, including the message
+ * as additional user-context before the model call.
+ */
+export const steeringSignal = defineSignal<[string]>('steeringMessage');
