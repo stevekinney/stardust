@@ -321,7 +321,7 @@ describe('agentRunWorkflow subagents', () => {
 		await env.teardown();
 	});
 
-	it('fans out research, code, and critic children against one shared budget ledger', async () => {
+	it('runs the advisory critic child against the shared budget without rewriting the answer', async () => {
 		const worker = await Worker.create({
 			connection: env.nativeConnection,
 			namespace: 'default',
@@ -341,29 +341,39 @@ describe('agentRunWorkflow subagents', () => {
 						message: 'research the option, draft the change, and critique the answer',
 						delegateSubagents: true,
 						budget: {
-							inputTokens: 100,
-							outputTokens: 40,
-							estimatedCostUsd: 0.001
+							inputTokens: 160,
+							outputTokens: 50,
+							estimatedCostUsd: 0.0016
 						}
 					}
 				]
 			});
 
+			const criticLaneId = `${runId}:critic`;
 			expect(result.status).toBe('complete');
 			expect(result.finalAnswer).toBe('(stub — no model in T2)');
 			expect(result.budgetLedger?.used).toEqual({
-				inputTokens: 100,
-				outputTokens: 40,
-				estimatedCostUsd: 0.001
+				inputTokens: 160,
+				outputTokens: 50,
+				estimatedCostUsd: 0.0016
 			});
 			expect(result.budgetLedger?.entries.map((entry) => entry.laneId)).toEqual([
 				`${runId}:research`,
 				`${runId}:code`,
-				`${runId}:critic`
+				criticLaneId
 			]);
+			expect(result.budgetLedger?.entries.find((entry) => entry.laneId === criticLaneId)).toEqual(
+				expect.objectContaining({
+					usage: {
+						inputTokens: 20,
+						outputTokens: 10,
+						estimatedCostUsd: 0.0002
+					}
+				})
+			);
 			expect(
 				result.budgetLedger?.entries.reduce((sum, entry) => sum + entry.usage.inputTokens, 0)
-			).toBe(100);
+			).toBe(160);
 			expect(result.timelineLanes).toEqual([
 				expect.objectContaining({
 					id: runId,
@@ -371,12 +381,18 @@ describe('agentRunWorkflow subagents', () => {
 						expect.objectContaining({ id: `${runId}:research`, kind: 'subagent' }),
 						expect.objectContaining({ id: `${runId}:code`, kind: 'subagent' }),
 						expect.objectContaining({
-							id: `${runId}:critic`,
+							id: criticLaneId,
 							kind: 'subagent',
+							budget: {
+								inputTokens: 20,
+								outputTokens: 10,
+								estimatedCostUsd: 0.0002
+							},
 							annotations: [
 								expect.objectContaining({
 									blocking: false,
-									message: 'No-op critic stub: final answer left unchanged.'
+									laneId: criticLaneId,
+									message: expect.stringContaining('Advisory critic reviewed the final answer')
 								})
 							]
 						})
@@ -386,7 +402,8 @@ describe('agentRunWorkflow subagents', () => {
 			expect(result.criticAnnotations).toEqual([
 				expect.objectContaining({
 					blocking: false,
-					message: 'No-op critic stub: final answer left unchanged.'
+					laneId: criticLaneId,
+					message: expect.stringContaining('Advisory critic reviewed the final answer')
 				})
 			]);
 		});
