@@ -30,6 +30,38 @@ export type AgentRunResult = {
 	finalAnswer: string;
 };
 
+export type ScheduledAgentInput = {
+	scheduleId: string;
+	prompt: string;
+};
+
+export type CreateScheduleInput = {
+	name: string;
+	description?: string;
+	cronExpression: string;
+	prompt: string;
+};
+
+export type ScheduleProjection = {
+	id: string;
+	temporalScheduleId: string;
+	targetSessionKey: string;
+	name: string;
+	description: string | null;
+	cronExpression: string;
+	prompt: string;
+	status: 'active' | 'paused' | 'deleted';
+	lastRunAt: string | null;
+	nextRunAt: string | null;
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type TriggerScheduleResult = {
+	schedule: ScheduleProjection;
+	targetSessionKey: string;
+};
+
 export type ModelUsage = {
 	inputTokens: number;
 	outputTokens: number;
