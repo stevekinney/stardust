@@ -43,6 +43,7 @@ interface TrackedProcess {
 	child: ChildProcess;
 	killed: boolean;
 	timedOut: boolean;
+	forceKillTimer?: NodeJS.Timeout;
 }
 
 interface UtilityCommandResult {
@@ -177,6 +178,7 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 
 			child.on('close', (exitCode) => {
 				clearTimeout(timeout);
+				if (tracked.forceKillTimer) clearTimeout(tracked.forceKillTimer);
 				this.trackedProcesses.delete(id);
 
 				if (spawnError) {
@@ -321,15 +323,13 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 		const pid = tracked.child.pid;
 		if (pid === undefined) return;
 
-		try {
-			process.kill(-pid, 'SIGTERM');
-		} catch {
-			try {
-				tracked.child.kill('SIGTERM');
-			} catch {
-				// The process may have exited between lookup and kill.
+		killProcessGroupOrChild(tracked.child, 'SIGTERM');
+		tracked.forceKillTimer ??= setTimeout(() => {
+			if (this.trackedProcesses.has(tracked.id)) {
+				killProcessGroupOrChild(tracked.child, 'SIGKILL');
 			}
-		}
+		}, 100);
+		tracked.forceKillTimer.unref();
 	}
 
 	private async runUtilityCommand(
@@ -477,4 +477,19 @@ function appendCapturedOutput(existing: string, chunk: Buffer, maxBytes: number)
 	const combined = `${existing}${chunk.toString('utf8')}`;
 	if (Buffer.byteLength(combined, 'utf8') <= maxBytes) return combined;
 	return combined.slice(combined.length - maxBytes);
+}
+
+function killProcessGroupOrChild(child: ChildProcess, signal: NodeJS.Signals): void {
+	const pid = child.pid;
+	if (pid === undefined) return;
+
+	try {
+		process.kill(-pid, signal);
+	} catch {
+		try {
+			child.kill(signal);
+		} catch {
+			// The process may have exited between lookup and kill.
+		}
+	}
 }

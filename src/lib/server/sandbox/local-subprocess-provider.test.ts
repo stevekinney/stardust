@@ -212,6 +212,7 @@ describe('LocalSubprocessSandboxProvider', () => {
 		expect.assertions(1);
 
 		const provider = new LocalSubprocessSandboxProvider({ workspaceRoot: temporaryRoot });
+		await provider.ensureWorkspace('session-a');
 		const command = provider.runCommand({
 			sessionKey: 'session-a',
 			runId: 'run-a',
@@ -232,6 +233,7 @@ describe('LocalSubprocessSandboxProvider', () => {
 		expect.assertions(2);
 
 		const provider = new LocalSubprocessSandboxProvider({ workspaceRoot: temporaryRoot });
+		await provider.ensureWorkspace('session-a');
 		const command = provider.runCommand({
 			sessionKey: 'session-a',
 			runId: 'run-a',
