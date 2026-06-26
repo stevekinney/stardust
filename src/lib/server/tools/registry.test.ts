@@ -1,8 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TASK_QUEUE_SANDBOX, TASK_QUEUE_TOOLS } from '@src/lib/types';
+import {
+	TASK_QUEUE_MEMORY,
+	TASK_QUEUE_ORCHESTRATOR,
+	TASK_QUEUE_SANDBOX,
+	TASK_QUEUE_TOOLS
+} from '@src/lib/types';
 import {
 	executeRegisteredTool,
 	getAnthropicToolManifest,
@@ -13,10 +18,12 @@ import {
 let workspacePath: string;
 
 beforeEach(async () => {
+	vi.stubEnv('TAVILY_API_KEY', '');
 	workspacePath = await mkdtemp(join(tmpdir(), 'stardust-tools-'));
 });
 
 afterEach(async () => {
+	vi.unstubAllEnvs();
 	await rm(workspacePath, { recursive: true, force: true });
 });
 
@@ -24,6 +31,13 @@ describe('tool registry', () => {
 	it('exposes demo-critical tools with Stardust metadata', () => {
 		const manifest = getToolManifest();
 		expect(manifest.map((tool) => tool.name).sort()).toEqual([
+			'delegate.code',
+			'delegate.critic',
+			'delegate.research',
+			'memory.writeCandidate',
+			'process.kill',
+			'process.start',
+			'sandbox.snapshot',
 			'shell.exec',
 			'web.fetch',
 			'workspace.applyPatch',
@@ -39,6 +53,91 @@ describe('tool registry', () => {
 			risk: 'low',
 			requiresApproval: false,
 			taskQueue: TASK_QUEUE_TOOLS
+		});
+	});
+
+	it('exposes extended tools with risk, approval, queue, timeout, retry, and schemas', () => {
+		const toolsByName = new Map(getToolManifest().map((tool) => [tool.name, tool]));
+
+		expect(toolsByName.get('process.start')).toMatchObject({
+			metadata: {
+				risk: 'high',
+				requiresApproval: true,
+				taskQueue: TASK_QUEUE_SANDBOX,
+				timeoutMs: 30_000,
+				retry: { maximumAttempts: 1 }
+			},
+			inputSchema: expect.objectContaining({
+				type: 'object',
+				properties: expect.objectContaining({
+					command: expect.any(Object)
+				})
+			})
+		});
+		expect(toolsByName.get('process.kill')).toMatchObject({
+			metadata: {
+				risk: 'high',
+				requiresApproval: true,
+				taskQueue: TASK_QUEUE_SANDBOX,
+				timeoutMs: 10_000,
+				retry: { maximumAttempts: 1 }
+			}
+		});
+		expect(toolsByName.get('sandbox.snapshot')).toMatchObject({
+			metadata: {
+				risk: 'medium',
+				requiresApproval: true,
+				taskQueue: TASK_QUEUE_SANDBOX,
+				timeoutMs: 20_000,
+				retry: { maximumAttempts: 1 }
+			}
+		});
+		expect(toolsByName.get('memory.writeCandidate')).toMatchObject({
+			metadata: {
+				risk: 'medium',
+				requiresApproval: true,
+				taskQueue: TASK_QUEUE_MEMORY,
+				timeoutMs: 10_000,
+				retry: { maximumAttempts: 1 }
+			}
+		});
+		for (const name of ['delegate.research', 'delegate.code', 'delegate.critic']) {
+			expect(toolsByName.get(name)).toMatchObject({
+				metadata: {
+					risk: 'medium',
+					requiresApproval: true,
+					taskQueue: TASK_QUEUE_ORCHESTRATOR,
+					timeoutMs: 60_000,
+					retry: { maximumAttempts: 1 }
+				},
+				inputSchema: expect.objectContaining({ type: 'object' })
+			});
+		}
+	});
+
+	it('hides web.search from the manifest when Tavily is not configured', async () => {
+		vi.stubEnv('TAVILY_API_KEY', '');
+
+		expect(getToolManifest().map((tool) => tool.name)).not.toContain('web.search');
+	});
+
+	it('exposes web.search when Tavily is configured', async () => {
+		vi.stubEnv('TAVILY_API_KEY', 'test-tavily-key');
+
+		expect(getToolManifest().find((tool) => tool.name === 'web.search')).toMatchObject({
+			metadata: {
+				risk: 'low',
+				requiresApproval: false,
+				taskQueue: TASK_QUEUE_TOOLS,
+				timeoutMs: 10_000,
+				retry: { maximumAttempts: 2 }
+			},
+			inputSchema: expect.objectContaining({
+				type: 'object',
+				properties: expect.objectContaining({
+					query: expect.any(Object)
+				})
+			})
 		});
 	});
 
@@ -100,6 +199,30 @@ describe('tool registry', () => {
 		});
 		expect(approved.outcome).toBe('success');
 		await expect(readFile(join(workspacePath, 'notes/hello.txt'), 'utf8')).resolves.toBe('hello');
+	});
+
+	it('routes process and snapshot tools through approval policy', async () => {
+		await expect(
+			executeRegisteredTool({
+				workspacePath,
+				call: {
+					id: 'call-005',
+					name: 'process.start',
+					arguments: { command: 'bun', args: ['--version'] }
+				}
+			})
+		).resolves.toMatchObject({ outcome: 'approval_required' });
+
+		await expect(
+			executeRegisteredTool({
+				workspacePath,
+				call: {
+					id: 'call-006',
+					name: 'sandbox.snapshot',
+					arguments: { label: 'before-edit' }
+				}
+			})
+		).resolves.toMatchObject({ outcome: 'approval_required' });
 	});
 
 	it('denies hallucinated and malformed tool calls before execution', async () => {

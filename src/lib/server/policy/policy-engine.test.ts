@@ -36,6 +36,32 @@ describe('policy engine', () => {
 		}
 	});
 
+	it('routes process and snapshot tools through approval policy', () => {
+		for (const call of [
+			{
+				id: 'call-process-start',
+				name: 'process.start',
+				arguments: { command: 'bun', args: ['--version'] }
+			},
+			{
+				id: 'call-process-kill',
+				name: 'process.kill',
+				arguments: { processId: 'process-001' }
+			},
+			{
+				id: 'call-sandbox-snapshot',
+				name: 'sandbox.snapshot',
+				arguments: { label: 'before-edit' }
+			}
+		]) {
+			const decision = validateToolCall(registeredTools, call);
+			expect(decision).toMatchObject({ status: 'approval_required' });
+			if (decision.status === 'approval_required') {
+				expect(assertSideEffectAllowed(decision.tool.metadata)).toBe('approval_required');
+			}
+		}
+	});
+
 	it('rejects unknown and malformed calls', () => {
 		expect(
 			validateToolCall(registeredTools, { id: 'call-003', name: 'unknown.tool', arguments: {} })
