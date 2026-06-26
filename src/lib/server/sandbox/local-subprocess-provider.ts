@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type { DatabaseClient } from '../db';
 import { sandboxCommands, sandboxes, sandboxSnapshots } from '../db';
@@ -19,7 +19,8 @@ import {
 import type {
 	SandboxCommandInput,
 	SandboxCommandResult,
-	SandboxEphemeralDirectory,
+	SandboxEphemeralCommandInput,
+	SandboxEphemeralSandbox,
 	SandboxFileInput,
 	SandboxProvider,
 	SandboxSnapshotInput,
@@ -38,6 +39,7 @@ interface LocalSubprocessSandboxProviderOptions {
 interface TrackedProcess {
 	id: string;
 	sessionKey: string;
+	workspacePath: string;
 	child: ChildProcess;
 	killed: boolean;
 	timedOut: boolean;
@@ -112,10 +114,18 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 	}
 
 	async runCommand(input: SandboxCommandInput): Promise<SandboxCommandResult> {
+		const workspacePath = await this.ensureWorkspace(input.sessionKey);
+		return this.runCommandInWorkspace(input, workspacePath, this.workspaceRoot);
+	}
+
+	private async runCommandInWorkspace(
+		input: SandboxCommandInput,
+		workspacePath: string,
+		homePath: string
+	): Promise<SandboxCommandResult> {
 		const id = randomUUID();
 		const args = input.args ?? [];
 		const startedAt = new Date().toISOString();
-		const workspacePath = await this.ensureWorkspace(input.sessionKey);
 		const commandCwd = resolveWorkspacePath(workspacePath, input.cwd);
 		const timeoutMs = input.timeoutMs ?? this.commandTimeoutMs;
 
@@ -135,12 +145,13 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 			const child = spawn(input.command, args, {
 				cwd: commandCwd,
 				detached: true,
-				env: this.buildEnvironment(input.env),
+				env: this.buildEnvironment(input.env, homePath),
 				stdio: ['ignore', 'pipe', 'pipe']
 			});
 			const tracked: TrackedProcess = {
 				id,
 				sessionKey: input.sessionKey,
+				workspacePath,
 				child,
 				killed: false,
 				timedOut: false
@@ -245,16 +256,21 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 		await this.runUtilityCommand('git', ['clean', '-fd'], workspacePath);
 	}
 
-	async createEphemeralDirectory(sessionKey: string): Promise<SandboxEphemeralDirectory> {
-		const workspacePath = await this.ensureWorkspace(sessionKey);
-		const ephemeralRoot = resolveWorkspacePath(workspacePath, '.stardust-tmp');
-		await mkdir(ephemeralRoot, { recursive: true });
-		const ephemeralPath = await mkdtemp(join(ephemeralRoot, 'ephemeral-'));
+	async createEphemeralSandbox(sessionKey: string): Promise<SandboxEphemeralSandbox> {
+		const workspacePath = await realpath(await mkdtemp(join(tmpdir(), 'stardust-ephemeral-')));
+		let terminated = false;
 
 		return {
-			path: ephemeralPath,
-			remove: async () => {
-				await rm(ephemeralPath, { recursive: true, force: true });
+			workspacePath,
+			runCommand: async (input: SandboxEphemeralCommandInput) => {
+				if (terminated) throw new SandboxError('Ephemeral sandbox has been terminated.');
+				return this.runCommandInWorkspace({ ...input, sessionKey }, workspacePath, workspacePath);
+			},
+			terminate: async () => {
+				if (terminated) return;
+				terminated = true;
+				await this.cancelWorkspace(workspacePath);
+				await rm(workspacePath, { recursive: true, force: true });
 			}
 		};
 	}
@@ -275,9 +291,20 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 		}
 	}
 
-	private buildEnvironment(inputEnvironment: Record<string, string | undefined> | undefined) {
+	private async cancelWorkspace(workspacePath: string): Promise<void> {
+		for (const tracked of this.trackedProcesses.values()) {
+			if (tracked.workspacePath === workspacePath) {
+				this.killTrackedProcess(tracked);
+			}
+		}
+	}
+
+	private buildEnvironment(
+		inputEnvironment: Record<string, string | undefined> | undefined,
+		homePath: string
+	) {
 		const environment: Record<string, string> = {
-			HOME: this.workspaceRoot,
+			HOME: homePath,
 			PATH: process.env.PATH ?? ''
 		};
 

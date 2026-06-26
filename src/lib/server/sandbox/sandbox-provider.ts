@@ -53,9 +53,12 @@ export interface SandboxSnapshotResult {
 	createdAt: string;
 }
 
-export interface SandboxEphemeralDirectory {
-	path: string;
-	remove(): Promise<void>;
+export type SandboxEphemeralCommandInput = Omit<SandboxCommandInput, 'sessionKey'>;
+
+export interface SandboxEphemeralSandbox {
+	readonly workspacePath: string;
+	runCommand(input: SandboxEphemeralCommandInput): Promise<SandboxCommandResult>;
+	terminate(): Promise<void>;
 }
 
 export interface SandboxProvider {
@@ -67,7 +70,7 @@ export interface SandboxProvider {
 	runCommand(input: SandboxCommandInput): Promise<SandboxCommandResult>;
 	snapshot(input: SandboxSnapshotInput): Promise<SandboxSnapshotResult>;
 	restore(sessionKey: string, gitCommitSha: string): Promise<void>;
-	createEphemeralDirectory(sessionKey: string): Promise<SandboxEphemeralDirectory>;
+	createEphemeralSandbox(sessionKey: string): Promise<SandboxEphemeralSandbox>;
 	killProcess(processId: string): Promise<boolean>;
 	cancelSession(sessionKey: string): Promise<void>;
 }
