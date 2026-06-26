@@ -14,6 +14,7 @@ const REQUIRED_TABLES = [
 	'runs',
 	'transcript_events',
 	'audit_events',
+	'approval_requests',
 	'memory_notes',
 	'tool_invocations',
 	'artifacts',
