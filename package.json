@@ -67,6 +67,7 @@
 		"armorer": "^0.8.1",
 		"better-sqlite3": "^12.11.1",
 		"conversationalist": "^0.2.0",
+		"sqlite-vec": "^0.1.9",
 		"zod": "^4.3.6"
 	},
 	"trustedDependencies": [

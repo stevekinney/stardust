@@ -31,7 +31,11 @@ export type MemoryCandidate = {
 export type MemorySearchResult = MemoryNote & {
 	lexicalRank: number;
 	score: number;
+	vectorRank?: number;
+	vectorScore?: number;
 };
+
+export type MemoryEmbedding = number[];
 
 export type CreateMemoryNoteInput = {
 	id?: string;
@@ -63,10 +67,26 @@ export type LexicalMemorySearchInput = {
 	limit?: number;
 };
 
+export type UpsertMemoryEmbeddingInput = {
+	noteId: string;
+	embedding: MemoryEmbedding;
+	model: string;
+	createdAt?: string;
+};
+
+export type VectorMemorySearchInput = {
+	sessionId: string;
+	embedding: MemoryEmbedding;
+	layers?: MemoryLayer[];
+	limit?: number;
+};
+
 type MemoryNoteKind = typeof memoryNotes.$inferSelect.kind;
 type MemoryNoteRow = typeof memoryNotes.$inferSelect;
 
 const DEFAULT_LIMIT = 8;
+export const EMBEDDING_DIMENSION = 384;
+export const LOCAL_EMBEDDING_MODEL = 'local-384-hashing';
 const MEMORY_LAYER_TO_KIND: Record<MemoryLayer, MemoryNoteKind> = {
 	session: 'session_summary',
 	durable: 'durable',
@@ -83,7 +103,17 @@ type RawLexicalRow = MemoryNoteRow & {
 	lexicalRank: number;
 };
 
+type RawVectorRow = MemoryNoteRow & {
+	embedding: string;
+};
+
+type RawSqliteVecRow = MemoryNoteRow & {
+	distance: number;
+};
+
 export class MemoryStore {
+	private vectorIndexAvailable: boolean | null = null;
+
 	constructor(private readonly database: DatabaseClient) {}
 
 	async createNote(input: CreateMemoryNoteInput): Promise<MemoryNote> {
@@ -186,6 +216,193 @@ export class MemoryStore {
 		});
 	}
 
+	async upsertEmbedding(input: UpsertMemoryEmbeddingInput): Promise<void> {
+		assertEmbedding(input.embedding);
+		const vecRowid = await this.upsertVectorIndex(input.noteId, input.embedding);
+		await this.database.run(sql`
+			INSERT INTO memory_note_embeddings (note_id, embedding, embedding_model, vec_rowid, created_at)
+			VALUES (
+				${input.noteId},
+				${JSON.stringify(input.embedding)},
+				${input.model},
+				${vecRowid},
+				${input.createdAt ?? new Date().toISOString()}
+			)
+			ON CONFLICT(note_id) DO UPDATE SET
+				embedding = excluded.embedding,
+				embedding_model = excluded.embedding_model,
+				vec_rowid = excluded.vec_rowid,
+				created_at = excluded.created_at
+		`);
+		await this.database
+			.update(memoryNotes)
+			.set({
+				embeddingModel: input.model,
+				updatedAt: input.createdAt ?? new Date().toISOString()
+			})
+			.where(eq(memoryNotes.id, input.noteId));
+	}
+
+	async searchVector(input: VectorMemorySearchInput): Promise<MemorySearchResult[]> {
+		assertEmbedding(input.embedding);
+
+		const sqliteVecResults = await this.searchSqliteVec(input);
+		if (sqliteVecResults) {
+			return sqliteVecResults;
+		}
+
+		const layers = input.layers && input.layers.length > 0 ? input.layers : undefined;
+		const kinds = layers?.map((layer) => MEMORY_LAYER_TO_KIND[layer]);
+		const layerFilter = kinds
+			? sql`m.kind IN (${sql.join(
+					kinds.map((kind) => sql`${kind}`),
+					sql`, `
+				)})`
+			: sql`1 = 1`;
+
+		const rows = await this.database.all<RawVectorRow>(sql`
+			SELECT
+				m.id,
+				m.session_id AS sessionId,
+				m.kind,
+				m.content,
+				m.embedding_model AS embeddingModel,
+				m.tags,
+				m.run_id AS runId,
+				m.confirmed_at AS confirmedAt,
+				m.created_at AS createdAt,
+				m.updated_at AS updatedAt,
+				e.embedding
+			FROM memory_note_embeddings e
+			JOIN memory_notes m ON m.id = e.note_id
+			WHERE m.session_id = ${input.sessionId}
+				AND ${layerFilter}
+		`);
+
+		return rows
+			.map((row) => ({
+				note: toMemoryNote(row),
+				vectorScore: cosineSimilarity(input.embedding, parseEmbedding(row.embedding))
+			}))
+			.filter(({ vectorScore }) => Number.isFinite(vectorScore) && vectorScore > 0)
+			.sort((left, right) => right.vectorScore - left.vectorScore)
+			.slice(0, input.limit ?? DEFAULT_LIMIT)
+			.map(({ note, vectorScore }, index) => ({
+				...note,
+				lexicalRank: Number.POSITIVE_INFINITY,
+				vectorRank: index + 1,
+				vectorScore,
+				score: vectorScore
+			}));
+	}
+
+	private async searchSqliteVec(
+		input: VectorMemorySearchInput
+	): Promise<MemorySearchResult[] | null> {
+		if (!(await this.ensureVectorIndex())) {
+			return null;
+		}
+
+		const layers = input.layers && input.layers.length > 0 ? input.layers : undefined;
+		const kinds = layers?.map((layer) => MEMORY_LAYER_TO_KIND[layer]);
+		const layerFilter = kinds
+			? sql`m.kind IN (${sql.join(
+					kinds.map((kind) => sql`${kind}`),
+					sql`, `
+				)})`
+			: sql`1 = 1`;
+		const limit = input.limit ?? DEFAULT_LIMIT;
+
+		const rows = await this.database.all<RawSqliteVecRow>(sql`
+			SELECT
+				m.id,
+				m.session_id AS sessionId,
+				m.kind,
+				m.content,
+				m.embedding_model AS embeddingModel,
+				m.tags,
+				m.run_id AS runId,
+				m.confirmed_at AS confirmedAt,
+				m.created_at AS createdAt,
+				m.updated_at AS updatedAt,
+				v.distance
+			FROM memory_note_embedding_vectors v
+			JOIN memory_note_embeddings e ON e.vec_rowid = v.rowid
+			JOIN memory_notes m ON m.id = e.note_id
+			WHERE v.embedding MATCH ${JSON.stringify(input.embedding)}
+				AND k = ${limit}
+				AND m.session_id = ${input.sessionId}
+				AND ${layerFilter}
+			ORDER BY v.distance ASC
+			LIMIT ${limit}
+		`);
+
+		return rows.map((row, index) => {
+			const vectorScore = 1 / (1 + Math.max(0, row.distance));
+			return {
+				...toMemoryNote(row),
+				lexicalRank: Number.POSITIVE_INFINITY,
+				vectorRank: index + 1,
+				vectorScore,
+				score: vectorScore
+			};
+		});
+	}
+
+	private async upsertVectorIndex(
+		noteId: string,
+		embedding: MemoryEmbedding
+	): Promise<number | null> {
+		if (!(await this.ensureVectorIndex())) {
+			return null;
+		}
+
+		const existingRows = await this.database.all<{ vecRowid: number | null }>(sql`
+			SELECT vec_rowid AS vecRowid
+			FROM memory_note_embeddings
+			WHERE note_id = ${noteId}
+			LIMIT 1
+		`);
+		const existingRowid = existingRows[0]?.vecRowid;
+		const serializedEmbedding = JSON.stringify(embedding);
+
+		if (existingRowid) {
+			await this.database.run(sql`
+				UPDATE memory_note_embedding_vectors
+				SET embedding = ${serializedEmbedding}
+				WHERE rowid = ${existingRowid}
+			`);
+			return existingRowid;
+		}
+
+		await this.database.run(sql`
+			INSERT INTO memory_note_embedding_vectors (embedding)
+			VALUES (${serializedEmbedding})
+		`);
+		const rowidRows = await this.database.all<{ rowid: number }>(sql`
+			SELECT last_insert_rowid() AS rowid
+		`);
+		return rowidRows[0]?.rowid ?? null;
+	}
+
+	private async ensureVectorIndex(): Promise<boolean> {
+		if (this.vectorIndexAvailable !== null) {
+			return this.vectorIndexAvailable;
+		}
+
+		try {
+			await this.database.run(sql`
+				CREATE VIRTUAL TABLE IF NOT EXISTS memory_note_embedding_vectors
+				USING vec0(embedding float[384])
+			`);
+			this.vectorIndexAvailable = true;
+		} catch {
+			this.vectorIndexAvailable = false;
+		}
+
+		return this.vectorIndexAvailable;
+	}
+
 	async writeCandidate(input: WriteMemoryCandidateInput): Promise<MemoryCandidate> {
 		const candidate: MemoryCandidate = {
 			id: input.id ?? randomUUID(),
@@ -232,6 +449,109 @@ export class MemoryStore {
 			.where(eq(streamEvents.runId, runId));
 		return (rows[0]?.highestSequence ?? 0) + 1;
 	}
+
+	async compactSessionMemory(input: {
+		sessionId: string;
+		summary: string;
+		candidates: {
+			layer: MemoryLayer;
+			content: string;
+			tags?: string[];
+			reason?: string | null;
+		}[];
+		toTranscriptCursor: number;
+		existingMemoryRefs: string[];
+	}): Promise<{
+		sessionId: string;
+		summaryNoteId: string;
+		candidateIds: string[];
+		memoryRefs: string[];
+		transcriptCursor: number;
+	}> {
+		const now = new Date().toISOString();
+		const summaryNote = await this.createNote({
+			sessionId: input.sessionId,
+			layer: 'session',
+			content: input.summary,
+			tags: ['compaction'],
+			confirmedAt: now,
+			createdAt: now,
+			updatedAt: now
+		});
+		const candidateNotes = [];
+		for (const candidate of input.candidates) {
+			candidateNotes.push(
+				await this.createNote({
+					sessionId: input.sessionId,
+					layer: candidate.layer,
+					content: candidate.content,
+					tags: candidate.tags,
+					confirmedAt: null,
+					createdAt: now,
+					updatedAt: now
+				})
+			);
+		}
+
+		const memoryRefs = Array.from(
+			new Set([
+				...input.existingMemoryRefs,
+				summaryNote.id,
+				...candidateNotes.map((candidate) => candidate.id)
+			])
+		);
+
+		await this.database.run(sql`
+			UPDATE sessions
+			SET summary_cursor = ${input.toTranscriptCursor},
+				memory_refs = ${JSON.stringify(memoryRefs)},
+				updated_at = ${now}
+			WHERE id = ${input.sessionId}
+		`);
+
+		return {
+			sessionId: input.sessionId,
+			summaryNoteId: summaryNote.id,
+			candidateIds: candidateNotes.map((candidate) => candidate.id),
+			memoryRefs,
+			transcriptCursor: input.toTranscriptCursor
+		};
+	}
+}
+
+export function createEmptyEmbedding(): MemoryEmbedding {
+	return Array.from({ length: EMBEDDING_DIMENSION }, () => 0);
+}
+
+export function assertEmbedding(embedding: MemoryEmbedding): void {
+	if (embedding.length !== EMBEDDING_DIMENSION) {
+		throw new Error(`Expected embedding to have ${EMBEDDING_DIMENSION} dimensions`);
+	}
+	if (!embedding.every((value) => Number.isFinite(value))) {
+		throw new Error('Expected embedding values to be finite numbers');
+	}
+}
+
+export function cosineSimilarity(left: MemoryEmbedding, right: MemoryEmbedding): number {
+	assertEmbedding(left);
+	assertEmbedding(right);
+	let dotProduct = 0;
+	let leftMagnitude = 0;
+	let rightMagnitude = 0;
+
+	for (let index = 0; index < EMBEDDING_DIMENSION; index++) {
+		const leftValue = left[index]!;
+		const rightValue = right[index]!;
+		dotProduct += leftValue * rightValue;
+		leftMagnitude += leftValue * leftValue;
+		rightMagnitude += rightValue * rightValue;
+	}
+
+	if (leftMagnitude === 0 || rightMagnitude === 0) {
+		return 0;
+	}
+
+	return dotProduct / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
 }
 
 function toMemoryNote(row: MemoryNoteRow): MemoryNote {
@@ -257,6 +577,16 @@ function parseTags(value: string | null): string[] {
 	return Array.isArray(parsed)
 		? parsed.filter((tag): tag is string => typeof tag === 'string')
 		: [];
+}
+
+function parseEmbedding(value: string): MemoryEmbedding {
+	const parsed: unknown = JSON.parse(value);
+	if (!Array.isArray(parsed)) {
+		throw new Error('Stored memory embedding is not an array');
+	}
+	const embedding = parsed.map((item) => Number(item));
+	assertEmbedding(embedding);
+	return embedding;
 }
 
 function toFtsQuery(query: string): string {

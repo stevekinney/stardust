@@ -4,6 +4,7 @@ import { mkdirSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { DATABASE_URL } from '../config';
 import * as schema from './schema';
+import { loadSqliteVecExtension } from './sqlite-vec';
 
 function resolveDbPath(url: string): string {
 	const raw = url.startsWith('file:') ? url.slice(5) : url;
@@ -16,6 +17,7 @@ function createClient() {
 
 	const sqlite = new Database(dbPath);
 	sqlite.pragma('journal_mode = WAL');
+	loadSqliteVecExtension(sqlite);
 
 	return drizzle(sqlite, { schema });
 }
