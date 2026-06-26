@@ -243,10 +243,20 @@ function reconcileBudgetEntry(
 
 // ── Subagent delegation ────────────────────────────────────────────────────────
 
+/**
+ * Runs the research, code, and critic child workflows in parallel, then
+ * reconciles real usage back into the shared budget ledger.
+ *
+ * `childWorkflowsAllowed` is the remaining child-workflow budget at the call
+ * site (min of budget.maxChildWorkflows and remaining maxActions). If fewer
+ * than three slots are available the delegation is skipped entirely
+ * (all-or-nothing) to avoid a partial fanout without the safety critic.
+ */
 async function runDelegatedSubagents(
 	input: AgentRunInput,
 	finalAnswer: string,
-	observability: Pick<ObservabilityActivities, 'recordSubagentStarted' | 'recordSubagentCompleted'>
+	observability: Pick<ObservabilityActivities, 'recordSubagentStarted' | 'recordSubagentCompleted'>,
+	childWorkflowsAllowed: number
 ): Promise<{
 	budgetLedger: BudgetLedgerSnapshot;
 	timelineLanes: RunTimelineLane[];
@@ -262,6 +272,16 @@ async function runDelegatedSubagents(
 		budget: createEmptyUsage(),
 		children: []
 	};
+
+	// Enforce maxChildWorkflows cap: all three subagents are spawned together as
+	// a unit (research + code + critic). If the budget doesn't cover all three,
+	// skip the delegation entirely rather than produce a partial fanout without
+	// the safety critic.
+	if (childWorkflowsAllowed < 3) {
+		parentLane.status = 'complete';
+		return { budgetLedger, timelineLanes: [parentLane], criticAnnotations: [] };
+	}
+
 	const researchDebit = reserveBudgetEntry({
 		ledger: budgetLedger,
 		runId: input.runId,
@@ -549,6 +569,11 @@ async function handleToolCall(
 export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunResult> {
 	const budget = input.budget ?? DEFAULT_RUN_BUDGET;
 
+	// Record wall-clock start time for maxActiveWallClockMs enforcement.
+	// Date.now() is intercepted by Temporal's sandbox and returns deterministic
+	// workflow time, making this replay-safe.
+	const runStartMs = Date.now();
+
 	let status: 'running' | 'waiting_approval' | 'complete' | 'cancelled' | 'failed' = 'running';
 	let pendingApproval: ApprovalCardState | null = null;
 	let approvalResolution: ApprovalResolutionInput | null = null;
@@ -625,6 +650,8 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 
 	let modelCallCount = 0;
 	let toolCallCount = 0;
+	/** Unified counter: every tool-call execution and child-workflow launch increments this. */
+	let actionsCount = 0;
 	let totalUsage: ModelUsage = createEmptyUsage();
 	// Definite-assignment assertion: every code path that reaches the code
 	// below the loop assigns `finalAnswer` before breaking; the TypeScript
@@ -642,6 +669,13 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 		}
 		if (totalUsage.inputTokens + totalUsage.outputTokens >= budget.maxTokens) {
 			finalAnswer = `Run stopped: token budget exhausted (${totalUsage.inputTokens + totalUsage.outputTokens} tokens).`;
+			break;
+		}
+		// Date.now() is intercepted by Temporal's sandbox and returns deterministic
+		// workflow time, so this comparison is replay-safe.
+		// eslint-disable-next-line temporal/workflow-no-nondeterministic-control-flow
+		if (Date.now() - runStartMs >= budget.maxActiveWallClockMs) {
+			finalAnswer = `Run stopped: wall-clock budget exhausted (${budget.maxActiveWallClockMs}ms).`;
 			break;
 		}
 
@@ -674,7 +708,12 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 				finalAnswer = `Run stopped: tool call budget exhausted (${budget.maxToolCalls} calls).`;
 				break outer;
 			}
+			if (actionsCount >= budget.maxActions) {
+				finalAnswer = `Run stopped: action budget exhausted (${budget.maxActions} actions).`;
+				break outer;
+			}
 			toolCallCount++;
+			actionsCount++;
 
 			const outcome = await handleToolCall(input, toolCall, approvalState);
 
@@ -699,7 +738,17 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 
 	// ── Subagent delegation (optional) ────────────────────────────────────────
 	if (input.delegateSubagents === true) {
-		delegationResult = await runDelegatedSubagents(input, finalAnswer, observabilityActivities);
+		// Enforce maxChildWorkflows and the remaining maxActions budget jointly.
+		// Three child workflows are always spawned as a unit, so both caps must
+		// allow at least three.
+		const remainingActions = budget.maxActions - actionsCount;
+		const childWorkflowsAllowed = Math.min(budget.maxChildWorkflows, remainingActions);
+		delegationResult = await runDelegatedSubagents(
+			input,
+			finalAnswer,
+			observabilityActivities,
+			childWorkflowsAllowed
+		);
 	}
 
 	// ── Session memory candidate ──────────────────────────────────────────────

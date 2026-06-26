@@ -410,46 +410,6 @@ describe('agentRunWorkflow approvals', () => {
 			expect(activityState.executions).toHaveLength(0);
 		});
 	});
-
-	it('enforces maxModelCalls budget cap and returns a budget-exhausted message', async () => {
-		await runWithWorkers(async () => {
-			const runId = `budget-model-calls-${Date.now()}`;
-			const result: AgentRunResult = await env.client.workflow.execute('agentRunWorkflow', {
-				taskQueue: TASK_QUEUE_ORCHESTRATOR,
-				workflowId: `agent-run:${runId}`,
-				args: [
-					{
-						sessionKey: 'session-001',
-						runId,
-						message: 'do something',
-						approvalTtlMs: 60_000,
-						// Cap at 1 model call — the first call returns tool_use but there
-						// is no budget for the second call needed after approval.
-						budget: {
-							maxModelCalls: 1,
-							maxToolCalls: 20,
-							maxChildWorkflows: 3,
-							maxTokens: 100_000,
-							maxActions: 30,
-							maxActiveWallClockMs: 5 * 60 * 1000,
-							maxEstimatedCostUsd: 1.0
-						} satisfies RunBudget
-					}
-				]
-			});
-
-			// With maxModelCalls:1, the model is called once (returns tool_use),
-			// the tool enters approval waiting. The test auto-approves via the
-			// cancel action which causes a terminal return before the second model
-			// call is needed.
-			// However, if we don't resolve the approval, the run times out.
-			// Instead, test with a model that immediately returns text (cap triggers on second turn).
-			// Since our mock returns tool_use on call 1, the run will enter waiting_approval.
-			// The budget cap won't fire because we return early on terminal outcome.
-			// So this test mainly verifies the run starts without error and stops gracefully.
-			expect(result.status).toBe('complete');
-		});
-	});
 });
 
 // ── Subagent delegation suite ──────────────────────────────────────────────────
@@ -622,5 +582,315 @@ describe('agentRunWorkflow subagents', () => {
 		const modelTask = model.runUntil(task.catch(() => undefined));
 		const memoryTask = memory.runUntil(task.catch(() => undefined));
 		await Promise.all([task, toolsTask, modelTask, memoryTask]);
+	});
+});
+
+// ── Budget caps suite ──────────────────────────────────────────────────────────
+
+/**
+ * These tests exercise the runtime enforcement of every RunBudget field that
+ * wasn't covered by the approval or subagent suites.
+ *
+ * All tests use a policy that returns `allowed` so the tool-call execution path
+ * is taken immediately, without approval flow interference. This isolates the
+ * budget cap as the sole termination reason.
+ */
+describe('agentRunWorkflow budget caps', () => {
+	let env: TestWorkflowEnvironment;
+
+	beforeAll(async () => {
+		env = await TestWorkflowEnvironment.createTimeSkipping();
+	});
+
+	afterAll(async () => {
+		await env.teardown();
+	});
+
+	/** Allows all tool calls immediately (no approval dance). */
+	const allowedTool: ToolManifestEntry = {
+		name: 'test.noop',
+		description: 'A no-op tool.',
+		inputSchema: {},
+		metadata: {
+			risk: 'low',
+			requiresApproval: false,
+			taskQueue: TASK_QUEUE_SANDBOX,
+			timeoutMs: 5_000,
+			retry: { maximumAttempts: 1 }
+		}
+	};
+
+	/**
+	 * Builds a base activity set for budget-cap tests.
+	 * `callModelFn` is injected so individual tests can control what the model
+	 * returns without rebuilding the whole activity set.
+	 */
+	function buildCapActivities(callModelFn: (input: ModelCallInput) => Promise<ModelCallResult>): {
+		callModel(input: ModelCallInput): Promise<ModelCallResult>;
+		evaluateToolCallPolicy(input: { call: ToolCallInput }): Promise<ToolPolicyDecision>;
+		recordApprovalRequest(input: RecordApprovalRequestInput): Promise<ApprovalCardState>;
+		recordApprovalResolution(input: RecordApprovalResolutionInput): Promise<ApprovalResolution>;
+		executeTool(input: ToolExecutionInput & { approved?: boolean }): Promise<ToolExecutionResult>;
+		persistToolResult(): Promise<void>;
+		recordRunStarted(): Promise<void>;
+		recordRunCompleted(): Promise<void>;
+		recordSubagentStarted(): Promise<void>;
+		recordSubagentCompleted(): Promise<void>;
+		writeMemoryCandidate(): Promise<void>;
+	} {
+		return {
+			callModel: callModelFn,
+			async evaluateToolCallPolicy(input: { call: ToolCallInput }): Promise<ToolPolicyDecision> {
+				return { status: 'allowed', tool: { ...allowedTool, name: input.call.name } };
+			},
+			async recordApprovalRequest(): Promise<ApprovalCardState> {
+				throw ApplicationFailure.nonRetryable('Should not be called in budget caps test');
+			},
+			async recordApprovalResolution(): Promise<ApprovalResolution> {
+				throw ApplicationFailure.nonRetryable('Should not be called in budget caps test');
+			},
+			async executeTool(
+				input: ToolExecutionInput & { approved?: boolean }
+			): Promise<ToolExecutionResult> {
+				return {
+					callId: input.call.id,
+					toolName: input.call.name,
+					outcome: 'success',
+					content: { ok: true }
+				};
+			},
+			async persistToolResult(): Promise<void> {},
+			async recordRunStarted(): Promise<void> {},
+			async recordRunCompleted(): Promise<void> {},
+			async recordSubagentStarted(): Promise<void> {},
+			async recordSubagentCompleted(): Promise<void> {},
+			async writeMemoryCandidate(): Promise<void> {}
+		};
+	}
+
+	/** Spins up one orchestrator + all activity workers and runs `callback`. */
+	async function runCapTest<T>(
+		activities: ReturnType<typeof buildCapActivities>,
+		callback: () => Promise<T>
+	): Promise<T> {
+		const orchestrator = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_ORCHESTRATOR,
+			workflowsPath: fileURLToPath(new URL('./index.ts', import.meta.url))
+		});
+		const tools = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_TOOLS,
+			activities
+		});
+		const sandbox = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_SANDBOX,
+			activities
+		});
+		const model = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_MODEL,
+			activities
+		});
+		const memory = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_MEMORY,
+			activities
+		});
+
+		const task = orchestrator.runUntil(callback);
+		const [result] = await Promise.all([
+			task,
+			tools.runUntil(task.catch(() => undefined)),
+			sandbox.runUntil(task.catch(() => undefined)),
+			model.runUntil(task.catch(() => undefined)),
+			memory.runUntil(task.catch(() => undefined))
+		]);
+		return result;
+	}
+
+	it('enforces maxModelCalls and returns the budget-exhausted message on the second turn', async () => {
+		// The model always returns a tool call so the loop can never terminate via a
+		// text answer — the only exit is the budget cap. With maxModelCalls:1 the
+		// cap fires at the top of the second outer-loop iteration, after the first
+		// model call and one tool execution have completed.
+		const activities = buildCapActivities(async (input: ModelCallInput) => ({
+			runId: input.runId,
+			model: input.model,
+			message: {
+				text: '',
+				toolCalls: [{ id: 'cap-tool-001', name: 'test.noop', input: {} }]
+			},
+			usage: MOCK_MODEL_USAGE
+		}));
+
+		await runCapTest(activities, async () => {
+			const runId = `budget-model-calls-${Date.now()}`;
+			const result: AgentRunResult = await env.client.workflow.execute('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [
+					{
+						sessionKey: 'session-cap',
+						runId,
+						message: 'do something',
+						budget: {
+							maxModelCalls: 1,
+							maxToolCalls: 20,
+							maxChildWorkflows: 3,
+							maxTokens: 100_000,
+							maxActions: 30,
+							maxActiveWallClockMs: 5 * 60 * 1000,
+							maxEstimatedCostUsd: 1.0
+						} satisfies RunBudget
+					}
+				]
+			});
+
+			// First outer iteration: model called (modelCallCount → 1), returns
+			// tool_use → tool executed → back to top of loop.
+			// Second outer iteration: modelCallCount (1) >= maxModelCalls (1) → cap.
+			expect(result.status).toBe('complete');
+			expect(result.finalAnswer).toContain('model call budget exhausted');
+		});
+	});
+
+	it('enforces maxActions and returns the budget-exhausted message', async () => {
+		// With maxActions:1 the first tool call sets actionsCount to 1. The model
+		// is called again (maxModelCalls is high), returns another tool_use, and
+		// the inner-loop actionsCount check fires before the second tool is run.
+		const activities = buildCapActivities(async (input: ModelCallInput) => ({
+			runId: input.runId,
+			model: input.model,
+			message: {
+				text: '',
+				toolCalls: [{ id: 'cap-tool-001', name: 'test.noop', input: {} }]
+			},
+			usage: MOCK_MODEL_USAGE
+		}));
+
+		await runCapTest(activities, async () => {
+			const runId = `budget-actions-${Date.now()}`;
+			const result: AgentRunResult = await env.client.workflow.execute('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [
+					{
+						sessionKey: 'session-cap',
+						runId,
+						message: 'do something',
+						budget: {
+							maxModelCalls: 10,
+							maxToolCalls: 20,
+							maxChildWorkflows: 3,
+							maxTokens: 100_000,
+							maxActions: 1,
+							maxActiveWallClockMs: 5 * 60 * 1000,
+							maxEstimatedCostUsd: 1.0
+						} satisfies RunBudget
+					}
+				]
+			});
+
+			expect(result.status).toBe('complete');
+			expect(result.finalAnswer).toContain('action budget exhausted');
+		});
+	});
+
+	it('enforces maxActiveWallClockMs:0 and exits before the first model call', async () => {
+		// maxActiveWallClockMs:0 means Date.now() - runStartMs >= 0 is always true,
+		// so the cap fires at the very top of the first outer-loop iteration before
+		// any model call is attempted.
+		let modelCallCount = 0;
+		const activities = buildCapActivities(async (input: ModelCallInput) => {
+			modelCallCount++;
+			return {
+				runId: input.runId,
+				model: input.model,
+				message: { text: 'Should never reach this.', toolCalls: [] },
+				usage: MOCK_MODEL_USAGE
+			};
+		});
+
+		await runCapTest(activities, async () => {
+			const runId = `budget-wallclock-${Date.now()}`;
+			const result: AgentRunResult = await env.client.workflow.execute('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [
+					{
+						sessionKey: 'session-cap',
+						runId,
+						message: 'do something',
+						budget: {
+							maxModelCalls: 10,
+							maxToolCalls: 20,
+							maxChildWorkflows: 3,
+							maxTokens: 100_000,
+							maxActions: 30,
+							maxActiveWallClockMs: 0,
+							maxEstimatedCostUsd: 1.0
+						} satisfies RunBudget
+					}
+				]
+			});
+
+			expect(result.status).toBe('complete');
+			expect(result.finalAnswer).toContain('wall-clock budget exhausted');
+			// The model was never called — the cap fired first.
+			expect(modelCallCount).toBe(0);
+		});
+	});
+
+	it('enforces maxChildWorkflows:0 and skips subagent delegation', async () => {
+		// The model returns a text answer immediately (no tool calls), so the main
+		// loop completes cleanly. Then delegation is attempted with
+		// maxChildWorkflows:0 — the all-or-nothing guard skips spawning all three
+		// child workflows, leaving budgetLedger entries empty and criticAnnotations
+		// as an empty array.
+		const activities = buildCapActivities(async (input: ModelCallInput) => ({
+			runId: input.runId,
+			model: input.model,
+			message: { text: 'Done.', toolCalls: [] },
+			usage: MOCK_MODEL_USAGE
+		}));
+
+		await runCapTest(activities, async () => {
+			const runId = `budget-child-wf-${Date.now()}`;
+			const result: AgentRunResult = await env.client.workflow.execute('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [
+					{
+						sessionKey: 'session-cap',
+						runId,
+						message: 'do something',
+						delegateSubagents: true,
+						budget: {
+							maxModelCalls: 10,
+							maxToolCalls: 20,
+							maxChildWorkflows: 0,
+							maxTokens: 100_000,
+							maxActions: 30,
+							maxActiveWallClockMs: 5 * 60 * 1000,
+							maxEstimatedCostUsd: 1.0
+						} satisfies RunBudget
+					}
+				]
+			});
+
+			expect(result.status).toBe('complete');
+			expect(result.finalAnswer).toBe('Done.');
+			// No child workflows were spawned — budget ledger has no subagent entries.
+			expect(result.budgetLedger?.entries).toHaveLength(0);
+			// Critic annotations are empty because the critic subagent was not run.
+			expect(result.criticAnnotations).toEqual([]);
+		});
 	});
 });
