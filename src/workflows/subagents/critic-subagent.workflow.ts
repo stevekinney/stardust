@@ -3,7 +3,6 @@ import type {
 	SubagentWorkflowInput,
 	SubagentWorkflowResult
 } from '@src/lib/types';
-import { sleep } from '@temporalio/workflow';
 
 function includesAny(value: string, needles: string[]): boolean {
 	return needles.some((needle) => value.includes(needle));
@@ -37,10 +36,13 @@ function createAdvisoryMessage(input: SubagentWorkflowInput): string {
 	return `Advisory critic reviewed the final answer for policy adherence, missing evidence, and unsafe claims: ${reviewNotes.join('; ')}.`;
 }
 
+// The critic is advisory-only: it analyses the final answer without calling
+// the model, so its real token usage is always zero.
+const ZERO_USAGE = { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
+
 export async function criticSubagentWorkflow(
 	input: SubagentWorkflowInput
 ): Promise<SubagentWorkflowResult> {
-	await sleep('1ms');
 	const annotation: CriticAnnotation = {
 		id: `${input.subagentRunId}:annotation`,
 		laneId: input.subagentRunId,
@@ -53,13 +55,14 @@ export async function criticSubagentWorkflow(
 		kind: 'critic',
 		status: 'complete',
 		finalAnswer: annotation.message,
-		budgetDebit: input.budgetDebit,
+		// Report zero usage — the critic is heuristic-only, no model call.
+		budgetDebit: { ...input.budgetDebit, usage: ZERO_USAGE },
 		timelineLane: {
 			id: input.subagentRunId,
 			label: 'Critic',
 			kind: 'subagent',
 			status: 'complete',
-			budget: input.budgetDebit.usage,
+			budget: ZERO_USAGE,
 			annotations: [annotation]
 		},
 		annotations: [annotation]

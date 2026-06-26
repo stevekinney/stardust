@@ -3,6 +3,7 @@ import { toAnthropicTools } from 'armorer/adapters/anthropic';
 import type { AnthropicTool } from 'armorer/adapters/anthropic';
 import type { JsonObject, SerializedToolDefinition } from 'armorer/core';
 import { ApplicationFailure } from '@temporalio/common';
+import { randomUUID } from 'node:crypto';
 import type {
 	ModelCallInput,
 	ModelCallResult,
@@ -11,7 +12,7 @@ import type {
 } from '@src/lib/types';
 import { db } from '../db/client';
 import type { DatabaseClient } from '../db/client';
-import { publishAssistantDeltas } from '../stream';
+import { appendTranscriptEvent, publishAssistantDeltas, publishStreamEvent } from '../stream';
 import { assertKnownModel, calculateModelUsage } from './budgets';
 import { buildModelContext } from './context-builder';
 import {
@@ -126,12 +127,48 @@ export async function runModelCall(
 	const usageTokens = readAnthropicUsage(result.message);
 	const message: NormalizedModelMessage = normalizeAnthropicMessage(result.message);
 	const deltas = result.deltas ?? (message.text ? [message.text] : []);
+	const now = new Date().toISOString();
 
+	// Publish assistant deltas to the live stream bus for SSE rendering.
 	await publishAssistantDeltas(database, {
 		sessionId: input.sessionId,
 		runId: input.runId,
 		chunks: deltas
 	});
+
+	if (message.toolCalls.length > 0) {
+		// Intermediate turn: the model is requesting tool execution.
+		// Write a tool_call transcript event so the next model call sees the tool
+		// requests in its context window and so the context builder can reconstruct
+		// the multi-turn conversation correctly.
+		const turnId = randomUUID();
+		await appendTranscriptEvent(database, {
+			id: `${input.runId}:tool-call:${turnId}`,
+			sessionId: input.sessionId,
+			runId: input.runId,
+			kind: 'tool_call',
+			payload: JSON.stringify({
+				text: message.text || undefined,
+				calls: message.toolCalls.map((tc) => ({
+					id: tc.id,
+					name: tc.name,
+					input: tc.input
+				}))
+			}),
+			createdAt: now
+		});
+
+		// Emit individual tool.call stream events so the UI can render tool cards.
+		for (const tc of message.toolCalls) {
+			await publishStreamEvent(database, {
+				sessionId: input.sessionId,
+				runId: input.runId,
+				kind: 'tool.call',
+				payload: JSON.stringify({ id: tc.id, name: tc.name, input: tc.input }),
+				createdAt: now
+			});
+		}
+	}
 
 	return {
 		runId: input.runId,

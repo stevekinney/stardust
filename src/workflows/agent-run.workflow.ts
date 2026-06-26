@@ -7,9 +7,12 @@ import type {
 	BudgetLedgerEntry,
 	BudgetLedgerSnapshot,
 	CriticAnnotation,
+	ModelCallInput,
+	ModelCallResult,
 	ModelUsage,
 	RecordApprovalRequestInput,
 	RecordApprovalResolutionInput,
+	RunBudget,
 	RunTimelineLane,
 	SubagentKind,
 	ToolCallInput,
@@ -22,14 +25,55 @@ import {
 	condition,
 	executeChild,
 	proxyActivities,
-	setHandler,
-	sleep
+	setHandler
 } from '@temporalio/workflow';
 import { ApplicationFailure } from '@temporalio/common';
 import { getAgentRunStateQuery, resolveApprovalUpdate } from './approval-contracts';
 import { codeSubagentWorkflow } from './subagents/code-subagent.workflow';
 import { criticSubagentWorkflow } from './subagents/critic-subagent.workflow';
 import { researchSubagentWorkflow } from './subagents/research-subagent.workflow';
+
+// ── Constants ──────────────────────────────────────────────────────────────────
+
+/** Default model ID used when the run input does not specify one. */
+const DEFAULT_MODEL = 'claude-sonnet-4-5-20250929';
+
+/** Default runtime budget applied when the run input omits `budget`. */
+const DEFAULT_RUN_BUDGET: RunBudget = {
+	maxModelCalls: 10,
+	maxToolCalls: 20,
+	maxChildWorkflows: 3,
+	maxTokens: 100_000,
+	maxActions: 30,
+	maxActiveWallClockMs: 10 * 60 * 1000,
+	maxEstimatedCostUsd: 1.0
+};
+
+const TASK_QUEUE_TOOLS = 'tools-general';
+const TASK_QUEUE_SANDBOX = 'tools-sandbox';
+const TASK_QUEUE_MODEL = 'model-calls';
+const TASK_QUEUE_MEMORY = 'memory';
+const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
+const HANDLER_FINISH_TIMEOUT_MS = 60_000;
+const REQUESTED_SUBAGENT_USAGE: Record<SubagentKind, ModelUsage> = {
+	research: {
+		inputTokens: 70,
+		outputTokens: 20,
+		estimatedCostUsd: 0.0007
+	},
+	code: {
+		inputTokens: 70,
+		outputTokens: 20,
+		estimatedCostUsd: 0.0007
+	},
+	critic: {
+		inputTokens: 20,
+		outputTokens: 10,
+		estimatedCostUsd: 0.0002
+	}
+};
+
+// ── Activity proxies ───────────────────────────────────────────────────────────
 
 type PolicyActivities = {
 	evaluateToolCallPolicy(input: { call: ToolCallInput }): Promise<ToolPolicyDecision>;
@@ -65,33 +109,28 @@ type ObservabilityActivities = {
 		status: 'complete' | 'failed' | 'cancelled';
 		budget?: ModelUsage;
 	}): Promise<void>;
+	persistToolResult(input: {
+		sessionId: string;
+		runId: string;
+		callId: string;
+		content: unknown;
+		isError?: boolean;
+	}): Promise<void>;
 };
 
-const TASK_QUEUE_TOOLS = 'tools-general';
-const TASK_QUEUE_SANDBOX = 'tools-sandbox';
-const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
-const HANDLER_FINISH_TIMEOUT_MS = 60_000;
-const DEFAULT_BUDGET_LIMIT: ModelUsage = {
-	inputTokens: 120,
-	outputTokens: 50,
-	estimatedCostUsd: 0.0012
+type ModelActivities = {
+	callModel(input: ModelCallInput): Promise<ModelCallResult>;
 };
-const REQUESTED_SUBAGENT_USAGE: Record<SubagentKind, ModelUsage> = {
-	research: {
-		inputTokens: 70,
-		outputTokens: 20,
-		estimatedCostUsd: 0.0007
-	},
-	code: {
-		inputTokens: 70,
-		outputTokens: 20,
-		estimatedCostUsd: 0.0007
-	},
-	critic: {
-		inputTokens: 20,
-		outputTokens: 10,
-		estimatedCostUsd: 0.0002
-	}
+
+type MemoryActivities = {
+	writeMemoryCandidate(input: {
+		sessionId: string;
+		runId: string;
+		layer: 'session' | 'durable' | 'action_sensitive';
+		content: string;
+		tags?: string[];
+		reason?: string | null;
+	}): Promise<unknown>;
 };
 
 const policyActivities = proxyActivities<PolicyActivities>({
@@ -112,29 +151,39 @@ const observabilityActivities = proxyActivities<ObservabilityActivities>({
 	retry: { maximumAttempts: 3 }
 });
 
+const modelActivities = proxyActivities<ModelActivities>({
+	taskQueue: TASK_QUEUE_MODEL,
+	startToCloseTimeout: '120 seconds',
+	retry: { maximumAttempts: 2 }
+});
+
+const memoryActivities = proxyActivities<MemoryActivities>({
+	taskQueue: TASK_QUEUE_MEMORY,
+	startToCloseTimeout: '10 seconds',
+	retry: { maximumAttempts: 2 }
+});
+
+// ── Budget helpers ─────────────────────────────────────────────────────────────
+
 function createApprovalId(runId: string, toolCallId: string): string {
 	return `${runId}:${toolCallId}:approval`;
 }
 
 function createEmptyUsage(): ModelUsage {
-	return {
-		inputTokens: 0,
-		outputTokens: 0,
-		estimatedCostUsd: 0
-	};
+	return { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
 }
 
 function roundCost(value: number): number {
 	return Number(value.toFixed(8));
 }
 
-function createBudgetLedger(limit: ModelUsage): BudgetLedgerSnapshot {
-	return {
-		limit,
-		used: createEmptyUsage(),
-		remaining: { ...limit },
-		entries: []
+function createBudgetLedger(budget: RunBudget): BudgetLedgerSnapshot {
+	const limit: ModelUsage = {
+		inputTokens: budget.maxTokens,
+		outputTokens: Math.round(budget.maxTokens / 2),
+		estimatedCostUsd: budget.maxEstimatedCostUsd
 	};
+	return { limit, used: createEmptyUsage(), remaining: { ...limit }, entries: [] };
 }
 
 function addUsage(left: ModelUsage, right: ModelUsage): ModelUsage {
@@ -177,6 +226,23 @@ function reserveBudgetEntry(input: {
 	return entry;
 }
 
+/**
+ * Reconciles a budget entry with the subagent's real model usage, returning
+ * unused allocation to the shared ledger's remaining pool.
+ */
+function reconcileBudgetEntry(
+	ledger: BudgetLedgerSnapshot,
+	entry: BudgetLedgerEntry,
+	realUsage: ModelUsage
+): void {
+	const diff = subtractUsage(entry.usage, realUsage);
+	ledger.remaining = addUsage(ledger.remaining, diff);
+	ledger.used = subtractUsage(ledger.used, diff);
+	entry.usage = realUsage;
+}
+
+// ── Subagent delegation ────────────────────────────────────────────────────────
+
 async function runDelegatedSubagents(
 	input: AgentRunInput,
 	finalAnswer: string,
@@ -186,7 +252,8 @@ async function runDelegatedSubagents(
 	timelineLanes: RunTimelineLane[];
 	criticAnnotations: CriticAnnotation[];
 }> {
-	const budgetLedger = createBudgetLedger(input.budget ?? DEFAULT_BUDGET_LIMIT);
+	const budget = input.budget ?? DEFAULT_RUN_BUDGET;
+	const budgetLedger = createBudgetLedger(budget);
 	const parentLane: RunTimelineLane = {
 		id: input.runId,
 		label: 'Parent run',
@@ -214,7 +281,6 @@ async function runDelegatedSubagents(
 		label: 'Critic'
 	});
 
-	// Emit start events before launching all three subagents in parallel.
 	await Promise.all([
 		observability.recordSubagentStarted({
 			sessionId: input.sessionKey,
@@ -246,9 +312,11 @@ async function runDelegatedSubagents(
 				{
 					parentRunId: input.runId,
 					subagentRunId: `${input.runId}:research`,
-					kind: 'research',
+					sessionKey: input.sessionKey,
+					kind: 'research' as SubagentKind,
 					message: input.message,
-					budgetDebit: researchDebit
+					budgetDebit: researchDebit,
+					model: input.model
 				}
 			]
 		}),
@@ -258,9 +326,11 @@ async function runDelegatedSubagents(
 				{
 					parentRunId: input.runId,
 					subagentRunId: `${input.runId}:code`,
-					kind: 'code',
+					sessionKey: input.sessionKey,
+					kind: 'code' as SubagentKind,
 					message: input.message,
-					budgetDebit: codeDebit
+					budgetDebit: codeDebit,
+					model: input.model
 				}
 			]
 		}),
@@ -270,16 +340,22 @@ async function runDelegatedSubagents(
 				{
 					parentRunId: input.runId,
 					subagentRunId: `${input.runId}:critic`,
-					kind: 'critic',
+					sessionKey: input.sessionKey,
+					kind: 'critic' as SubagentKind,
 					message: input.message,
 					finalAnswer,
-					budgetDebit: criticDebit
+					budgetDebit: criticDebit,
+					model: input.model
 				}
 			]
 		})
 	]);
 
-	// Emit completion events after all three finish.
+	// Reconcile real usage with reserved allocations.
+	reconcileBudgetEntry(budgetLedger, researchDebit, research.budgetDebit.usage);
+	reconcileBudgetEntry(budgetLedger, codeDebit, code.budgetDebit.usage);
+	reconcileBudgetEntry(budgetLedger, criticDebit, critic.budgetDebit.usage);
+
 	await Promise.all([
 		observability.recordSubagentCompleted({
 			sessionId: input.sessionKey,
@@ -329,12 +405,182 @@ async function completeRun(input: AgentRunInput, result: AgentRunResult): Promis
 	return result;
 }
 
-/** Stub: no-tool model path. Yields control briefly so the parent session can accept concurrent turns. */
+// ── Approval handling ──────────────────────────────────────────────────────────
+
+type MutableApprovalState = {
+	status: 'running' | 'waiting_approval' | 'complete' | 'cancelled' | 'failed';
+	pendingApproval: ApprovalCardState | null;
+	approvalResolution: ApprovalResolutionInput | null;
+	recordedApprovalResolution: ApprovalResolution | null;
+};
+
+/**
+ * Runs policy evaluation → durable approval wait → tool execution for a single
+ * tool call. Returns the `ToolExecutionResult` if executed, or a terminal
+ * outcome if the call was denied, cancelled, or expired.
+ */
+async function handleToolCall(
+	input: AgentRunInput,
+	toolCall: ToolCallInput,
+	state: MutableApprovalState
+): Promise<
+	| { kind: 'executed'; result: ToolExecutionResult }
+	| { kind: 'terminal'; status: AgentRunResult['status']; finalAnswer: string }
+> {
+	const approvalTtlMs = input.approvalTtlMs ?? APPROVAL_TTL_MS;
+	const decision = await policyActivities.evaluateToolCallPolicy({ call: toolCall });
+
+	if (decision.status === 'denied') {
+		return {
+			kind: 'terminal',
+			status: 'failed',
+			finalAnswer: `Tool call denied by policy: ${decision.reason}`
+		};
+	}
+
+	if (decision.status === 'allowed') {
+		const result = await sandboxActivities.executeTool({
+			call: toolCall,
+			sessionId: input.sessionKey,
+			runId: input.runId,
+			workspacePath: input.workspacePath
+		});
+		return { kind: 'executed', result };
+	}
+
+	// Approval required — park in waiting_approval, wait for resolution update.
+	const approvalId = createApprovalId(input.runId, toolCall.id);
+	const expiresAt = new Date(Date.now() + approvalTtlMs).toISOString();
+	state.approvalResolution = null;
+	state.recordedApprovalResolution = null;
+	state.status = 'waiting_approval';
+	state.pendingApproval = await policyActivities.recordApprovalRequest({
+		approvalId,
+		sessionId: input.sessionKey,
+		runId: input.runId,
+		toolCall,
+		tool: decision.tool,
+		policyVersion: decision.policyVersion,
+		proposedArguments: toolCall.arguments,
+		expiresAt
+	});
+
+	const resolvedBeforeExpiry = await condition(
+		() => state.approvalResolution !== null,
+		approvalTtlMs
+	);
+	if (!resolvedBeforeExpiry) {
+		const expired = await policyActivities.recordApprovalResolution({
+			approvalId,
+			action: 'expire',
+			reason: 'Approval expired before the user resolved it.',
+			remember: false,
+			actor: 'system'
+		});
+		state.pendingApproval = { ...state.pendingApproval!, status: 'expired', resolution: expired };
+		state.status = 'complete';
+		return {
+			kind: 'terminal',
+			status: 'complete',
+			finalAnswer: 'Tool call approval expired before execution.'
+		};
+	}
+
+	const recordedResolution = await policyActivities.recordApprovalResolution({
+		approvalId,
+		action: state.approvalResolution!.action,
+		editedArguments: state.approvalResolution!.editedArguments,
+		reason: state.approvalResolution!.reason,
+		remember: state.approvalResolution!.remember,
+		actor: state.approvalResolution!.actor ?? 'user'
+	});
+	state.recordedApprovalResolution = recordedResolution;
+	state.pendingApproval = {
+		...state.pendingApproval!,
+		status: recordedResolution.terminalState,
+		resolution: recordedResolution
+	};
+
+	if (recordedResolution.terminalState === 'cancelled') {
+		state.status = 'cancelled';
+		return {
+			kind: 'terminal',
+			status: 'cancelled',
+			finalAnswer: recordedResolution.reason ?? 'Run cancelled during approval.'
+		};
+	}
+
+	if (recordedResolution.terminalState !== 'approved') {
+		state.status = 'complete';
+		return {
+			kind: 'terminal',
+			status: 'complete',
+			finalAnswer:
+				recordedResolution.reason ??
+				`Tool call ${recordedResolution.terminalState} before execution.`
+		};
+	}
+
+	state.status = 'running';
+	state.pendingApproval = null;
+	const result = await sandboxActivities.executeTool({
+		call: { ...toolCall, arguments: recordedResolution.canonicalArguments },
+		sessionId: input.sessionKey,
+		runId: input.runId,
+		workspacePath: input.workspacePath,
+		approved: true
+	});
+	return { kind: 'executed', result };
+}
+
+// ── Main workflow ──────────────────────────────────────────────────────────────
+
+/**
+ * AgentRunWorkflow — owns one prepared turn.
+ *
+ * Assembles context, calls the model, validates tool calls, enforces policy,
+ * waits durably for approval, executes tools, publishes stream events, persists
+ * canonical transcript events, and produces memory candidates.
+ *
+ * Streaming decision: the model-runner awaits the full response then emits one
+ * coalesced delta rather than streaming tokens as they arrive. Real streaming
+ * is tracked separately as a fast-follow.
+ */
 export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunResult> {
+	const budget = input.budget ?? DEFAULT_RUN_BUDGET;
+
 	let status: 'running' | 'waiting_approval' | 'complete' | 'cancelled' | 'failed' = 'running';
 	let pendingApproval: ApprovalCardState | null = null;
 	let approvalResolution: ApprovalResolutionInput | null = null;
 	let recordedApprovalResolution: ApprovalResolution | null = null;
+
+	const approvalState: MutableApprovalState = {
+		get status() {
+			return status;
+		},
+		set status(v) {
+			status = v;
+		},
+		get pendingApproval() {
+			return pendingApproval;
+		},
+		set pendingApproval(v) {
+			pendingApproval = v;
+		},
+		get approvalResolution() {
+			return approvalResolution;
+		},
+		set approvalResolution(v) {
+			approvalResolution = v;
+		},
+		get recordedApprovalResolution() {
+			return recordedApprovalResolution;
+		},
+		set recordedApprovalResolution(v) {
+			recordedApprovalResolution = v;
+		}
+	};
+
 	let delegationResult:
 		| {
 				budgetLedger: BudgetLedgerSnapshot;
@@ -375,118 +621,100 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 		message: input.message
 	});
 
-	for (const toolCall of input.toolCalls ?? []) {
-		const decision = await policyActivities.evaluateToolCallPolicy({ call: toolCall });
-		if (decision.status === 'denied') {
-			return completeRun(input, {
-				runId: input.runId,
-				status: 'failed',
-				finalAnswer: `Tool call denied by policy: ${decision.reason}`
-			});
+	// ── Model → tool loop ──────────────────────────────────────────────────────
+
+	let modelCallCount = 0;
+	let toolCallCount = 0;
+	let totalUsage: ModelUsage = createEmptyUsage();
+	// Definite-assignment assertion: every code path that reaches the code
+	// below the loop assigns `finalAnswer` before breaking; the TypeScript
+	// compiler cannot always infer this across labelled-loop boundaries.
+	let finalAnswer!: string;
+
+	outer: while (true) {
+		if (modelCallCount >= budget.maxModelCalls) {
+			finalAnswer = `Run stopped: model call budget exhausted (${budget.maxModelCalls} calls).`;
+			break;
+		}
+		if (totalUsage.estimatedCostUsd >= budget.maxEstimatedCostUsd) {
+			finalAnswer = `Run stopped: cost budget exhausted ($${totalUsage.estimatedCostUsd.toFixed(6)}).`;
+			break;
+		}
+		if (totalUsage.inputTokens + totalUsage.outputTokens >= budget.maxTokens) {
+			finalAnswer = `Run stopped: token budget exhausted (${totalUsage.inputTokens + totalUsage.outputTokens} tokens).`;
+			break;
 		}
 
-		if (decision.status === 'allowed') {
-			await sandboxActivities.executeTool({
-				call: toolCall,
+		const modelResult = await modelActivities.callModel({
+			sessionId: input.sessionKey,
+			runId: input.runId,
+			model: input.model ?? DEFAULT_MODEL,
+			tools: input.tools,
+			systemPrompt: input.systemPrompt,
+			maxTokens: 4096
+		});
+		modelCallCount++;
+		totalUsage = addUsage(totalUsage, modelResult.usage);
+
+		if (modelResult.message.toolCalls.length === 0) {
+			finalAnswer = modelResult.message.text;
+			break;
+		}
+
+		for (const normalizedToolCall of modelResult.message.toolCalls) {
+			// NormalizedToolCall uses `.input`; ToolCallInput uses `.arguments`.
+			// Convert before passing into the policy/approval/execution path.
+			const toolCall: ToolCallInput = {
+				id: normalizedToolCall.id,
+				name: normalizedToolCall.name,
+				arguments: normalizedToolCall.input
+			};
+
+			if (toolCallCount >= budget.maxToolCalls) {
+				finalAnswer = `Run stopped: tool call budget exhausted (${budget.maxToolCalls} calls).`;
+				break outer;
+			}
+			toolCallCount++;
+
+			const outcome = await handleToolCall(input, toolCall, approvalState);
+
+			if (outcome.kind === 'terminal') {
+				await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
+				return completeRun(input, {
+					runId: input.runId,
+					status: outcome.status,
+					finalAnswer: outcome.finalAnswer
+				});
+			}
+
+			await observabilityActivities.persistToolResult({
 				sessionId: input.sessionKey,
 				runId: input.runId,
-				workspacePath: input.workspacePath
-			});
-			continue;
-		}
-
-		const approvalTtlMs = input.approvalTtlMs ?? APPROVAL_TTL_MS;
-		const approvalId = createApprovalId(input.runId, toolCall.id);
-		const expiresAt = new Date(Date.now() + approvalTtlMs).toISOString();
-		approvalResolution = null;
-		recordedApprovalResolution = null;
-		status = 'waiting_approval';
-		pendingApproval = await policyActivities.recordApprovalRequest({
-			approvalId,
-			sessionId: input.sessionKey,
-			runId: input.runId,
-			toolCall,
-			tool: decision.tool,
-			policyVersion: decision.policyVersion,
-			proposedArguments: toolCall.arguments,
-			expiresAt
-		});
-
-		const resolvedBeforeExpiry = await condition(() => approvalResolution !== null, approvalTtlMs);
-		if (!resolvedBeforeExpiry) {
-			const expired = await policyActivities.recordApprovalResolution({
-				approvalId,
-				action: 'expire',
-				reason: 'Approval expired before the user resolved it.',
-				remember: false,
-				actor: 'system'
-			});
-			pendingApproval = { ...pendingApproval, status: 'expired', resolution: expired };
-			status = 'complete';
-			await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
-			return completeRun(input, {
-				runId: input.runId,
-				status: 'complete',
-				finalAnswer: 'Tool call approval expired before execution.'
+				callId: toolCall.id,
+				content: outcome.result.content,
+				isError: outcome.result.outcome === 'error'
 			});
 		}
-
-		const recordedResolution = await policyActivities.recordApprovalResolution({
-			approvalId,
-			action: approvalResolution!.action,
-			editedArguments: approvalResolution!.editedArguments,
-			reason: approvalResolution!.reason,
-			remember: approvalResolution!.remember,
-			actor: approvalResolution!.actor ?? 'user'
-		});
-		recordedApprovalResolution = recordedResolution;
-		pendingApproval = {
-			...pendingApproval,
-			status: recordedResolution.terminalState,
-			resolution: recordedResolution
-		};
-
-		if (recordedResolution.terminalState === 'cancelled') {
-			status = 'cancelled';
-			await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
-			return completeRun(input, {
-				runId: input.runId,
-				status: 'cancelled',
-				finalAnswer: recordedResolution.reason ?? 'Run cancelled during approval.'
-			});
-		}
-
-		if (recordedResolution.terminalState !== 'approved') {
-			status = 'complete';
-			await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
-			return completeRun(input, {
-				runId: input.runId,
-				status: 'complete',
-				finalAnswer:
-					recordedResolution.reason ??
-					`Tool call ${recordedResolution.terminalState} before execution.`
-			});
-		}
-
-		status = 'running';
-		pendingApproval = null;
-		await sandboxActivities.executeTool({
-			call: {
-				...toolCall,
-				arguments: recordedResolution.canonicalArguments
-			},
-			sessionId: input.sessionKey,
-			runId: input.runId,
-			workspacePath: input.workspacePath,
-			approved: true
-		});
 	}
 
-	await sleep('1ms');
-	const finalAnswer = '(stub — no model in T2)';
+	// ── Subagent delegation (optional) ────────────────────────────────────────
 	if (input.delegateSubagents === true) {
 		delegationResult = await runDelegatedSubagents(input, finalAnswer, observabilityActivities);
 	}
+
+	// ── Session memory candidate ──────────────────────────────────────────────
+	// Non-fatal: write failure does not fail the run.
+	await memoryActivities
+		.writeMemoryCandidate({
+			sessionId: input.sessionKey,
+			runId: input.runId,
+			layer: 'session',
+			content: `Run ${input.runId}: ${finalAnswer.slice(0, 500)}`,
+			tags: ['run-summary'],
+			reason: 'Auto-generated run summary candidate'
+		})
+		.catch(() => undefined);
+
 	status = 'complete';
 	await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
 	return completeRun(input, {

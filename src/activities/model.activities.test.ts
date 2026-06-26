@@ -6,7 +6,12 @@ import { mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import * as schema from '../lib/server/db/schema';
-import { appendTranscriptEvent, readStreamEventsAfterCursor } from '../lib/server/stream';
+import {
+	appendTranscriptEvent,
+	persistToolResult,
+	readStreamEventsAfterCursor,
+	reconstructSessionTranscript
+} from '../lib/server/stream';
 import {
 	classifyModelProviderError,
 	formatToolsForAnthropic,
@@ -146,6 +151,82 @@ describe('model activity', () => {
 		expect(replay.events).toHaveLength(1);
 		expect(replay.events[0]?.kind).toBe('assistant.delta');
 		expect(JSON.parse(replay.events[0]!.payload)).toEqual({ text: 'hello' });
+	});
+
+	it('writes a tool_call transcript event and tool.call stream events when the model requests tools', async () => {
+		await appendTranscriptEvent(database, {
+			id: 'transcript-001',
+			runId: 'run-001',
+			sessionId: 'session-001',
+			kind: 'user_message',
+			payload: JSON.stringify({ text: 'Fetch https://example.com' }),
+			createdAt: '2026-01-01T00:00:00.000Z'
+		});
+
+		const provider: ModelProviderClient = {
+			createMessage: vi.fn(async () => ({
+				deltas: [],
+				message: {
+					role: 'assistant' as const,
+					content: [
+						{
+							type: 'tool_use' as const,
+							id: 'call-1',
+							name: 'web.fetch',
+							input: { url: 'https://example.com' }
+						}
+					],
+					usage: { input_tokens: 50, output_tokens: 10 }
+				}
+			}))
+		};
+
+		await runModelCall(
+			{ sessionId: 'session-001', runId: 'run-001', model: 'claude-sonnet-4-5-20250929' },
+			{ database, provider, apiKey: 'test-key' }
+		);
+
+		// Transcript should have a tool_call event
+		const transcript = await reconstructSessionTranscript(database, 'session-001');
+		const toolCallEvent = transcript.find((e) => e.kind === 'tool_call');
+		expect(toolCallEvent).toBeDefined();
+		const payload = JSON.parse(toolCallEvent!.payload);
+		expect(payload.calls).toHaveLength(1);
+		expect(payload.calls[0]).toEqual({
+			id: 'call-1',
+			name: 'web.fetch',
+			input: { url: 'https://example.com' }
+		});
+
+		// Stream should have a tool.call event
+		const streamEvents = await readStreamEventsAfterCursor(database, { runId: 'run-001' });
+		const toolCallStreamEvent = streamEvents.events.find((e) => e.kind === 'tool.call');
+		expect(toolCallStreamEvent).toBeDefined();
+		const streamPayload = JSON.parse(toolCallStreamEvent!.payload);
+		expect(streamPayload.id).toBe('call-1');
+		expect(streamPayload.name).toBe('web.fetch');
+	});
+
+	it('persistToolResult writes a tool_result transcript event and tool.result stream event', async () => {
+		await persistToolResult(database, {
+			sessionId: 'session-001',
+			runId: 'run-001',
+			callId: 'call-1',
+			content: '<html>result</html>',
+			isError: false
+		});
+
+		const transcript = await reconstructSessionTranscript(database, 'session-001');
+		const toolResultEvent = transcript.find((e) => e.kind === 'tool_result');
+		expect(toolResultEvent).toBeDefined();
+		const payload = JSON.parse(toolResultEvent!.payload);
+		expect(payload.callId).toBe('call-1');
+		expect(payload.content).toBe('<html>result</html>');
+		expect(payload.isError).toBe(false);
+
+		const streamEvents = await readStreamEventsAfterCursor(database, { runId: 'run-001' });
+		const toolResultStreamEvent = streamEvents.events.find((e) => e.kind === 'tool.result');
+		expect(toolResultStreamEvent).toBeDefined();
 	});
 
 	it('classifies retryable provider failures', () => {

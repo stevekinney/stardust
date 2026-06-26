@@ -18,15 +18,39 @@ export type SessionState = {
 	completedRunCount: number;
 };
 
+/** Hard limits enforced by AgentRunWorkflow at runtime. */
+export type RunBudget = {
+	/** Max number of model round-trips per run. */
+	maxModelCalls: number;
+	/** Max number of tool calls per run. */
+	maxToolCalls: number;
+	/** Max number of child workflow launches per run. */
+	maxChildWorkflows: number;
+	/** Max total tokens (input + output) across all model calls. */
+	maxTokens: number;
+	/** Max total actions (tool calls + child workflows) per run. */
+	maxActions: number;
+	/** Max wall-clock milliseconds from run start to completion. */
+	maxActiveWallClockMs: number;
+	/** Max total estimated cost in USD across all model calls. */
+	maxEstimatedCostUsd: number;
+};
+
 export type AgentRunInput = {
 	sessionKey: string;
 	runId: string;
 	message: string;
-	toolCalls?: ToolCallInput[];
+	/** Model ID to use for the run. Defaults to the project default in the workflow. */
+	model?: string;
+	/** Optional system prompt override for the run. */
+	systemPrompt?: string;
+	/** Tool schemas to expose to the model. */
+	tools?: ModelToolSchema[];
 	workspacePath?: string;
 	approvalTtlMs?: number;
 	delegateSubagents?: boolean;
-	budget?: ModelUsage;
+	/** Runtime budget caps. Workflow uses DEFAULT_RUN_BUDGET when omitted. */
+	budget?: RunBudget;
 };
 
 export type AgentRunResult = {
@@ -74,10 +98,13 @@ export type SubagentKind = 'research' | 'code' | 'critic';
 export type SubagentWorkflowInput = {
 	parentRunId: string;
 	subagentRunId: string;
+	sessionKey: string;
 	kind: SubagentKind;
 	message: string;
 	finalAnswer?: string;
 	budgetDebit: BudgetLedgerEntry;
+	/** Model ID to use for the subagent's model call. */
+	model?: string;
 };
 
 export type SubagentWorkflowResult = {
