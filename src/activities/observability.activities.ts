@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../lib/server/db/client';
 import { runs, sessions } from '../lib/server/db/schema';
+import type { ModelUsage, SubagentKind } from '../lib/types';
 import { appendTranscriptEvent, publishStreamEvent } from '../lib/server/stream';
 
 type RunCompletionStatus = 'complete' | 'failed' | 'cancelled';
@@ -68,6 +69,54 @@ export async function recordRunStarted(input: {
 		runId: input.runId,
 		kind: 'lifecycle',
 		payload: JSON.stringify({ status: 'started' }),
+		createdAt: now
+	});
+}
+
+export async function recordSubagentStarted(input: {
+	sessionId: string;
+	runId: string;
+	subagentRunId: string;
+	kind: SubagentKind;
+	label: string;
+}): Promise<void> {
+	const now = new Date().toISOString();
+	await publishStreamEvent(db, {
+		sessionId: input.sessionId,
+		runId: input.runId,
+		kind: 'subagent.start',
+		payload: JSON.stringify({
+			subagentRunId: input.subagentRunId,
+			kind: input.kind,
+			label: input.label,
+			startedAt: now
+		}),
+		createdAt: now
+	});
+}
+
+export async function recordSubagentCompleted(input: {
+	sessionId: string;
+	runId: string;
+	subagentRunId: string;
+	kind: SubagentKind;
+	label: string;
+	status: 'complete' | 'failed' | 'cancelled';
+	budget?: ModelUsage;
+}): Promise<void> {
+	const now = new Date().toISOString();
+	await publishStreamEvent(db, {
+		sessionId: input.sessionId,
+		runId: input.runId,
+		kind: 'subagent.complete',
+		payload: JSON.stringify({
+			subagentRunId: input.subagentRunId,
+			kind: input.kind,
+			label: input.label,
+			status: input.status,
+			budget: input.budget ?? null,
+			completedAt: now
+		}),
 		createdAt: now
 	});
 }

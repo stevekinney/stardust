@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { asc, desc, eq } from 'drizzle-orm';
 import type {
 	ApprovalAction,
 	ApprovalCardState,
@@ -280,5 +280,15 @@ export class ApprovalsRepository {
 			.where(eq(approvalRequests.id, approvalId))
 			.limit(1);
 		return rows[0] ? toCardState(rows[0]) : null;
+	}
+
+	/** List all approval requests for a session, pending first then newest first. */
+	async listBySession(sessionId: string): Promise<ApprovalCardState[]> {
+		const rows = await this.database
+			.select()
+			.from(approvalRequests)
+			.where(eq(approvalRequests.sessionId, sessionId))
+			.orderBy(asc(approvalRequests.status), desc(approvalRequests.createdAt));
+		return rows.map(toCardState);
 	}
 }
