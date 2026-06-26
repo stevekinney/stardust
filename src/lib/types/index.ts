@@ -25,12 +25,69 @@ export type AgentRunInput = {
 	toolCalls?: ToolCallInput[];
 	workspacePath?: string;
 	approvalTtlMs?: number;
+	delegateSubagents?: boolean;
+	budget?: ModelUsage;
 };
 
 export type AgentRunResult = {
 	runId: string;
 	status: 'complete' | 'failed' | 'cancelled';
 	finalAnswer: string;
+	budgetLedger?: BudgetLedgerSnapshot;
+	timelineLanes?: RunTimelineLane[];
+	criticAnnotations?: CriticAnnotation[];
+};
+
+export type BudgetLedgerEntry = {
+	workflowId: string;
+	laneId: string;
+	label: string;
+	usage: ModelUsage;
+};
+
+export type BudgetLedgerSnapshot = {
+	limit: ModelUsage;
+	used: ModelUsage;
+	remaining: ModelUsage;
+	entries: BudgetLedgerEntry[];
+};
+
+export type CriticAnnotation = {
+	id: string;
+	laneId: string;
+	message: string;
+	blocking: false;
+};
+
+export type RunTimelineLane = {
+	id: string;
+	label: string;
+	kind: 'parent' | 'subagent';
+	status: 'running' | 'complete' | 'failed' | 'cancelled';
+	budget?: ModelUsage;
+	children?: RunTimelineLane[];
+	annotations?: CriticAnnotation[];
+};
+
+export type SubagentKind = 'research' | 'code' | 'critic';
+
+export type SubagentWorkflowInput = {
+	parentRunId: string;
+	subagentRunId: string;
+	kind: SubagentKind;
+	message: string;
+	budgetDebit: BudgetLedgerEntry;
+};
+
+export type SubagentWorkflowResult = {
+	parentRunId: string;
+	subagentRunId: string;
+	kind: SubagentKind;
+	status: 'complete';
+	finalAnswer: string;
+	budgetDebit: BudgetLedgerEntry;
+	timelineLane: RunTimelineLane;
+	annotations?: CriticAnnotation[];
 };
 
 export type ScheduledAgentInput = {

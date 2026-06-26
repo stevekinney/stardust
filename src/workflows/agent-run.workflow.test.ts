@@ -4,6 +4,7 @@ import { ApplicationFailure } from '@temporalio/common';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type {
+	AgentRunResult,
 	ApprovalCardState,
 	ApprovalResolution,
 	RecordApprovalRequestInput,
@@ -305,6 +306,89 @@ describe('agentRunWorkflow approvals', () => {
 				expect.objectContaining({ action: 'expire', actor: 'system' })
 			]);
 			expect(activityState.executions).toHaveLength(0);
+		});
+	});
+});
+
+describe('agentRunWorkflow subagents', () => {
+	let env: TestWorkflowEnvironment;
+
+	beforeAll(async () => {
+		env = await TestWorkflowEnvironment.createTimeSkipping();
+	});
+
+	afterAll(async () => {
+		await env.teardown();
+	});
+
+	it('fans out research, code, and critic children against one shared budget ledger', async () => {
+		const worker = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_ORCHESTRATOR,
+			workflowsPath: fileURLToPath(new URL('./index.ts', import.meta.url))
+		});
+
+		await worker.runUntil(async () => {
+			const runId = `subagents-${Date.now()}`;
+			const result: AgentRunResult = await env.client.workflow.execute('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [
+					{
+						sessionKey: 'session-001',
+						runId,
+						message: 'research the option, draft the change, and critique the answer',
+						delegateSubagents: true,
+						budget: {
+							inputTokens: 100,
+							outputTokens: 40,
+							estimatedCostUsd: 0.001
+						}
+					}
+				]
+			});
+
+			expect(result.status).toBe('complete');
+			expect(result.finalAnswer).toBe('(stub — no model in T2)');
+			expect(result.budgetLedger?.used).toEqual({
+				inputTokens: 100,
+				outputTokens: 40,
+				estimatedCostUsd: 0.001
+			});
+			expect(result.budgetLedger?.entries.map((entry) => entry.laneId)).toEqual([
+				`${runId}:research`,
+				`${runId}:code`,
+				`${runId}:critic`
+			]);
+			expect(
+				result.budgetLedger?.entries.reduce((sum, entry) => sum + entry.usage.inputTokens, 0)
+			).toBe(100);
+			expect(result.timelineLanes).toEqual([
+				expect.objectContaining({
+					id: runId,
+					children: [
+						expect.objectContaining({ id: `${runId}:research`, kind: 'subagent' }),
+						expect.objectContaining({ id: `${runId}:code`, kind: 'subagent' }),
+						expect.objectContaining({
+							id: `${runId}:critic`,
+							kind: 'subagent',
+							annotations: [
+								expect.objectContaining({
+									blocking: false,
+									message: 'No-op critic stub: final answer left unchanged.'
+								})
+							]
+						})
+					]
+				})
+			]);
+			expect(result.criticAnnotations).toEqual([
+				expect.objectContaining({
+					blocking: false,
+					message: 'No-op critic stub: final answer left unchanged.'
+				})
+			]);
 		});
 	});
 });
