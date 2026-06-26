@@ -171,17 +171,41 @@ describe('LocalSubprocessSandboxProvider', () => {
 		});
 	});
 
-	it('removes ephemeral directories after use', async () => {
-		expect.assertions(2);
+	it('runs ephemeral commands in an isolated temporary directory and removes it on terminate', async () => {
+		expect.assertions(6);
 
 		const provider = new LocalSubprocessSandboxProvider({ workspaceRoot: temporaryRoot });
-		const ephemeralDirectory = await provider.createEphemeralDirectory('session-a');
+		await provider.writeFile({
+			sessionKey: 'session-a',
+			path: 'shared.txt',
+			contents: 'persistent'
+		});
+		const sessionWorkspacePath = await provider.ensureWorkspace('session-a');
+		const ephemeralSandbox = await provider.createEphemeralSandbox('session-a');
 
-		await expect(stat(ephemeralDirectory.path)).resolves.toMatchObject({
+		expect(ephemeralSandbox.workspacePath).not.toBe(sessionWorkspacePath);
+		await expect(stat(ephemeralSandbox.workspacePath)).resolves.toMatchObject({
 			isDirectory: expect.any(Function)
 		});
-		await ephemeralDirectory.remove();
-		await expect(stat(ephemeralDirectory.path)).rejects.toMatchObject({ code: 'ENOENT' });
+
+		const result = await ephemeralSandbox.runCommand({
+			runId: 'run-a',
+			command: 'bun',
+			args: [
+				'-e',
+				[
+					'console.log(process.cwd())',
+					"console.log(await Bun.file('shared.txt').exists())",
+					"await Bun.write('ephemeral.txt', 'temporary')"
+				].join(';')
+			]
+		});
+
+		expect(result.status).toBe('complete');
+		expect(result.workspacePath).toBe(ephemeralSandbox.workspacePath);
+		expect(result.stdout).toBe(`${ephemeralSandbox.workspacePath}\nfalse\n`);
+		await ephemeralSandbox.terminate();
+		await expect(stat(ephemeralSandbox.workspacePath)).rejects.toMatchObject({ code: 'ENOENT' });
 	});
 
 	it('does not preserve still-running tracked processes across provider instances', async () => {

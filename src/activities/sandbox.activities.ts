@@ -4,6 +4,7 @@ import { getSandboxProvider } from '@src/lib/server/sandbox';
 import type {
 	SandboxCommandInput,
 	SandboxCommandResult,
+	SandboxEphemeralCommandInput,
 	SandboxFileInput,
 	SandboxSnapshotInput,
 	SandboxSnapshotResult,
@@ -30,6 +31,25 @@ export async function runSandboxCommand(input: SandboxCommandInput): Promise<San
 		return await sandboxProvider.runCommand(input);
 	} finally {
 		await sandboxProvider.cancelSession(input.sessionKey);
+	}
+}
+
+interface RunEphemeralSandboxCommandInput {
+	sessionKey: string;
+	input: SandboxEphemeralCommandInput;
+}
+
+export async function runEphemeralSandboxCommand({
+	sessionKey,
+	input
+}: RunEphemeralSandboxCommandInput): Promise<SandboxCommandResult> {
+	const sandbox = await sandboxProvider.createEphemeralSandbox(sessionKey);
+
+	try {
+		heartbeat({ sessionKey, command: input.command });
+		return await sandbox.runCommand(input);
+	} finally {
+		await sandbox.terminate();
 	}
 }
 
