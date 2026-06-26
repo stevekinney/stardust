@@ -29,6 +29,13 @@
       "when": 1782424974534,
       "tag": "0003_approval_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1782424975534,
+      "tag": "0004_stream_events_unique_run_sequence",
+      "breakpoints": true
     }
   ]
 }

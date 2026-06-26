@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 // ── sessions ─────────────────────────────────────────────────────────────────
 // One row per logical resumable conversation thread. Maps 1:1 to AgentSessionWorkflow.
@@ -245,29 +245,37 @@ export const schedules = sqliteTable('schedules', {
 
 // ── stream_events ─────────────────────────────────────────────────────────────
 // Live stream bus (replaces Redis Streams). WAL mode lets Worker write while SSE route reads.
-export const streamEvents = sqliteTable('stream_events', {
-	id: integer('id', { mode: 'number' }).primaryKey({ autoIncrement: true }),
-	runId: text('run_id').notNull(),
-	sessionId: text('session_id').notNull(),
-	sequence: integer('sequence').notNull(),
-	kind: text('kind', {
-		enum: [
-			'assistant.delta',
-			'assistant.message',
-			'tool.call',
-			'tool.result',
-			'lifecycle',
-			'approval.request',
-			'approval.resolution',
-			'memory.candidate',
-			'subagent.start',
-			'subagent.complete',
-			'sandbox.output'
-		]
-	}).notNull(),
-	payload: text('payload').notNull(), // JSON
-	createdAt: text('created_at').notNull().default(new Date(0).toISOString())
-});
+export const streamEvents = sqliteTable(
+	'stream_events',
+	{
+		id: integer('id', { mode: 'number' }).primaryKey({ autoIncrement: true }),
+		runId: text('run_id').notNull(),
+		sessionId: text('session_id').notNull(),
+		sequence: integer('sequence').notNull(),
+		kind: text('kind', {
+			enum: [
+				'assistant.delta',
+				'assistant.message',
+				'tool.call',
+				'tool.result',
+				'lifecycle',
+				'approval.request',
+				'approval.resolution',
+				'memory.candidate',
+				'subagent.start',
+				'subagent.complete',
+				'sandbox.output'
+			]
+		}).notNull(),
+		payload: text('payload').notNull(), // JSON
+		createdAt: text('created_at').notNull().default(new Date(0).toISOString())
+	},
+	(table) => [
+		// Enforces monotonic per-run sequence authority: no two events for the same
+		// run may share a sequence number, preventing duplicates under concurrent writes.
+		uniqueIndex('stream_events_run_id_sequence_unique').on(table.runId, table.sequence)
+	]
+);
 
 // ── idempotency_ledger ────────────────────────────────────────────────────────
 // Prevents duplicate external side effects on Activity retry.

@@ -5,7 +5,8 @@ import type { ModelUsage, SubagentKind } from '../lib/types';
 import {
 	appendTranscriptEvent,
 	persistToolResult as runPersistToolResult,
-	publishStreamEvent
+	publishStreamEvent,
+	trimCompletedRunStream
 } from '../lib/server/stream';
 
 type RunCompletionStatus = 'complete' | 'failed' | 'cancelled';
@@ -183,4 +184,12 @@ export async function recordRunCompleted(input: {
 		payload: JSON.stringify({ status: input.status }),
 		createdAt: now
 	});
+
+	// Trim the live stream bus once the canonical transcript has been committed.
+	// Only 'complete' runs are trimmed; failed/cancelled runs retain their events
+	// for post-mortem inspection. The trim must run after the status update so
+	// trimCompletedRunStream's guard passes.
+	if (input.status === 'complete') {
+		await trimCompletedRunStream(db, input.runId);
+	}
 }

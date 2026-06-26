@@ -72,7 +72,19 @@ describe('stream events', () => {
 		expect(second.id).toBeGreaterThan(first.id);
 	});
 
-	it('replays stream events after a cursor and detects gaps', async () => {
+	it('rejects a duplicate (run_id, sequence) pair — UNIQUE constraint is enforced', () => {
+		// The migration must have created the index for this to throw.
+		expect(() => {
+			sqlite
+				.prepare(
+					`INSERT INTO stream_events (run_id, session_id, sequence, kind, payload, created_at)
+					 VALUES (?, ?, ?, ?, ?, ?)`
+				)
+				.run('run-001', 'session-001', 1, 'lifecycle', '{}', new Date().toISOString());
+		}).toThrow(/UNIQUE constraint failed/);
+	});
+
+	it('replays stream events after a cursor and detects leading-edge gaps', async () => {
 		const first = await publishStreamEvent(database, {
 			runId: 'run-complete',
 			sessionId: 'session-001',
@@ -109,6 +121,40 @@ describe('stream events', () => {
 		expect(later.id).toBeGreaterThan(first.id + 1);
 		expect(gapReplay.gapDetected).toBe(true);
 		expect(encodeServerSentEvents(gapReplay)).toContain('event: stream.gap');
+	});
+
+	it('detects interior gaps within a batch via per-run sequence', async () => {
+		// Insert three events for a fresh run.
+		const a = await publishStreamEvent(database, {
+			runId: 'run-001',
+			sessionId: 'session-001',
+			kind: 'lifecycle',
+			payload: JSON.stringify({ status: 'seq-gap-test-a' })
+		});
+		const b = await publishStreamEvent(database, {
+			runId: 'run-001',
+			sessionId: 'session-001',
+			kind: 'lifecycle',
+			payload: JSON.stringify({ status: 'seq-gap-test-b' })
+		});
+		await publishStreamEvent(database, {
+			runId: 'run-001',
+			sessionId: 'session-001',
+			kind: 'lifecycle',
+			payload: JSON.stringify({ status: 'seq-gap-test-c' })
+		});
+
+		// Delete the middle event to create an interior sequence gap.
+		sqlite.prepare(`DELETE FROM stream_events WHERE id = ?`).run(b.id);
+
+		// Reading after `a` should now return a and c — sequences a.sequence, a.sequence+2.
+		const gapReplay = await readStreamEventsAfterCursor(database, {
+			runId: 'run-001',
+			afterId: a.id - 1
+		});
+
+		// The batch contains a (seq N) and c (seq N+2) — the gap between them must be detected.
+		expect(gapReplay.gapDetected).toBe(true);
 	});
 
 	it('coalesces token deltas before publishing', async () => {

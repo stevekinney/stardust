@@ -27,6 +27,21 @@ beforeAll(() => {
 	sqlite.pragma('journal_mode = WAL');
 	database = drizzle(sqlite, { schema });
 	migrate(database, { migrationsFolder: './drizzle' });
+
+	// Seed session and runs used across tests.
+	sqlite
+		.prepare(`INSERT INTO sessions (id, session_key, status, workflow_id) VALUES (?, ?, ?, ?)`)
+		.run('route-session-001', 'route-session-001', 'active', 'agent-session:route-session-001');
+
+	// A completed run — the SSE tail must close after sending buffered events.
+	sqlite
+		.prepare(`INSERT INTO runs (id, session_id, workflow_id, status) VALUES (?, ?, ?, ?)`)
+		.run('route-run-complete', 'route-session-001', 'agent-run:route-run-complete', 'complete');
+
+	// A running run — flipped to complete during the live-tail test.
+	sqlite
+		.prepare(`INSERT INTO runs (id, session_id, workflow_id, status) VALUES (?, ?, ?, ?)`)
+		.run('route-run-live', 'route-session-001', 'agent-run:route-run-live', 'running');
 });
 
 afterAll(() => {
@@ -35,32 +50,83 @@ afterAll(() => {
 });
 
 describe('stream route', () => {
-	it('returns server-sent events after the requested cursor', async () => {
+	it('returns server-sent events after the requested cursor and closes when run is complete', async () => {
+		// Publish two events for a completed run.
 		const first = await publishStreamEvent(database, {
-			runId: 'route-run-001',
+			runId: 'route-run-complete',
 			sessionId: 'route-session-001',
 			kind: 'lifecycle',
 			payload: JSON.stringify({ status: 'started' })
 		});
 		await publishStreamEvent(database, {
-			runId: 'route-run-001',
+			runId: 'route-run-complete',
 			sessionId: 'route-session-001',
 			kind: 'assistant.message',
 			payload: JSON.stringify({ text: 'ready' })
 		});
 
+		// Because the run is already 'complete', the stream must close naturally.
 		const response = await GET({
-			params: { sessionKey: 'route-session-001', runId: 'route-run-001' },
-			request: new Request(`http://localhost/api/sessions/route-session-001/stream/route-run-001`),
+			params: { sessionKey: 'route-session-001', runId: 'route-run-complete' },
+			request: new Request(
+				`http://localhost/api/sessions/route-session-001/stream/route-run-complete`
+			),
 			url: new URL(
-				`http://localhost/api/sessions/route-session-001/stream/route-run-001?cursor=${first.id}`
+				`http://localhost/api/sessions/route-session-001/stream/route-run-complete?cursor=${first.id}`
 			)
 		} as Parameters<typeof GET>[0]);
 
 		expect(response.headers.get('content-type')).toContain('text/event-stream');
+
+		// response.text() resolves only when the stream closes — it must not hang.
 		const body = await response.text();
 		expect(body).not.toContain(`id: ${first.id}`);
 		expect(body).toContain('event: assistant.message');
 		expect(body).toContain('data: {"text":"ready"}');
+	});
+
+	it('delivers events published after the stream opens (live tail)', async () => {
+		// Publish an initial event before the stream opens.
+		const first = await publishStreamEvent(database, {
+			runId: 'route-run-live',
+			sessionId: 'route-session-001',
+			kind: 'lifecycle',
+			payload: JSON.stringify({ status: 'started' })
+		});
+
+		// Open the stream with a cursor pointing past the initial event.
+		const response = await GET({
+			params: { sessionKey: 'route-session-001', runId: 'route-run-live' },
+			request: new Request(`http://localhost/api/sessions/route-session-001/stream/route-run-live`),
+			url: new URL(
+				`http://localhost/api/sessions/route-session-001/stream/route-run-live?cursor=${first.id}`
+			)
+		} as Parameters<typeof GET>[0]);
+
+		expect(response.headers.get('content-type')).toContain('text/event-stream');
+
+		// Publish a new event while the stream is polling, then flip the run to
+		// 'complete' so the tail loop exits naturally.
+		await publishStreamEvent(database, {
+			runId: 'route-run-live',
+			sessionId: 'route-session-001',
+			kind: 'assistant.message',
+			payload: JSON.stringify({ text: 'live delivery' })
+		});
+		sqlite.prepare(`UPDATE runs SET status = 'complete' WHERE id = ?`).run('route-run-live');
+
+		// Drain the stream incrementally via the reader.
+		const reader = response.body!.getReader();
+		const decoder = new TextDecoder();
+		let body = '';
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			body += decoder.decode(value, { stream: true });
+		}
+
+		// The live-published event must arrive before the stream closes.
+		expect(body).toContain('event: assistant.message');
+		expect(body).toContain('data: {"text":"live delivery"}');
 	});
 });

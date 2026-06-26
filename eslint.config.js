@@ -80,7 +80,11 @@ export default defineConfig(
 			'temporal/workflow-no-logger-library-in-workflow': 'off',
 			'temporal/workflow-no-worker-import': 'off',
 			// SSR tests intentionally manipulate globalThis to simulate a window-less environment.
-			'temporal/workflow-no-unsafe-global-mutation': 'off'
+			'temporal/workflow-no-unsafe-global-mutation': 'off',
+			// Activity test files must import activity implementations directly to call them.
+			// The rule is designed for workflow code; test files are not workflows.
+			'temporal/workflow-no-activity-definitions-import': 'off',
+			'temporal/test-import-type-for-activities': 'off'
 		}
 	},
 	{

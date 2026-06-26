@@ -12,7 +12,6 @@ export type PublishStreamEventInput = Pick<
 	StreamEventInsert,
 	'runId' | 'sessionId' | 'kind' | 'payload'
 > & {
-	sequence?: number;
 	createdAt?: string;
 };
 
@@ -20,7 +19,6 @@ export type AppendTranscriptEventInput = Pick<
 	TranscriptEventInsert,
 	'id' | 'runId' | 'sessionId' | 'kind' | 'payload'
 > & {
-	sequence?: number;
 	createdAt?: string;
 };
 
@@ -29,39 +27,52 @@ export type StreamReplay = {
 	gapDetected: boolean;
 };
 
-async function nextStreamSequence(database: DatabaseClient, runId: string): Promise<number> {
-	const rows = await database
-		.select({ sequence: streamEvents.sequence })
-		.from(streamEvents)
-		.where(eq(streamEvents.runId, runId))
-		.orderBy(desc(streamEvents.sequence))
-		.limit(1);
-	return (rows[0]?.sequence ?? 0) + 1;
-}
-
-async function nextTranscriptSequence(database: DatabaseClient, runId: string): Promise<number> {
-	const rows = await database
-		.select({ sequence: transcriptEvents.sequence })
-		.from(transcriptEvents)
-		.where(eq(transcriptEvents.runId, runId))
-		.orderBy(desc(transcriptEvents.sequence))
-		.limit(1);
-	return (rows[0]?.sequence ?? 0) + 1;
-}
-
+/**
+ * Inserts a stream event and assigns the next per-run monotonic sequence number
+ * atomically inside a SQLite transaction. The transaction's exclusive write lock
+ * prevents concurrent inserts from claiming the same sequence for the same run,
+ * and the UNIQUE(run_id, sequence) index enforces this at the database level.
+ *
+ * Inside the synchronous transaction callback, `.get()` is used instead of
+ * `await` because better-sqlite3 transactions run synchronously.
+ */
 export async function publishStreamEvent(
 	database: DatabaseClient,
 	input: PublishStreamEventInput
 ): Promise<StreamEventSelect> {
-	const sequence = input.sequence ?? (await nextStreamSequence(database, input.runId));
 	const createdAt = input.createdAt ?? new Date().toISOString();
-	const rows = await database
-		.insert(streamEvents)
-		.values({ ...input, sequence, createdAt })
-		.returning();
-	return rows[0];
+	const row = database.transaction((tx) => {
+		const last = tx
+			.select({ sequence: streamEvents.sequence })
+			.from(streamEvents)
+			.where(eq(streamEvents.runId, input.runId))
+			.orderBy(desc(streamEvents.sequence))
+			.limit(1)
+			.get();
+		const sequence = (last?.sequence ?? 0) + 1;
+		const inserted = tx
+			.insert(streamEvents)
+			.values({
+				runId: input.runId,
+				sessionId: input.sessionId,
+				kind: input.kind,
+				payload: input.payload,
+				sequence,
+				createdAt
+			})
+			.returning()
+			.get();
+		return inserted;
+	});
+	// The transaction always inserts one row and returns it; the non-null assertion
+	// is safe here.
+	return row!;
 }
 
+/**
+ * Coalesces an array of token-delta chunks into a single assistant.delta stream
+ * event. Returns null when chunks is empty so callers can skip the insert.
+ */
 export async function publishAssistantDeltas(
 	database: DatabaseClient,
 	input: Omit<PublishStreamEventInput, 'kind' | 'payload'> & { chunks: string[] }
@@ -71,13 +82,21 @@ export async function publishAssistantDeltas(
 	return publishStreamEvent(database, {
 		runId: input.runId,
 		sessionId: input.sessionId,
-		sequence: input.sequence,
 		createdAt: input.createdAt,
 		kind: 'assistant.delta',
 		payload: JSON.stringify({ text })
 	});
 }
 
+/**
+ * Reads stream events for a run after a given cursor ID, ordered by autoincrement
+ * ID. Detects gaps using two checks:
+ * - Leading edge: the first returned event's ID is not immediately after the cursor.
+ * - Interior: any consecutive pair of returned events has non-contiguous sequences.
+ *
+ * Either condition sets gapDetected=true so the client can request a full replay
+ * from the canonical transcript.
+ */
 export async function readStreamEventsAfterCursor(
 	database: DatabaseClient,
 	input: { runId: string; afterId?: number; limit?: number }
@@ -90,23 +109,56 @@ export async function readStreamEventsAfterCursor(
 		.orderBy(asc(streamEvents.id))
 		.limit(input.limit ?? 100);
 
+	const hasLeadingGap = events.length > 0 && afterId > 0 && events[0].id !== afterId + 1;
+	const hasInteriorGap = events.some(
+		(event, index) => index > 0 && event.sequence !== events[index - 1].sequence + 1
+	);
+
 	return {
 		events,
-		gapDetected: events.length > 0 && afterId > 0 && events[0].id !== afterId + 1
+		gapDetected: hasLeadingGap || hasInteriorGap
 	};
 }
 
+/**
+ * Inserts a canonical transcript event and assigns the next per-run monotonic
+ * sequence number atomically inside a SQLite transaction.
+ *
+ * Inside the synchronous transaction callback, `.get()` is used instead of
+ * `await` because better-sqlite3 transactions run synchronously.
+ */
 export async function appendTranscriptEvent(
 	database: DatabaseClient,
 	input: AppendTranscriptEventInput
 ): Promise<TranscriptEventSelect> {
-	const sequence = input.sequence ?? (await nextTranscriptSequence(database, input.runId));
 	const createdAt = input.createdAt ?? new Date().toISOString();
-	const rows = await database
-		.insert(transcriptEvents)
-		.values({ ...input, sequence, createdAt })
-		.returning();
-	return rows[0];
+	const row = database.transaction((tx) => {
+		const last = tx
+			.select({ sequence: transcriptEvents.sequence })
+			.from(transcriptEvents)
+			.where(eq(transcriptEvents.runId, input.runId))
+			.orderBy(desc(transcriptEvents.sequence))
+			.limit(1)
+			.get();
+		const sequence = (last?.sequence ?? 0) + 1;
+		const inserted = tx
+			.insert(transcriptEvents)
+			.values({
+				id: input.id,
+				runId: input.runId,
+				sessionId: input.sessionId,
+				kind: input.kind,
+				payload: input.payload,
+				sequence,
+				createdAt
+			})
+			.returning()
+			.get();
+		return inserted;
+	});
+	// The transaction always inserts one row and returns it; the non-null assertion
+	// is safe here.
+	return row!;
 }
 
 export async function reconstructSessionTranscript(
