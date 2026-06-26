@@ -40,10 +40,19 @@ const activityState: {
 	requests: RecordApprovalRequestInput[];
 	resolutions: RecordApprovalResolutionInput[];
 	executions: Array<ToolExecutionInput & { approved?: boolean }>;
+	startedRuns: Array<{ sessionId: string; runId: string; message: string }>;
+	completedRuns: Array<{
+		sessionId: string;
+		runId: string;
+		status: 'complete' | 'failed' | 'cancelled';
+		finalAnswer: string;
+	}>;
 } = {
 	requests: [],
 	resolutions: [],
-	executions: []
+	executions: [],
+	startedRuns: [],
+	completedRuns: []
 };
 
 function terminalStateForAction(
@@ -111,6 +120,17 @@ const testActivities = {
 			outcome: 'success',
 			content: { ok: true }
 		};
+	},
+	async recordRunStarted(input: { sessionId: string; runId: string; message: string }) {
+		activityState.startedRuns.push(input);
+	},
+	async recordRunCompleted(input: {
+		sessionId: string;
+		runId: string;
+		status: 'complete' | 'failed' | 'cancelled';
+		finalAnswer: string;
+	}) {
+		activityState.completedRuns.push(input);
 	}
 };
 
@@ -129,6 +149,8 @@ describe('agentRunWorkflow approvals', () => {
 		activityState.requests = [];
 		activityState.resolutions = [];
 		activityState.executions = [];
+		activityState.startedRuns = [];
+		activityState.completedRuns = [];
 	});
 
 	async function runWithWorkers<T>(callback: () => Promise<T>): Promise<T> {

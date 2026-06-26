@@ -31,6 +31,16 @@ type ToolActivities = {
 	executeTool(input: ToolExecutionInput & { approved?: boolean }): Promise<ToolExecutionResult>;
 };
 
+type ObservabilityActivities = {
+	recordRunStarted(input: { sessionId: string; runId: string; message: string }): Promise<void>;
+	recordRunCompleted(input: {
+		sessionId: string;
+		runId: string;
+		status: AgentRunResult['status'];
+		finalAnswer: string;
+	}): Promise<void>;
+};
+
 const TASK_QUEUE_TOOLS = 'tools-general';
 const TASK_QUEUE_SANDBOX = 'tools-sandbox';
 const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
@@ -48,8 +58,24 @@ const sandboxActivities = proxyActivities<ToolActivities>({
 	retry: { maximumAttempts: 1 }
 });
 
+const observabilityActivities = proxyActivities<ObservabilityActivities>({
+	taskQueue: TASK_QUEUE_TOOLS,
+	startToCloseTimeout: '10 seconds',
+	retry: { maximumAttempts: 3 }
+});
+
 function createApprovalId(runId: string, toolCallId: string): string {
 	return `${runId}:${toolCallId}:approval`;
+}
+
+async function completeRun(input: AgentRunInput, result: AgentRunResult): Promise<AgentRunResult> {
+	await observabilityActivities.recordRunCompleted({
+		sessionId: input.sessionKey,
+		runId: input.runId,
+		status: result.status,
+		finalAnswer: result.finalAnswer
+	});
+	return result;
 }
 
 /** Stub: no-tool model path. Yields control briefly so the parent session can accept concurrent turns. */
@@ -85,19 +111,27 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 		return recordedApprovalResolution!;
 	});
 
+	await observabilityActivities.recordRunStarted({
+		sessionId: input.sessionKey,
+		runId: input.runId,
+		message: input.message
+	});
+
 	for (const toolCall of input.toolCalls ?? []) {
 		const decision = await policyActivities.evaluateToolCallPolicy({ call: toolCall });
 		if (decision.status === 'denied') {
-			return {
+			return completeRun(input, {
 				runId: input.runId,
 				status: 'failed',
 				finalAnswer: `Tool call denied by policy: ${decision.reason}`
-			};
+			});
 		}
 
 		if (decision.status === 'allowed') {
 			await sandboxActivities.executeTool({
 				call: toolCall,
+				sessionId: input.sessionKey,
+				runId: input.runId,
 				workspacePath: input.workspacePath
 			});
 			continue;
@@ -132,11 +166,11 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 			pendingApproval = { ...pendingApproval, status: 'expired', resolution: expired };
 			status = 'complete';
 			await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
-			return {
+			return completeRun(input, {
 				runId: input.runId,
 				status: 'complete',
 				finalAnswer: 'Tool call approval expired before execution.'
-			};
+			});
 		}
 
 		const recordedResolution = await policyActivities.recordApprovalResolution({
@@ -157,23 +191,23 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 		if (recordedResolution.terminalState === 'cancelled') {
 			status = 'cancelled';
 			await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
-			return {
+			return completeRun(input, {
 				runId: input.runId,
 				status: 'cancelled',
 				finalAnswer: recordedResolution.reason ?? 'Run cancelled during approval.'
-			};
+			});
 		}
 
 		if (recordedResolution.terminalState !== 'approved') {
 			status = 'complete';
 			await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
-			return {
+			return completeRun(input, {
 				runId: input.runId,
 				status: 'complete',
 				finalAnswer:
 					recordedResolution.reason ??
 					`Tool call ${recordedResolution.terminalState} before execution.`
-			};
+			});
 		}
 
 		status = 'running';
@@ -183,6 +217,8 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 				...toolCall,
 				arguments: recordedResolution.canonicalArguments
 			},
+			sessionId: input.sessionKey,
+			runId: input.runId,
 			workspacePath: input.workspacePath,
 			approved: true
 		});
@@ -191,9 +227,9 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 	await sleep('1ms');
 	status = 'complete';
 	await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
-	return {
+	return completeRun(input, {
 		runId: input.runId,
 		status: 'complete',
 		finalAnswer: '(stub — no model in T2)'
-	};
+	});
 }
