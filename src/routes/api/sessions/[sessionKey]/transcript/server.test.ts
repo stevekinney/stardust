@@ -1,31 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { GET } from './+server';
 
-const mocks = vi.hoisted(() => ({
-	dbSelect: vi.fn()
-}));
-
-// Mock the drizzle db client with a chainable builder.
-vi.mock('$lib/server/db/client', () => {
-	const chain = {
-		from: () => chain,
-		where: () => chain,
-		orderBy: () => chain,
-		limit: () => chain,
-		then: (resolve: (value: unknown[]) => void) => Promise.resolve([]).then(resolve)
-	};
-
-	return {
-		db: {
-			select: () => {
-				mocks.dbSelect();
-				return chain;
-			}
-		}
-	};
-});
-
-// Replace the drizzle chain with controllable mocks per test.
+// Controllable per-test fixtures for the two DB selects the route performs:
+// first select resolves the session row, second resolves the event rows.
 let sessionRow: unknown = null;
 let eventRows: unknown[] = [];
 

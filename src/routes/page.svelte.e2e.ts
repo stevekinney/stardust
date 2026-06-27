@@ -119,10 +119,117 @@ test('home page redirects to the most recent session when sessions exist', async
 		});
 	});
 
+	// Provide a minimal transcript so the redirect destination renders correctly.
+	await page.route('/api/sessions/my-test-session/transcript', (route) => {
+		void route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ events: [] })
+		});
+	});
+
 	await page.goto('/');
 
 	// Should auto-redirect to the most recent session.
 	await page.waitForURL('/sessions/my-test-session');
 	await expect(page.getByLabel('Message stream')).toBeVisible();
 	await expect(page.getByLabel('Message composer')).toBeVisible();
+});
+
+test('resume: navigating to an existing session rehydrates the conversation from transcript', async ({
+	page
+}) => {
+	// Serve the session in the list so the page doesn't redirect away.
+	await page.route('/api/sessions', (route) => {
+		void route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				sessions: [
+					{
+						id: 'sess-002',
+						sessionKey: 'resume-session',
+						status: 'idle',
+						workflowId: 'agent-session:resume-session',
+						createdAt: new Date().toISOString(),
+						updatedAt: new Date().toISOString()
+					}
+				]
+			})
+		});
+	});
+
+	// Mock the transcript with real payload shapes matching what the server writes:
+	// - user_message: { text } (observability.activities.ts → recordRunStarted)
+	// - tool_call:    { calls: [{id, name, input}] } (model-runner.ts → appendTranscriptEvent)
+	// - tool_result:  { callId, content, isError } (stream/index.ts → persistToolResult)
+	// - assistant_message: { text } (observability.activities.ts → recordRunCompleted)
+	// - lifecycle:    { status } (observability.activities.ts → recordRunStarted/recordRunCompleted)
+	await page.route('/api/sessions/resume-session/transcript', (route) => {
+		void route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				events: [
+					{
+						id: 'evt-1',
+						kind: 'user_message',
+						payload: JSON.stringify({ text: 'What is the capital of France?' }),
+						sequence: 1
+					},
+					{
+						id: 'evt-2',
+						kind: 'lifecycle',
+						payload: JSON.stringify({ status: 'started', recoverySafe: true }),
+						sequence: 2
+					},
+					{
+						id: 'evt-3',
+						kind: 'tool_call',
+						payload: JSON.stringify({
+							calls: [{ id: 'call-001', name: 'search_web', input: { query: 'capital France' } }]
+						}),
+						sequence: 3
+					},
+					{
+						id: 'evt-4',
+						kind: 'tool_result',
+						payload: JSON.stringify({ callId: 'call-001', content: 'Paris', isError: false }),
+						sequence: 4
+					},
+					{
+						id: 'evt-5',
+						kind: 'assistant_message',
+						payload: JSON.stringify({ text: 'The capital of France is Paris.' }),
+						sequence: 5
+					},
+					{
+						id: 'evt-6',
+						kind: 'lifecycle',
+						payload: JSON.stringify({ status: 'complete', recoverySafe: true }),
+						sequence: 6
+					}
+				]
+			})
+		});
+	});
+
+	await page.goto('/sessions/resume-session');
+
+	// The user message should appear as the conversation header.
+	await expect(page.getByLabel('User message')).toContainText('What is the capital of France?', {
+		timeout: 5_000
+	});
+
+	// The tool card from the transcript should render.
+	await expect(page.getByLabel('Tool: search_web')).toBeVisible({ timeout: 5_000 });
+
+	// The assistant response from the transcript should render.
+	await expect(page.getByLabel('Assistant message')).toContainText(
+		'The capital of France is Paris.',
+		{ timeout: 5_000 }
+	);
+
+	// The lifecycle completion marker should render.
+	await expect(page.getByLabel('Run complete')).toBeVisible({ timeout: 5_000 });
 });

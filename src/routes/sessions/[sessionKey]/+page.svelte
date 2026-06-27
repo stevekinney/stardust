@@ -33,8 +33,16 @@
 
 	/**
 	 * Fetch the canonical transcript for this session and populate the render state.
-	 * Transcript kinds use underscore-style (e.g. tool_call); the ConversationView
-	 * expects dot-style (e.g. tool.call), so we normalise on the way in.
+	 *
+	 * Transcript events use underscore-style kinds (e.g. `tool_call`) while the
+	 * ConversationView expects dot-style kinds (e.g. `tool.call`). We normalise
+	 * on the way in.
+	 *
+	 * `tool_call` transcript events are special: they pack multiple calls into a
+	 * single row as `{ calls: [{id, name, input}] }`, but ConversationView expects
+	 * one event per call with shape `{ id, name, input }`. We expand them here.
+	 *
+	 * `user_message` transcript payloads use `{ text }` (not `{ message }`).
 	 */
 	async function loadTranscript() {
 		try {
@@ -46,21 +54,22 @@
 			};
 
 			// Extract the last user_message as the current user message header.
+			// The transcript payload for user_message is { text: string }.
 			const userMsgEvents = body.events.filter((e) => e.kind === 'user_message');
 			if (userMsgEvents.length > 0) {
 				const lastUserMsg = userMsgEvents[userMsgEvents.length - 1];
 				try {
-					const parsed = JSON.parse(lastUserMsg.payload) as { message?: string };
-					currentUserMessage = parsed.message ?? null;
+					const parsed = JSON.parse(lastUserMsg.payload) as { text?: string };
+					currentUserMessage = parsed.text ?? null;
 				} catch {
 					// ignore malformed payload
 				}
 			}
 
 			// Map transcript kinds (underscore) → stream event kinds (dot).
+			// tool_call is omitted here because it needs special expansion below.
 			const KIND_MAP: Record<string, string> = {
 				assistant_message: 'assistant.message',
-				tool_call: 'tool.call',
 				tool_result: 'tool.result',
 				approval_request: 'approval.request',
 				approval_resolution: 'approval.resolution',
@@ -68,13 +77,29 @@
 				// user_message is rendered via currentUserMessage above
 			};
 
+			let seq = 0;
 			events = body.events
 				.filter((e) => e.kind !== 'user_message')
-				.map((e, index) => ({
-					id: index,
-					kind: KIND_MAP[e.kind] ?? e.kind,
-					payload: e.payload
-				}));
+				.flatMap((e) => {
+					if (e.kind === 'tool_call') {
+						// Each tool_call transcript event holds an array of calls.
+						// Expand into one tool.call event per call so ConversationView
+						// can render individual tool cards.
+						try {
+							const parsed = JSON.parse(e.payload) as {
+								calls?: Array<{ id: string; name: string; input: unknown }>;
+							};
+							return (parsed.calls ?? []).map((call) => ({
+								id: seq++,
+								kind: 'tool.call',
+								payload: JSON.stringify({ id: call.id, name: call.name, input: call.input })
+							}));
+						} catch {
+							return [];
+						}
+					}
+					return [{ id: seq++, kind: KIND_MAP[e.kind] ?? e.kind, payload: e.payload }];
+				});
 		} catch {
 			// Non-fatal: the conversation simply starts fresh if transcript can't be loaded.
 		}
