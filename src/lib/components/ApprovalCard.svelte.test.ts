@@ -168,4 +168,34 @@ describe('ApprovalCard', () => {
 
 		unmount(component);
 	});
+
+	it('renders tool description and risk level from the tool metadata', () => {
+		const component = mount(ApprovalCard, {
+			target: document.body,
+			props: {
+				approval: {
+					...approval,
+					tool: {
+						name: 'web.fetch',
+						description: 'Fetch an HTTP or HTTPS URL with SSRF protection.',
+						inputSchema: {},
+						metadata: {
+							risk: 'low' as const,
+							requiresApproval: false,
+							taskQueue: TASK_QUEUE_SANDBOX,
+							timeoutMs: 10_000,
+							retry: { maximumAttempts: 2 },
+							idempotencyBehavior: 'safe' as const
+						}
+					}
+				}
+			}
+		});
+
+		expect(document.body.textContent).toContain('Fetch an HTTP or HTTPS URL with SSRF protection.');
+		expect(document.body.textContent).toContain('Risk');
+		expect(document.body.textContent).toContain('low');
+
+		unmount(component);
+	});
 });
