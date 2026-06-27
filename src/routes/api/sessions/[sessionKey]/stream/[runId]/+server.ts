@@ -1,3 +1,4 @@
+import { error } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import { db } from '../../../../../../lib/server/db';
 import { runs } from '../../../../../../lib/server/db/schema';
@@ -58,6 +59,19 @@ function isTerminalLifecycleEvent(event: { kind: string; payload: string }): boo
  */
 export const GET: RequestHandler = async ({ params, request, url }) => {
 	const { runId } = params;
+
+	// Guard: return 404 immediately if the run does not exist. Without this
+	// check, an unknown runId causes the poll loop to spin indefinitely because
+	// `const [run] = await db.select(...)` resolves to `undefined` and the
+	// terminal-status guard `run && TERMINAL_STATUSES.has(run.status)` is
+	// permanently false.
+	const [existingRun] = await db
+		.select({ id: runs.id })
+		.from(runs)
+		.where(eq(runs.id, runId))
+		.limit(1);
+	if (!existingRun) throw error(404, 'Run not found');
+
 	let cursor = readCursor(request, url);
 	const signal = request.signal;
 
