@@ -171,6 +171,70 @@ describe('MemoryStore', () => {
 		});
 	});
 
+	it('excludes unconfirmed compaction candidates from listBySession and searchLexical', async () => {
+		// compactSessionMemory writes candidates with confirmedAt: null.
+		// listBySession and searchLexical must not surface them — only confirmed notes
+		// should appear in retrieval so the "no silent writes" invariant holds.
+		const sessionId = 'session-compaction-leak';
+
+		// Write the session row so the compactSessionMemory UPDATE does not fail.
+		sqlite
+			.prepare(
+				`INSERT INTO sessions (id, session_key, status, workflow_id)
+				 VALUES (?, ?, 'active', ?) ON CONFLICT(id) DO NOTHING`
+			)
+			.run(sessionId, sessionId, `agent-session:${sessionId}`);
+
+		// Also need a stream_events-compatible run for sequence tracking; use a confirmed
+		// session-summary so the memory panel's notes list shows one confirmed note.
+		await store.createNote({
+			id: 'compaction-confirmed-summary',
+			sessionId,
+			layer: 'session',
+			content: 'Session is about launch planning.',
+			tags: ['compaction'],
+			confirmedAt: new Date().toISOString()
+		});
+
+		// Run compaction — this writes a durable candidate with confirmedAt: null.
+		const result = await store.compactSessionMemory({
+			sessionId,
+			summary: 'Session compacted.',
+			candidates: [
+				{
+					layer: 'durable',
+					content: 'Steve prefers Bun for TypeScript projects.',
+					tags: ['tooling'],
+					reason: 'Stated clearly by the user.'
+				}
+			],
+			toTranscriptCursor: 10,
+			existingMemoryRefs: []
+		});
+
+		expect(result.candidateIds).toHaveLength(1);
+
+		// The unconfirmed candidate must NOT appear in listBySession.
+		const listed = await store.listBySession(sessionId);
+		const listedIds = listed.map((note) => note.id);
+		expect(listedIds).not.toContain(result.candidateIds[0]);
+		// The confirmed summary note SHOULD appear.
+		expect(listedIds).toContain('compaction-confirmed-summary');
+
+		// The unconfirmed candidate must NOT surface in searchLexical.
+		const searchResults = await store.searchLexical({
+			sessionId,
+			query: 'Bun TypeScript',
+			limit: 10
+		});
+		const searchIds = searchResults.map((note) => note.id);
+		expect(searchIds).not.toContain(result.candidateIds[0]);
+
+		// findById must still return the unconfirmed row (needed for confirmation flow).
+		const found = await store.findById(result.candidateIds[0]!);
+		expect(found).toMatchObject({ id: result.candidateIds[0], confirmedAt: null });
+	});
+
 	it('keeps a vector-ready retrieval seam that defaults to FTS-only', async () => {
 		await store.createNote({
 			id: 'memory-vector-low',
