@@ -294,6 +294,8 @@ export type ToolPolicyDecision =
 export type ToolExecutionInput = {
 	call: ToolCallInput;
 	sessionId?: string;
+	/** Session key (UUIDv7) used to construct artifact object keys. */
+	sessionKey?: string;
 	runId?: string;
 	workspacePath?: string;
 };
@@ -308,6 +310,10 @@ export type ToolExecutionResult = {
 		originalCharacters?: number;
 		idempotencyKey?: string;
 		idempotencyReplayed?: boolean;
+		/** Artifact ID when output was spilled to a local artifact (above TOOL_RESULT_INLINE_LIMIT). */
+		spilledArtifactId?: string;
+		/** Byte size of the spilled artifact content. */
+		spilledBytes?: number;
 	};
 };
 

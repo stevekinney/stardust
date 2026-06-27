@@ -6,10 +6,11 @@ import type {
 	ToolMetadata,
 	ToolPolicyDecision
 } from '@src/lib/types';
+import { TOOL_RESULT_INLINE_LIMIT } from '../config';
 import { detectPromptInjection } from './prompt-injection';
 import { POLICY_VERSION, riskRequiresApproval } from './risk';
 
-const MAX_INLINE_OUTPUT_CHARACTERS = 8_000;
+const MAX_INLINE_OUTPUT_CHARACTERS = TOOL_RESULT_INLINE_LIMIT;
 
 export type RegisteredTool = ToolManifestEntry & {
 	schema: z.ZodTypeAny;

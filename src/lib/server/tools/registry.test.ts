@@ -15,6 +15,7 @@ import {
 	getToolManifest,
 	registeredTools
 } from './registry';
+import { LocalArtifactStore } from '../artifacts/local-artifact-store';
 
 let workspacePath: string;
 
@@ -377,5 +378,42 @@ describe('tool registry', () => {
 	it('keeps armorer descriptors queryable through the registry', () => {
 		expect(registeredTools.every((tool) => tool.schema)).toBe(true);
 		expect(getToolManifest().every((tool) => tool.inputSchema.type === 'object')).toBe(true);
+	});
+
+	it('spills large tool output to artifact store when artifactStore and session IDs are provided', async () => {
+		const artifactDir = await mkdtemp(join(tmpdir(), 'stardust-spill-test-'));
+		try {
+			const artifactStore = new LocalArtifactStore({ storageRoot: artifactDir });
+			// Produce output above the default TOOL_RESULT_INLINE_LIMIT (8 000 chars).
+			const largeContent = 'X'.repeat(9_000);
+
+			const result = await executeRegisteredTool({
+				call: {
+					id: 'call-spill-001',
+					name: 'web.fetch',
+					arguments: { url: 'https://example.test' }
+				},
+				sessionId: 'sess-spill-test',
+				sessionKey: 'key-spill-test',
+				runId: 'run-spill-test',
+				artifactStore,
+				fetcher: async () =>
+					new Response(largeContent, {
+						status: 200,
+						headers: { 'content-type': 'text/plain' }
+					})
+			});
+
+			expect(result.outcome).toBe('success');
+			// The spill path should populate these metadata fields.
+			expect(result.metadata?.spilledArtifactId).toBeTypeOf('string');
+			expect(result.metadata?.spilledBytes).toBeGreaterThan(0);
+			// The model receives an excerpt, not the raw large content.
+			expect(typeof result.content).toBe('string');
+			expect(result.content as string).toContain('Output spilled to artifact');
+			expect(result.content as string).toContain('artifact:');
+		} finally {
+			await rm(artifactDir, { recursive: true, force: true });
+		}
 	});
 });
