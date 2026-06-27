@@ -15,6 +15,7 @@ import type { DatabaseClient } from '../db/client';
 import { artifacts, toolInvocations } from '../db/schema';
 import type { ArtifactStore } from './artifact-store';
 import { TOOL_RESULT_INLINE_LIMIT } from '../config';
+import { assertValidSessionKey } from '../session-key';
 
 export type SpillOptions = {
 	sessionId: string;
@@ -39,6 +40,10 @@ export async function spillLargeOutput(
 	result: ToolExecutionResult,
 	options: SpillOptions
 ): Promise<ToolExecutionResult> {
+	// Guard: the session key becomes a path segment in the artifact object key.
+	// Validate here so an unsafe key is caught before any filesystem write.
+	assertValidSessionKey(options.sessionKey);
+
 	const inlineLimit = options.inlineLimit ?? TOOL_RESULT_INLINE_LIMIT;
 	const text = typeof result.content === 'string' ? result.content : JSON.stringify(result.content);
 

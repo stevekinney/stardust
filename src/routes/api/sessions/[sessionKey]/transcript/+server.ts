@@ -3,15 +3,14 @@ import type { RequestHandler } from './$types';
 import { asc, eq } from 'drizzle-orm';
 import { db } from '$lib/server/db/client';
 import { sessions, transcriptEvents } from '$lib/server/db/schema';
-
-const IDENTIFIER_RE = /^[\w-]{1,128}$/;
+import { isValidSessionKey } from '$lib/server/session-key';
 
 /**
  * Returns the canonical transcript events for a session in chronological order.
  * Clients use this to rehydrate a conversation view after refresh or on resume.
  */
 export const GET: RequestHandler = async ({ params }) => {
-	if (!IDENTIFIER_RE.test(params.sessionKey)) {
+	if (!isValidSessionKey(params.sessionKey)) {
 		throw error(400, 'Invalid sessionKey');
 	}
 

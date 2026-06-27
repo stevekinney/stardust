@@ -2,8 +2,7 @@ import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getTemporalClient } from '$lib/server/temporal/client';
 import { interruptRunUpdate } from '@src/workflows/session-contracts';
-
-const SESSION_KEY_RE = /^[\w-]{1,128}$/;
+import { isValidSessionKey } from '$lib/server/session-key';
 
 /**
  * POST /api/sessions/[sessionKey]/interrupt
@@ -15,7 +14,7 @@ const SESSION_KEY_RE = /^[\w-]{1,128}$/;
 export const POST: RequestHandler = async ({ params, request }) => {
 	const { sessionKey } = params;
 
-	if (!SESSION_KEY_RE.test(sessionKey)) {
+	if (!isValidSessionKey(sessionKey)) {
 		throw error(400, 'Invalid sessionKey');
 	}
 

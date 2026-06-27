@@ -102,7 +102,7 @@ describe('schedule client', () => {
 		);
 		expect(projection).toMatchObject({
 			temporalScheduleId: 'schedule-fixed',
-			targetSessionKey: 'scheduled:schedule-fixed',
+			targetSessionKey: 'sched-schedule-fixed',
 			name: 'Daily digest',
 			status: 'active',
 			nextRunAt: '2026-01-01T09:00:00.000Z'
@@ -155,7 +155,7 @@ describe('schedule client', () => {
 		expect(getHandle).toHaveBeenCalledWith('schedule-fixed');
 		expect(trigger).toHaveBeenCalledWith('BUFFER_ONE');
 		expect(result).toMatchObject({
-			targetSessionKey: 'scheduled:schedule-fixed',
+			targetSessionKey: 'sched-schedule-fixed',
 			schedule: {
 				lastRunAt: '2026-01-01T09:00:03.000Z',
 				nextRunAt: '2026-01-02T09:00:00.000Z'

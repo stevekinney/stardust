@@ -5,13 +5,12 @@ import { TASK_QUEUE_ORCHESTRATOR } from '$lib/types';
 import { getTemporalClient } from '$lib/server/temporal/client';
 import { agentSessionWorkflow } from '@src/workflows/agent-session.workflow';
 import { submitTurnUpdate } from '@src/workflows/session-contracts';
-
-const SESSION_KEY_RE = /^[\w-]{1,128}$/;
+import { isValidSessionKey } from '$lib/server/session-key';
 
 export const POST: RequestHandler = async ({ params, request }) => {
 	const { sessionKey } = params;
 
-	if (!SESSION_KEY_RE.test(sessionKey)) {
+	if (!isValidSessionKey(sessionKey)) {
 		throw error(400, 'Invalid sessionKey');
 	}
 

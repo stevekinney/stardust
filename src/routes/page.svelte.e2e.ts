@@ -13,11 +13,20 @@ function sseBody(frames: Array<{ id: number; kind: string; data: object }>): str
 test('home page shows welcome screen when there are no sessions', async ({ page }) => {
 	// Intercept the sessions list so the test does not need a running database.
 	await page.route('/api/sessions', (route) => {
-		void route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify({ sessions: [] })
-		});
+		if (route.request().method() === 'POST') {
+			// Server-minted session key endpoint.
+			void route.fulfill({
+				status: 201,
+				contentType: 'application/json',
+				body: JSON.stringify({ sessionKey: 'e2e-mint-test-key' })
+			});
+		} else {
+			void route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ sessions: [] })
+			});
+		}
 	});
 
 	await page.goto('/');
@@ -30,13 +39,22 @@ test('home page shows welcome screen when there are no sessions', async ({ page 
 test('create → submit → stream: navigates to a conversation and renders the stream', async ({
 	page
 }) => {
-	// Return empty sessions so the home page stays visible instead of redirecting.
+	// Return empty sessions for the list; mint a deterministic key for session creation.
 	await page.route('/api/sessions', (route) => {
-		void route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify({ sessions: [] })
-		});
+		if (route.request().method() === 'POST') {
+			// POST /api/sessions → server-minted session key.
+			void route.fulfill({
+				status: 201,
+				contentType: 'application/json',
+				body: JSON.stringify({ sessionKey: 'e2e-stream-session' })
+			});
+		} else {
+			void route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ sessions: [] })
+			});
+		}
 	});
 
 	// Intercept the turn endpoint for any session key.

@@ -9,11 +9,11 @@ vi.mock('$lib/server/schedules', () => ({
 describe('schedule trigger route', () => {
 	it('triggers a schedule and returns the target session key', async () => {
 		vi.mocked(triggerTemporalSchedule).mockResolvedValueOnce({
-			targetSessionKey: 'scheduled:schedule-001',
+			targetSessionKey: 'sched-schedule-001',
 			schedule: {
 				id: 'schedule-001',
 				temporalScheduleId: 'schedule-001',
-				targetSessionKey: 'scheduled:schedule-001',
+				targetSessionKey: 'sched-schedule-001',
 				name: 'Daily digest',
 				description: null,
 				cronExpression: '0 9 * * *',
@@ -36,7 +36,7 @@ describe('schedule trigger route', () => {
 		expect(response.status).toBe(200);
 		expect(triggerTemporalSchedule).toHaveBeenCalledWith('schedule-001');
 		expect(await response.json()).toEqual({
-			targetSessionKey: 'scheduled:schedule-001',
+			targetSessionKey: 'sched-schedule-001',
 			schedule: expect.objectContaining({
 				lastRunAt: '2026-01-01T09:00:03.000Z'
 			})

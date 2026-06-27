@@ -13,7 +13,7 @@ describe('schedules create route', () => {
 			{
 				id: 'schedule-001',
 				temporalScheduleId: 'schedule-001',
-				targetSessionKey: 'scheduled:schedule-001',
+				targetSessionKey: 'sched-schedule-001',
 				name: 'Daily digest',
 				description: null,
 				cronExpression: '0 9 * * *',
@@ -44,7 +44,7 @@ describe('schedules create route', () => {
 		vi.mocked(createTemporalSchedule).mockResolvedValueOnce({
 			id: 'schedule-001',
 			temporalScheduleId: 'schedule-001',
-			targetSessionKey: 'scheduled:schedule-001',
+			targetSessionKey: 'sched-schedule-001',
 			name: 'Daily digest',
 			description: null,
 			cronExpression: '0 9 * * *',
@@ -77,7 +77,7 @@ describe('schedules create route', () => {
 		expect(await response.json()).toEqual({
 			schedule: expect.objectContaining({
 				temporalScheduleId: 'schedule-001',
-				targetSessionKey: 'scheduled:schedule-001'
+				targetSessionKey: 'sched-schedule-001'
 			})
 		});
 	});
