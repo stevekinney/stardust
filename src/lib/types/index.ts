@@ -372,6 +372,14 @@ export type ApprovalRequest = {
 	argsHash: string;
 	expiresAt: string;
 	createdAt: string;
+	/** Unified diff of changes the tool proposes to make. */
+	diff?: string;
+	/** Working directory in which the tool will execute. */
+	workingDirectory?: string;
+	/** Names (not values) of environment variables the tool will read. */
+	environmentVariableNames?: string[];
+	/** Snapshot identifiers the tool references or will modify. */
+	snapshotReferences?: string[];
 };
 
 export type ApprovalResolutionInput = {
