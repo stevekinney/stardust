@@ -155,6 +155,107 @@ describe('ApprovalsRepository', () => {
 		expect(card!.tool.metadata.requiresApproval).toBe(true);
 	});
 
+	it('recordRequest sets runs.status to waiting_approval', async () => {
+		const now = '2026-06-26T00:00:00.000Z';
+		sqlite
+			.prepare(
+				'INSERT INTO runs (id, session_id, workflow_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+			)
+			.run('run-status-test', 'session-001', 'workflow-001', 'running', now, now);
+
+		await approvals.recordRequest({
+			approvalId: 'approval-status-test',
+			sessionId: 'session-001',
+			runId: 'run-status-test',
+			toolCall: { id: 'tc-status-test', name: tool.name, arguments: {} },
+			tool,
+			policyVersion: '2026-06-26',
+			proposedArguments: {},
+			expiresAt: '2026-06-27T00:00:00.000Z',
+			createdAt: now
+		});
+
+		const row = sqlite.prepare('SELECT status FROM runs WHERE id = ?').get('run-status-test') as {
+			status: string;
+		};
+		expect(row.status).toBe('waiting_approval');
+	});
+
+	it('recordResolution with approve sets runs.status back to running', async () => {
+		const now = '2026-06-26T00:00:00.000Z';
+		sqlite
+			.prepare(
+				'INSERT INTO runs (id, session_id, workflow_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+			)
+			.run('run-approve-test', 'session-001', 'workflow-001', 'running', now, now);
+
+		await approvals.recordRequest({
+			approvalId: 'approval-approve-test',
+			sessionId: 'session-001',
+			runId: 'run-approve-test',
+			toolCall: { id: 'tc-approve-test', name: tool.name, arguments: {} },
+			tool,
+			policyVersion: '2026-06-26',
+			proposedArguments: {},
+			expiresAt: '2026-06-27T00:00:00.000Z',
+			createdAt: now
+		});
+
+		// Confirm runs.status is waiting_approval before resolution.
+		const beforeRow = sqlite
+			.prepare('SELECT status FROM runs WHERE id = ?')
+			.get('run-approve-test') as { status: string };
+		expect(beforeRow.status).toBe('waiting_approval');
+
+		await approvals.recordResolution({
+			approvalId: 'approval-approve-test',
+			action: 'approve',
+			remember: false,
+			actor: 'user',
+			resolvedAt: '2026-06-26T01:00:00.000Z'
+		});
+
+		const afterRow = sqlite
+			.prepare('SELECT status FROM runs WHERE id = ?')
+			.get('run-approve-test') as { status: string };
+		expect(afterRow.status).toBe('running');
+	});
+
+	it('recordResolution with deny does not change runs.status', async () => {
+		const now = '2026-06-26T00:00:00.000Z';
+		sqlite
+			.prepare(
+				'INSERT INTO runs (id, session_id, workflow_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+			)
+			.run('run-deny-test', 'session-001', 'workflow-001', 'running', now, now);
+
+		await approvals.recordRequest({
+			approvalId: 'approval-deny-test',
+			sessionId: 'session-001',
+			runId: 'run-deny-test',
+			toolCall: { id: 'tc-deny-test', name: tool.name, arguments: {} },
+			tool,
+			policyVersion: '2026-06-26',
+			proposedArguments: {},
+			expiresAt: '2026-06-27T00:00:00.000Z',
+			createdAt: now
+		});
+
+		await approvals.recordResolution({
+			approvalId: 'approval-deny-test',
+			action: 'deny',
+			remember: false,
+			actor: 'user',
+			resolvedAt: '2026-06-26T01:00:00.000Z'
+		});
+
+		// deny is handled by recordRunCompleted; runs.status must remain waiting_approval.
+		const row = sqlite.prepare('SELECT status FROM runs WHERE id = ?').get('run-deny-test') as {
+			status: string;
+		};
+		expect(row.status).toBe('waiting_approval');
+	});
+
 	it('makes edited arguments canonical while preserving proposed arguments', async () => {
 		const proposedArguments = { path: 'notes.txt', content: 'draft' };
 		const editedArguments = { path: 'notes.txt', content: 'approved text' };

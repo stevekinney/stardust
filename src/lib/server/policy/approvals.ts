@@ -250,6 +250,16 @@ export class ApprovalsRepository {
 			})
 			.where(eq(approvalRequests.id, input.approvalId));
 
+		// When the grant is approved, restore runs.status to 'running' so consumers
+		// (admin UI, monitoring, SSE route) see the active post-approval execution.
+		// Deny, cancel, and expire are left to recordRunCompleted.
+		if (terminalState === 'approved') {
+			await this.database
+				.update(runs)
+				.set({ status: 'running', updatedAt: resolvedAt })
+				.where(eq(runs.id, row.runId));
+		}
+
 		await this.database.insert(auditEvents).values({
 			id: `${input.approvalId}:resolution:${terminalState}`,
 			sessionId: row.sessionId,
