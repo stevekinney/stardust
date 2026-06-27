@@ -39,6 +39,8 @@ import {
 	validateToolCall
 } from '../policy/policy-engine';
 import { fetchWithSsrfGuard } from '../policy/ssrf';
+import type { ArtifactStore } from '../artifacts/artifact-store';
+import { spillLargeOutput } from '../artifacts/spill';
 
 const webFetchInput = z.object({
 	url: z.string().url(),
@@ -367,11 +369,13 @@ function buildToolStubResult(toolName: string, argumentsValue: unknown) {
 export async function executeRegisteredTool(input: {
 	call: ToolCallInput;
 	sessionId?: string;
+	sessionKey?: string;
 	runId?: string;
 	workspacePath?: string;
 	fetcher?: typeof fetch;
 	approved?: boolean;
 	database?: DatabaseClient;
+	artifactStore?: ArtifactStore;
 }): Promise<ToolExecutionResult> {
 	const decision = validateToolCall(getConfiguredTools(), input.call);
 	if (decision.status === 'denied') {
@@ -473,12 +477,27 @@ export async function executeRegisteredTool(input: {
 				throw new Error(`Unknown tool: ${input.call.name}`);
 		}
 
-		return truncateToolOutput({
+		const rawResult: ToolExecutionResult = {
 			callId: input.call.id,
 			toolName: input.call.name,
 			outcome: 'success',
 			content: input.call.name === 'web.fetch' ? fenceUntrustedOutput(content) : content
-		});
+		};
+
+		// Spill to artifact when store is available and IDs are known; otherwise fall
+		// back to the existing in-memory truncation path.
+		if (input.artifactStore && input.sessionId && input.sessionKey && input.runId) {
+			return spillLargeOutput(rawResult, {
+				sessionId: input.sessionId,
+				sessionKey: input.sessionKey,
+				runId: input.runId,
+				toolCallId: input.call.id,
+				artifactStore: input.artifactStore,
+				database: input.database
+			});
+		}
+
+		return truncateToolOutput(rawResult);
 	}
 
 	try {
