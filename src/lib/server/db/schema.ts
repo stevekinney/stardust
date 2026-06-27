@@ -11,6 +11,10 @@ export const sessions = sqliteTable('sessions', {
 	workflowId: text('workflow_id').notNull(),
 	summaryCursor: integer('summary_cursor').default(0),
 	memoryRefs: text('memory_refs'), // JSON array of memory_notes.id
+	/** Human-readable label for the session. Falls back to sessionKey when null. */
+	name: text('name'),
+	/** ISO timestamp set when the session is archived; null means not archived. */
+	archivedAt: text('archived_at'),
 	createdAt: text('created_at').notNull().default(new Date(0).toISOString()),
 	updatedAt: text('updated_at').notNull().default(new Date(0).toISOString())
 });

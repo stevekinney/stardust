@@ -73,10 +73,8 @@ describe('SessionList', () => {
 			props: { sessions: [session], onSelect, onCreate: vi.fn() }
 		});
 
-		// Find the button by session key text content.
-		const btn = Array.from(document.querySelectorAll('button')).find((b) =>
-			b.textContent?.includes('clickable-session')
-		) as HTMLButtonElement;
+		// Find the select button for this session (has aria-label="Select session <key>").
+		const btn = getByLabel('Select session clickable-session') as HTMLButtonElement;
 		expect(btn).toBeInstanceOf(HTMLButtonElement);
 
 		btn.click();
@@ -185,12 +183,118 @@ describe('SessionList', () => {
 			}
 		});
 
-		const buttons = Array.from(document.querySelectorAll('button'));
-		const activeBtn = buttons.find((b) => b.textContent?.includes('active-session'));
-		const otherBtn = buttons.find((b) => b.textContent?.includes('other-session'));
+		const activeBtn = getByLabel('Select session active-session');
+		const otherBtn = getByLabel('Select session other-session');
 
 		expect(activeBtn?.getAttribute('aria-current')).toBe('true');
 		expect(otherBtn?.getAttribute('aria-current')).toBeNull();
+
+		unmount(component);
+	});
+
+	// ── rename ───────────────────────────────────────────────────────────────────
+
+	it('displays session.name as label when provided', () => {
+		const session = makeSession({ sessionKey: 'sess-key', name: 'My Project' });
+
+		const component = mount(SessionList, {
+			target: document.body,
+			props: { sessions: [session], onSelect: vi.fn(), onCreate: vi.fn() }
+		});
+
+		expect(document.body.textContent).toContain('My Project');
+
+		unmount(component);
+	});
+
+	it('falls back to sessionKey when name is null', () => {
+		const session = makeSession({ sessionKey: 'bare-key', name: null });
+
+		const component = mount(SessionList, {
+			target: document.body,
+			props: { sessions: [session], onSelect: vi.fn(), onCreate: vi.fn() }
+		});
+
+		expect(document.body.textContent).toContain('bare-key');
+
+		unmount(component);
+	});
+
+	it('renders a Rename button per session row', () => {
+		const session = makeSession({ sessionKey: 'rename-me' });
+
+		const component = mount(SessionList, {
+			target: document.body,
+			props: { sessions: [session], onSelect: vi.fn(), onCreate: vi.fn() }
+		});
+
+		expect(getByLabel('Rename session rename-me')).toBeTruthy();
+
+		unmount(component);
+	});
+
+	it('calls onRename with the session when the Rename button is clicked', () => {
+		const onRename = vi.fn();
+		const session = makeSession({ sessionKey: 'rename-me' });
+
+		const component = mount(SessionList, {
+			target: document.body,
+			props: { sessions: [session], onSelect: vi.fn(), onCreate: vi.fn(), onRename }
+		});
+
+		(getByLabel('Rename session rename-me') as HTMLButtonElement).click();
+		expect(onRename).toHaveBeenCalledWith(session);
+
+		unmount(component);
+	});
+
+	// ── archive ──────────────────────────────────────────────────────────────────
+
+	it('renders an Archive button per session row', () => {
+		const session = makeSession({ sessionKey: 'archive-me' });
+
+		const component = mount(SessionList, {
+			target: document.body,
+			props: { sessions: [session], onSelect: vi.fn(), onCreate: vi.fn() }
+		});
+
+		expect(getByLabel('Archive session archive-me')).toBeTruthy();
+
+		unmount(component);
+	});
+
+	it('calls onArchive with the session when the Archive button is clicked', () => {
+		const onArchive = vi.fn();
+		const session = makeSession({ sessionKey: 'archive-me' });
+
+		const component = mount(SessionList, {
+			target: document.body,
+			props: { sessions: [session], onSelect: vi.fn(), onCreate: vi.fn(), onArchive }
+		});
+
+		(getByLabel('Archive session archive-me') as HTMLButtonElement).click();
+		expect(onArchive).toHaveBeenCalledWith(session);
+
+		unmount(component);
+	});
+
+	it('does not render archived sessions', () => {
+		const sessions = [
+			makeSession({ id: 'sess-1', sessionKey: 'visible-session', archivedAt: null }),
+			makeSession({
+				id: 'sess-2',
+				sessionKey: 'hidden-session',
+				archivedAt: new Date().toISOString()
+			})
+		];
+
+		const component = mount(SessionList, {
+			target: document.body,
+			props: { sessions, onSelect: vi.fn(), onCreate: vi.fn() }
+		});
+
+		expect(document.body.textContent).toContain('visible-session');
+		expect(document.body.textContent).not.toContain('hidden-session');
 
 		unmount(component);
 	});

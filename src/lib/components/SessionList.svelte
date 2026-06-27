@@ -6,6 +6,10 @@
 		workflowId: string;
 		createdAt: string;
 		updatedAt: string;
+		/** Human-readable label; falls back to sessionKey when absent. */
+		name?: string | null;
+		/** ISO timestamp when archived; null/undefined means not archived. */
+		archivedAt?: string | null;
 	};
 
 	type Props = {
@@ -15,6 +19,8 @@
 		selectedSessionKey?: string | null;
 		onSelect: (session: SessionRow) => void;
 		onCreate: () => void;
+		onRename?: (session: SessionRow) => void;
+		onArchive?: (session: SessionRow) => void;
 	};
 
 	let {
@@ -23,15 +29,23 @@
 		error = null,
 		selectedSessionKey = null,
 		onSelect,
-		onCreate
+		onCreate,
+		onRename,
+		onArchive
 	}: Props = $props();
 
 	let search = $state('');
 
+	const active = $derived(sessions.filter((s) => !s.archivedAt));
+
 	const filtered = $derived(
 		search.trim()
-			? sessions.filter((s) => s.sessionKey.toLowerCase().includes(search.trim().toLowerCase()))
-			: sessions
+			? active.filter(
+					(s) =>
+						(s.name ?? s.sessionKey).toLowerCase().includes(search.trim().toLowerCase()) ||
+						s.sessionKey.toLowerCase().includes(search.trim().toLowerCase())
+				)
+			: active
 	);
 
 	function formatDate(value: string) {
@@ -40,6 +54,10 @@
 
 	function formatStatus(status: string) {
 		return status.replace(/_/g, ' ');
+	}
+
+	function displayLabel(session: SessionRow): string {
+		return session.name ?? session.sessionKey;
 	}
 </script>
 
@@ -74,15 +92,16 @@
 	{:else}
 		<ul class="list" role="list">
 			{#each filtered as session (session.id)}
-				<li>
+				<li class="session-row">
 					<button
 						type="button"
 						class="session-item"
 						class:selected={selectedSessionKey === session.sessionKey}
 						onclick={() => onSelect(session)}
+						aria-label="Select session {session.sessionKey}"
 						aria-current={selectedSessionKey === session.sessionKey ? 'true' : undefined}
 					>
-						<span class="session-key">{session.sessionKey}</span>
+						<span class="session-label">{displayLabel(session)}</span>
 						<span class="session-meta">
 							<span class="status-pill" data-status={session.status}>
 								{formatStatus(session.status)}
@@ -90,6 +109,25 @@
 							<span class="session-date">{formatDate(session.updatedAt)}</span>
 						</span>
 					</button>
+
+					<div class="session-actions">
+						<button
+							type="button"
+							class="action-button"
+							onclick={() => onRename?.(session)}
+							aria-label="Rename session {session.sessionKey}"
+						>
+							Rename
+						</button>
+						<button
+							type="button"
+							class="action-button action-button--archive"
+							onclick={() => onArchive?.(session)}
+							aria-label="Archive session {session.sessionKey}"
+						>
+							Archive
+						</button>
+					</div>
 				</li>
 			{/each}
 		</ul>
@@ -163,6 +201,12 @@
 		overflow-y: auto;
 	}
 
+	.session-row {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
 	.session-item {
 		display: flex;
 		align-items: center;
@@ -190,7 +234,7 @@
 		background: #eff6ff;
 	}
 
-	.session-key {
+	.session-label {
 		font-family: ui-monospace, monospace;
 		font-size: 0.82rem;
 		overflow: hidden;
@@ -240,6 +284,35 @@
 	.status-pill[data-status='idle'] {
 		background: #f3f4f6;
 		color: #374151;
+	}
+
+	.session-actions {
+		display: flex;
+		gap: 6px;
+		padding: 0 4px;
+	}
+
+	.action-button {
+		padding: 3px 10px;
+		border: 1px solid #c8d0d8;
+		border-radius: 4px;
+		background: transparent;
+		color: #5e6f80;
+		font: inherit;
+		font-size: 0.75rem;
+		cursor: pointer;
+	}
+
+	.action-button:hover {
+		border-color: #174c77;
+		color: #174c77;
+		background: #f0f7ff;
+	}
+
+	.action-button--archive:hover {
+		border-color: #9b2c2c;
+		color: #9b2c2c;
+		background: #fff1f1;
 	}
 
 	.error {

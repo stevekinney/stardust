@@ -62,6 +62,45 @@
 			void goto(url);
 		});
 	}
+
+	async function handleRenameSession(session: SessionRow) {
+		const current = session.name ?? session.sessionKey;
+		const name = window.prompt('Rename session', current);
+		if (!name || !name.trim()) return;
+
+		try {
+			const response = await fetch(`/api/sessions/${encodeURIComponent(session.sessionKey)}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ name: name.trim() })
+			});
+			if (!response.ok) throw new Error(await response.text());
+			// Reload the list so the updated name is reflected.
+			await loadSessions();
+		} catch (caught) {
+			error = caught instanceof Error ? caught.message : 'Failed to rename session';
+		}
+	}
+
+	async function handleArchiveSession(session: SessionRow) {
+		const confirmed = window.confirm(
+			`Archive session "${session.name ?? session.sessionKey}"? It will be hidden from the list.`
+		);
+		if (!confirmed) return;
+
+		try {
+			const response = await fetch(`/api/sessions/${encodeURIComponent(session.sessionKey)}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ archived: true })
+			});
+			if (!response.ok) throw new Error(await response.text());
+			// Reload the list; archived session will be excluded by the API.
+			await loadSessions();
+		} catch (caught) {
+			error = caught instanceof Error ? caught.message : 'Failed to archive session';
+		}
+	}
 </script>
 
 <svelte:head>
@@ -90,6 +129,8 @@
 						{error}
 						onSelect={handleSelectSession}
 						onCreate={handleCreateSession}
+						onRename={handleRenameSession}
+						onArchive={handleArchiveSession}
 					/>
 				</aside>
 

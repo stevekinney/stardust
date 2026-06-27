@@ -6,7 +6,9 @@ vi.mock('$lib/server/db/client', () => ({
 	db: {
 		select: () => ({
 			from: () => ({
-				orderBy: () => Promise.resolve([])
+				where: () => ({
+					orderBy: () => Promise.resolve([])
+				})
 			})
 		})
 	}
