@@ -217,6 +217,19 @@ export type ModelToolSchema = {
 	input: Record<string, unknown>;
 };
 
+/**
+ * A confirmed memory note carried into the model context.
+ * Serialisable subset of `MemoryNote` — includes the fields needed for
+ * provenance display in the assembled system prompt.
+ */
+export type ContextMemoryNote = {
+	id: string;
+	/** Memory layer: session_summary, durable, or action-sensitive. */
+	layer: string;
+	content: string;
+	tags: string[];
+};
+
 export type ModelCallInput = {
 	sessionId: string;
 	runId: string;
@@ -230,6 +243,18 @@ export type ModelCallInput = {
 	 * Drained from the run's steering buffer at each model boundary.
 	 */
 	steeringMessages?: string[];
+	/**
+	 * Confirmed memory notes retrieved by the workflow before this model call.
+	 * Assembled from the FTS5+sqlite-vec RRF retrieval path and included in
+	 * the system prompt with full provenance (id, layer, tags, content).
+	 */
+	memoryNotes?: ContextMemoryNote[];
+	/**
+	 * Absolute path to the session workspace, when a sandbox has been
+	 * provisioned. Included as a workspace-reference line in the system prompt
+	 * so the model knows which directory to target for file operations.
+	 */
+	workspacePath?: string;
 };
 
 export type NormalizedToolCall = {

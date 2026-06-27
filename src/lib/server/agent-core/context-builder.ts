@@ -9,6 +9,7 @@ import {
 import { anthropicConversationAdapter } from 'conversationalist/adapters/anthropic';
 import type { AnthropicConversation } from 'conversationalist/adapters/anthropic';
 import type { ConversationHistory } from 'conversationalist';
+import type { ContextMemoryNote } from '@src/lib/types';
 import type { DatabaseClient } from '../db/client';
 import { reconstructSessionTranscript } from '../stream';
 
@@ -76,15 +77,46 @@ function parseToolResultPayload(payload: string): ToolResultPayload | null {
 }
 
 /**
+ * Formats confirmed memory notes as a `<memory>` block for inclusion in the
+ * system prompt. Each line carries full provenance: layer, tags, id, and content.
+ * Only called when `memoryNotes` is non-empty, so the system prompt stays
+ * byte-identical to the original when no memory is present.
+ */
+function buildMemorySection(notes: ContextMemoryNote[]): string {
+	const lines = notes.map((note) => {
+		const tagList = note.tags.length > 0 ? `, tags: ${note.tags.join(', ')}` : '';
+		return `- [${note.layer}] ${note.content} (id: ${note.id}${tagList})`;
+	});
+	return `\n\n<memory>\nRelevant confirmed memories for this session:\n${lines.join('\n')}\n</memory>`;
+}
+
+/**
  * Rebuilds Anthropic-ready conversation context from durable transcript events.
  *
  * Handles user_message, assistant_message, tool_call, and tool_result events.
  * The Anthropic adapter automatically merges consecutive same-role messages so
  * text + tool_use blocks and multiple tool_result blocks coalesce correctly.
+ *
+ * When provided:
+ * - `memoryNotes`: confirmed session/durable/action-sensitive memory is appended
+ *   to the system prompt as a `<memory>` block with full provenance.
+ * - `workspacePath`: a workspace-reference line is appended to the system prompt.
+ * - `steeringMessages`: each message is appended as a `[Steering] <msg>` user
+ *   turn after the transcript, so they reach the model at the next call boundary.
+ *
+ * Skills injection is not yet implemented for this POC. When the skill manifest
+ * is wired up, pass it here so context assembly remains a single call site.
  */
 export async function buildModelContext(
 	database: DatabaseClient,
-	input: { sessionId: string; systemPrompt?: string; maxMessages?: number }
+	input: {
+		sessionId: string;
+		systemPrompt?: string;
+		maxMessages?: number;
+		steeringMessages?: string[];
+		memoryNotes?: ContextMemoryNote[];
+		workspacePath?: string;
+	}
 ): Promise<ModelContext> {
 	const transcript = await reconstructSessionTranscript(database, input.sessionId);
 	const visibleTranscript = transcript
@@ -99,8 +131,18 @@ export async function buildModelContext(
 
 	let conversation = createConversationHistory();
 
-	if (input.systemPrompt) {
-		conversation = appendSystemMessage(conversation, input.systemPrompt);
+	// Build the system prompt, optionally extending it with memory provenance
+	// and a workspace reference.  Each extension is gated on non-empty input so
+	// the base-case output stays byte-identical to the pre-existing behaviour.
+	let systemPrompt = input.systemPrompt ?? '';
+	if (input.memoryNotes && input.memoryNotes.length > 0) {
+		systemPrompt += buildMemorySection(input.memoryNotes);
+	}
+	if (input.workspacePath) {
+		systemPrompt += `\n\n<workspace>\nCurrent working directory: ${input.workspacePath}\n</workspace>`;
+	}
+	if (systemPrompt) {
+		conversation = appendSystemMessage(conversation, systemPrompt);
 	}
 
 	for (const event of visibleTranscript) {
@@ -136,6 +178,16 @@ export async function buildModelContext(
 				outcome: toolResultPayload.isError ? 'error' : 'success',
 				content: toolResultPayload.content
 			});
+		}
+	}
+
+	// Append steering messages as user turns after the transcript so they reach
+	// the model at this call boundary.  The conversationalist adapter merges
+	// consecutive same-role messages, so multiple steering messages coalesce into
+	// a single user block alongside any open tool-result turns.
+	if (input.steeringMessages && input.steeringMessages.length > 0) {
+		for (const message of input.steeringMessages) {
+			conversation = appendUserMessage(conversation, `[Steering] ${message}`);
 		}
 	}
 
