@@ -86,7 +86,7 @@ type MemoryNoteRow = typeof memoryNotes.$inferSelect;
 
 const DEFAULT_LIMIT = 8;
 export const EMBEDDING_DIMENSION = 384;
-export const LOCAL_EMBEDDING_MODEL = 'local-384-hashing';
+export const LOCAL_EMBEDDING_MODEL = 'Xenova/all-MiniLM-L6-v2';
 const MEMORY_LAYER_TO_KIND: Record<MemoryLayer, MemoryNoteKind> = {
 	session: 'session_summary',
 	durable: 'durable',
