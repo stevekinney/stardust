@@ -42,6 +42,12 @@ beforeAll(() => {
 	sqlite
 		.prepare(`INSERT INTO runs (id, session_id, workflow_id, status) VALUES (?, ?, ?, ?)`)
 		.run('route-run-live', 'route-session-001', 'agent-run:route-run-live', 'running');
+
+	// A completed run with no stream events — simulates a run whose stream bus was
+	// trimmed by recordRunCompleted before the SSE subscriber could read it.
+	sqlite
+		.prepare(`INSERT INTO runs (id, session_id, workflow_id, status) VALUES (?, ?, ?, ?)`)
+		.run('route-run-trim-race', 'route-session-001', 'agent-run:route-run-trim-race', 'complete');
 });
 
 afterAll(() => {
@@ -128,5 +134,35 @@ describe('stream route', () => {
 		// The live-published event must arrive before the stream closes.
 		expect(body).toContain('event: assistant.message');
 		expect(body).toContain('data: {"text":"live delivery"}');
+	});
+
+	it('delivers the terminal lifecycle event even when stream events were trimmed before the poll landed', async () => {
+		// This is the trim-race regression test.
+		//
+		// Scenario: recordRunCompleted publishes lifecycle:complete to the stream bus then
+		// immediately calls trimCompletedRunStream, which deletes every row for the run.
+		// A live SSE subscriber whose poll lands after the trim sees an empty stream even
+		// though the run is terminal. Without the recovery path, the subscriber closes
+		// without receiving any terminal signal.
+		//
+		// The run `route-run-trim-race` is already seeded as 'complete' with zero stream
+		// events — identical to the post-trim state. Opening a fresh SSE connection with
+		// cursor=0 must still produce a lifecycle:complete frame from the canonical run
+		// record.
+		const response = await GET({
+			params: { sessionKey: 'route-session-001', runId: 'route-run-trim-race' },
+			request: new Request(
+				`http://localhost/api/sessions/route-session-001/stream/route-run-trim-race`
+			),
+			url: new URL(`http://localhost/api/sessions/route-session-001/stream/route-run-trim-race`)
+		} as Parameters<typeof GET>[0]);
+
+		expect(response.headers.get('content-type')).toContain('text/event-stream');
+
+		// response.text() must resolve (stream must close) and must contain the recovery
+		// lifecycle frame synthesised from the canonical run record.
+		const body = await response.text();
+		expect(body).toContain('event: lifecycle');
+		expect(body).toContain('data: {"status":"complete"}');
 	});
 });
