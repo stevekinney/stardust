@@ -55,7 +55,27 @@ export default defineConfig({
 					name: 'server',
 					environment: 'node',
 					include: ['src/**/*.{test,spec}.{js,ts}'],
-					exclude: ['src/**/*.svelte.{test,spec}.{js,ts}']
+					exclude: [
+						'src/**/*.svelte.{test,spec}.{js,ts}',
+						// Workflow tests run serially in the dedicated `workflows` project below.
+						'src/workflows/*.workflow.test.ts'
+					]
+				}
+			},
+
+			// Temporal workflow tests spin up in-memory Temporal servers and bundle workflow
+			// code on every Worker.create() call.  Running them in parallel across files
+			// causes CPU/memory contention that pushes the first test in each file past the
+			// default 5 000 ms Vitest timeout.  `fileParallelism: false` serialises the
+			// files so only one environment + bundle runs at a time, matching the behaviour
+			// when each file is executed in isolation.
+			{
+				extends: './vite.config.ts',
+				test: {
+					name: 'workflows',
+					environment: 'node',
+					fileParallelism: false,
+					include: ['src/workflows/*.workflow.test.ts']
 				}
 			}
 		]
