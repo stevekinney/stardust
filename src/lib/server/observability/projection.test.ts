@@ -187,6 +187,116 @@ describe('run inspector projection', () => {
 		expect(projection?.run.budget).toBeNull();
 	});
 
+	it('computes durationMs from tool_call/tool_result pairing by callId', async () => {
+		const callStart = '2026-06-26T05:00:00.000Z';
+		const resultTime = '2026-06-26T05:00:02.500Z'; // 2500ms later
+
+		sqlite
+			.prepare(
+				`INSERT INTO runs (id, session_id, workflow_id, status, started_at) VALUES (?, ?, ?, ?, ?)`
+			)
+			.run('run-timing-001', 'session-001', 'agent-run:run-timing-001', 'complete', callStart);
+
+		await appendTranscriptEvent(database, {
+			id: 'timing-tc-001',
+			runId: 'run-timing-001',
+			sessionId: 'session-001',
+			kind: 'tool_call',
+			payload: JSON.stringify({
+				calls: [{ id: 'call-abc', name: 'bash', input: { command: 'ls' } }]
+			}),
+			createdAt: callStart
+		});
+
+		await appendTranscriptEvent(database, {
+			id: 'timing-tr-001',
+			runId: 'run-timing-001',
+			sessionId: 'session-001',
+			kind: 'tool_result',
+			payload: JSON.stringify({
+				callId: 'call-abc',
+				content: 'file-list',
+				isError: false
+			}),
+			createdAt: resultTime
+		});
+
+		const projection = await readRunInspectorProjection(database, 'run-timing-001');
+		const toolCallEvent = projection?.transcript.find((e) => e.kind === 'tool_call');
+
+		expect(toolCallEvent?.durationMs).toBe(2500);
+		expect(toolCallEvent?.attempts).toBe(1);
+	});
+
+	it('computes attempts > 1 when multiple tool_result rows share a callId', async () => {
+		const callStart = '2026-06-26T06:00:00.000Z';
+		const firstResultTime = '2026-06-26T06:00:01.000Z'; // first attempt (error)
+		const secondResultTime = '2026-06-26T06:00:02.000Z'; // retry succeeds
+
+		sqlite
+			.prepare(
+				`INSERT INTO runs (id, session_id, workflow_id, status, started_at) VALUES (?, ?, ?, ?, ?)`
+			)
+			.run('run-timing-002', 'session-001', 'agent-run:run-timing-002', 'complete', callStart);
+
+		await appendTranscriptEvent(database, {
+			id: 'timing-tc-002',
+			runId: 'run-timing-002',
+			sessionId: 'session-001',
+			kind: 'tool_call',
+			payload: JSON.stringify({
+				calls: [{ id: 'call-def', name: 'bash', input: { command: 'risky' } }]
+			}),
+			createdAt: callStart
+		});
+
+		// First attempt: Temporal activity fails and persists an error result.
+		await appendTranscriptEvent(database, {
+			id: 'timing-tr-002a',
+			runId: 'run-timing-002',
+			sessionId: 'session-001',
+			kind: 'tool_result',
+			payload: JSON.stringify({
+				callId: 'call-def',
+				content: 'error: timeout',
+				isError: true
+			}),
+			createdAt: firstResultTime
+		});
+
+		// Second attempt: Temporal retries the activity; same callId, success.
+		await appendTranscriptEvent(database, {
+			id: 'timing-tr-002b',
+			runId: 'run-timing-002',
+			sessionId: 'session-001',
+			kind: 'tool_result',
+			payload: JSON.stringify({
+				callId: 'call-def',
+				content: 'success output',
+				isError: false
+			}),
+			createdAt: secondResultTime
+		});
+
+		const projection = await readRunInspectorProjection(database, 'run-timing-002');
+		const toolCallEvent = projection?.transcript.find((e) => e.kind === 'tool_call');
+
+		expect(toolCallEvent?.attempts).toBe(2);
+		// durationMs = latest result time - call start = 2000ms
+		expect(toolCallEvent?.durationMs).toBe(2000);
+	});
+
+	it('leaves durationMs and attempts undefined for non-tool_call events', async () => {
+		const projection = await readRunInspectorProjection(database, 'run-001');
+
+		for (const event of projection?.transcript ?? []) {
+			if (event.kind !== 'tool_call') {
+				expect(event.durationMs).toBeUndefined();
+				expect(event.attempts).toBeUndefined();
+			}
+		}
+	});
+
 	it('shows timeline lanes, usage, and tool invocations for a parent run with child workflow and tool call', async () => {
 		const usage = { inputTokens: 500, outputTokens: 200, estimatedCostUsd: 0.009 };
 		sqlite

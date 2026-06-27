@@ -316,4 +316,99 @@ describe('RunTimeline', () => {
 
 		unmount(component);
 	});
+
+	it('renders step duration badge when event.durationMs is present on a tool_call', () => {
+		const transcriptWithDuration: RunInspectorProjection['transcript'] = [
+			{
+				id: 'evt-d-001',
+				kind: 'tool_call',
+				sequence: 1,
+				createdAt: '2026-06-26T00:00:01.000Z',
+				payload: { calls: [{ id: 'tc-d-001', name: 'bash', input: {} }] },
+				durationMs: 1500,
+				attempts: 1
+			}
+		];
+		const projectionWithDuration: RunInspectorProjection = {
+			...projection,
+			transcript: transcriptWithDuration,
+			recoveryMarkers: []
+		};
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection: projectionWithDuration }
+		});
+
+		const durationBadge = document.querySelector('[data-step-duration]');
+		expect(durationBadge).not.toBeNull();
+		// 1500ms = 1.5s
+		expect(durationBadge?.textContent).toContain('1.5s');
+
+		unmount(component);
+	});
+
+	it('renders attempt badge when event.attempts > 1', () => {
+		const transcriptWithRetry: RunInspectorProjection['transcript'] = [
+			{
+				id: 'evt-r-001',
+				kind: 'tool_call',
+				sequence: 1,
+				createdAt: '2026-06-26T00:00:01.000Z',
+				payload: { calls: [{ id: 'tc-r-001', name: 'bash', input: {} }] },
+				durationMs: 3000,
+				attempts: 3
+			}
+		];
+		const projectionWithRetry: RunInspectorProjection = {
+			...projection,
+			transcript: transcriptWithRetry,
+			recoveryMarkers: []
+		};
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection: projectionWithRetry }
+		});
+
+		const attemptBadge = document.querySelector('[data-step-attempts]');
+		expect(attemptBadge).not.toBeNull();
+		expect(attemptBadge?.textContent).toContain('×3');
+
+		unmount(component);
+	});
+
+	it('omits attempt badge when event.attempts is 1 or absent', () => {
+		const transcriptSingleAttempt: RunInspectorProjection['transcript'] = [
+			{
+				id: 'evt-s-001',
+				kind: 'tool_call',
+				sequence: 1,
+				createdAt: '2026-06-26T00:00:01.000Z',
+				payload: { calls: [{ id: 'tc-s-001', name: 'bash', input: {} }] },
+				durationMs: 500,
+				attempts: 1
+			},
+			{
+				id: 'evt-s-002',
+				kind: 'user_message',
+				sequence: 2,
+				createdAt: '2026-06-26T00:00:02.000Z',
+				payload: { text: 'hello' }
+				// no durationMs, no attempts
+			}
+		];
+		const projectionSingleAttempt: RunInspectorProjection = {
+			...projection,
+			transcript: transcriptSingleAttempt,
+			recoveryMarkers: []
+		};
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection: projectionSingleAttempt }
+		});
+
+		const attemptBadge = document.querySelector('[data-step-attempts]');
+		expect(attemptBadge).toBeNull();
+
+		unmount(component);
+	});
 });
