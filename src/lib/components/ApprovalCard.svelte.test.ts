@@ -198,4 +198,38 @@ describe('ApprovalCard', () => {
 
 		unmount(component);
 	});
+
+	it('renders diff, workingDirectory, environmentVariableNames, snapshotReferences, and idempotencyKey when present', () => {
+		const component = mount(ApprovalCard, {
+			target: document.body,
+			props: {
+				approval: {
+					...approval,
+					toolCall: {
+						...approval.toolCall,
+						idempotencyKey: 'idem-key-abc123'
+					},
+					diff: '--- a/notes.txt\n+++ b/notes.txt\n@@ -1 +1 @@\n-draft\n+approved',
+					workingDirectory: '/workspace/project',
+					environmentVariableNames: ['API_KEY', 'DATABASE_URL'],
+					snapshotReferences: ['snap-001', 'snap-002']
+				}
+			}
+		});
+
+		expect(document.body.textContent).toContain('Idempotency key');
+		expect(document.body.textContent).toContain('idem-key-abc123');
+		expect(document.body.textContent).toContain('Working directory');
+		expect(document.body.textContent).toContain('/workspace/project');
+		expect(document.body.textContent).toContain('Environment variables');
+		expect(document.body.textContent).toContain('API_KEY');
+		expect(document.body.textContent).toContain('DATABASE_URL');
+		expect(document.body.textContent).toContain('Snapshot references');
+		expect(document.body.textContent).toContain('snap-001');
+		expect(document.body.textContent).toContain('snap-002');
+		expect(document.body.textContent).toContain('Diff');
+		expect(document.body.textContent).toContain('+approved');
+
+		unmount(component);
+	});
 });

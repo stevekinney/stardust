@@ -112,6 +112,30 @@
 			<dt>Arguments hash</dt>
 			<dd>{approval.argsHash}</dd>
 		</div>
+		{#if approval.toolCall.idempotencyKey}
+			<div>
+				<dt>Idempotency key</dt>
+				<dd>{approval.toolCall.idempotencyKey}</dd>
+			</div>
+		{/if}
+		{#if approval.workingDirectory}
+			<div>
+				<dt>Working directory</dt>
+				<dd>{approval.workingDirectory}</dd>
+			</div>
+		{/if}
+		{#if approval.environmentVariableNames && approval.environmentVariableNames.length > 0}
+			<div>
+				<dt>Environment variables</dt>
+				<dd>{approval.environmentVariableNames.join(', ')}</dd>
+			</div>
+		{/if}
+		{#if approval.snapshotReferences && approval.snapshotReferences.length > 0}
+			<div>
+				<dt>Snapshot references</dt>
+				<dd>{approval.snapshotReferences.join(', ')}</dd>
+			</div>
+		{/if}
 	</dl>
 
 	<section class="arguments" aria-label="Approval arguments">
@@ -125,6 +149,13 @@
 			></textarea>
 		</label>
 	</section>
+
+	{#if approval.diff}
+		<section class="diff" aria-label="Proposed diff">
+			<h3>Diff</h3>
+			<pre>{approval.diff}</pre>
+		</section>
+	{/if}
 
 	<label class="reason">
 		<span>Reason</span>
