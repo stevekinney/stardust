@@ -171,6 +171,46 @@ describe('MemoryStore', () => {
 		});
 	});
 
+	it('assigns unique per-run sequences for concurrent writeCandidate calls', async () => {
+		// Regression: the old non-atomic nextStreamSequence read let two concurrent
+		// writeCandidate calls claim the same sequence number for the same run, which
+		// would cause a UNIQUE(run_id, sequence) violation. publishStreamEvent wraps
+		// the read+insert inside a SQLite transaction, preventing any concurrent claim
+		// of the same sequence number.
+		const runId = 'run-concurrent-sequence';
+		const sessionId = 'session-concurrent-sequence';
+
+		const [a, b] = await Promise.all([
+			store.writeCandidate({
+				sessionId,
+				runId,
+				layer: 'session',
+				content: 'first concurrent candidate'
+			}),
+			store.writeCandidate({
+				sessionId,
+				runId,
+				layer: 'durable',
+				content: 'second concurrent candidate'
+			})
+		]);
+
+		// Both candidates must have been persisted as distinct stream events.
+		const rows = sqlite
+			.prepare(`SELECT sequence, kind FROM stream_events WHERE run_id = ? ORDER BY sequence`)
+			.all(runId) as { sequence: number; kind: string }[];
+
+		expect(rows).toHaveLength(2);
+		// Sequences must be distinct — no collision.
+		expect(rows[0]!.sequence).not.toBe(rows[1]!.sequence);
+		expect(rows[0]!.kind).toBe('memory.candidate');
+		expect(rows[1]!.kind).toBe('memory.candidate');
+		// Both return values must be valid candidate objects with distinct ids.
+		expect(a.id).toBeDefined();
+		expect(b.id).toBeDefined();
+		expect(a.id).not.toBe(b.id);
+	});
+
 	it('excludes unconfirmed compaction candidates from listBySession and searchLexical', async () => {
 		// compactSessionMemory writes candidates with confirmedAt: null.
 		// listBySession and searchLexical must not surface them — only confirmed notes
