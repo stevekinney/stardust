@@ -17,6 +17,8 @@ export type WorkspaceCommand = {
 	exitCode: number | null;
 	startedAt: string | null;
 	completedAt: string | null;
+	stdout?: string | null;
+	stderr?: string | null;
 };
 
 export type WorkspaceSnapshot = {
@@ -191,6 +193,55 @@ describe('WorkspacePanel', () => {
 		});
 
 		expect(document.body.textContent).toContain('No workspace');
+
+		unmount(component);
+	});
+
+	it('renders collapsible stdout output block when command has stdout', () => {
+		const commandWithOutput: WorkspaceCommand = {
+			...sampleCommand,
+			stdout: 'Build succeeded\n3 files written'
+		};
+		const component = mount(WorkspacePanel, {
+			target: document.body,
+			props: { files: [], commands: [commandWithOutput], snapshots: [], artifacts: [] }
+		});
+
+		const outputEl = document.querySelector('[data-command-output]');
+		expect(outputEl).not.toBeNull();
+		expect(outputEl?.textContent).toContain('Build succeeded');
+		expect(outputEl?.textContent).toContain('3 files written');
+
+		unmount(component);
+	});
+
+	it('renders collapsible stderr output block when command has stderr', () => {
+		const commandWithStderr: WorkspaceCommand = {
+			...sampleCommand,
+			status: 'failed',
+			exitCode: 1,
+			stderr: 'error: module not found'
+		};
+		const component = mount(WorkspacePanel, {
+			target: document.body,
+			props: { files: [], commands: [commandWithStderr], snapshots: [], artifacts: [] }
+		});
+
+		const outputEl = document.querySelector('[data-command-output]');
+		expect(outputEl).not.toBeNull();
+		expect(outputEl?.textContent).toContain('error: module not found');
+
+		unmount(component);
+	});
+
+	it('does not render an output block when command has no stdout or stderr', () => {
+		const component = mount(WorkspacePanel, {
+			target: document.body,
+			props: { files: [], commands: [sampleCommand], snapshots: [], artifacts: [] }
+		});
+
+		const outputEl = document.querySelector('[data-command-output]');
+		expect(outputEl).toBeNull();
 
 		unmount(component);
 	});

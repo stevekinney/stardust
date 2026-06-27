@@ -23,6 +23,8 @@ export type SandboxCommandRow = {
 	startedAt: string | null;
 	completedAt: string | null;
 	createdAt: string;
+	stdoutRef?: string | null;
+	stderrRef?: string | null;
 };
 
 export type SandboxSnapshotRow = {
@@ -125,6 +127,55 @@ describe('SandboxInspector', () => {
 		});
 
 		expect(document.body.textContent).toContain('No sandbox');
+
+		unmount(component);
+	});
+
+	it('renders collapsible stdout output block when command has stdoutRef', () => {
+		const commandWithOutput: SandboxCommandRow = {
+			...recentCommand,
+			stdoutRef: 'On branch main\nnothing to commit'
+		};
+		const component = mount(SandboxInspector, {
+			target: document.body,
+			props: { sandbox, commands: [commandWithOutput], snapshots: [] }
+		});
+
+		const outputEl = document.querySelector('[data-command-output]');
+		expect(outputEl).not.toBeNull();
+		expect(outputEl?.textContent).toContain('On branch main');
+		expect(outputEl?.textContent).toContain('nothing to commit');
+
+		unmount(component);
+	});
+
+	it('renders collapsible stderr output block when command has stderrRef', () => {
+		const commandWithStderr: SandboxCommandRow = {
+			...recentCommand,
+			status: 'failed',
+			exitCode: 128,
+			stderrRef: 'fatal: not a git repository'
+		};
+		const component = mount(SandboxInspector, {
+			target: document.body,
+			props: { sandbox, commands: [commandWithStderr], snapshots: [] }
+		});
+
+		const outputEl = document.querySelector('[data-command-output]');
+		expect(outputEl).not.toBeNull();
+		expect(outputEl?.textContent).toContain('fatal: not a git repository');
+
+		unmount(component);
+	});
+
+	it('does not render an output block when command has no stdoutRef or stderrRef', () => {
+		const component = mount(SandboxInspector, {
+			target: document.body,
+			props: { sandbox, commands: [recentCommand], snapshots: [] }
+		});
+
+		const outputEl = document.querySelector('[data-command-output]');
+		expect(outputEl).toBeNull();
 
 		unmount(component);
 	});

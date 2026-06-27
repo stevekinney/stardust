@@ -79,7 +79,9 @@ export const GET: RequestHandler = async ({ params }) => {
 		status: row.status,
 		exitCode: row.exitCode,
 		startedAt: row.startedAt,
-		completedAt: row.completedAt
+		completedAt: row.completedAt,
+		stdout: row.stdoutRef ?? null,
+		stderr: row.stderrRef ?? null
 	}));
 
 	const snapshots: WorkspaceSnapshot[] = snapshotRows.map((row) => ({

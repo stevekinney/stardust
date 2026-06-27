@@ -20,6 +20,8 @@
 		startedAt: string | null;
 		completedAt: string | null;
 		createdAt: string;
+		stdoutRef?: string | null;
+		stderrRef?: string | null;
 	};
 
 	export type SandboxSnapshotRow = {
@@ -98,21 +100,34 @@
 				<ul class="item-list">
 					{#each commands as cmd (cmd.id)}
 						{@const args = parseArgs(cmd.args)}
-						<li class="item-row">
-							<code class="cmd-text">
-								{cmd.command}{args.length > 0 ? ' ' + args.join(' ') : ''}
-							</code>
-							<span
-								class="status-pill"
-								class:success={cmd.status === 'complete' && cmd.exitCode === 0}
-								class:failure={cmd.status === 'failed' ||
-									(cmd.exitCode !== null && cmd.exitCode !== 0)}
-								data-status={cmd.status}
-							>
-								{cmd.status}
-							</span>
-							{#if cmd.exitCode !== null}
-								<span class="exit-code">exit {cmd.exitCode}</span>
+						<li class="command-item">
+							<div class="item-row">
+								<code class="cmd-text">
+									{cmd.command}{args.length > 0 ? ' ' + args.join(' ') : ''}
+								</code>
+								<span
+									class="status-pill"
+									class:success={cmd.status === 'complete' && cmd.exitCode === 0}
+									class:failure={cmd.status === 'failed' ||
+										(cmd.exitCode !== null && cmd.exitCode !== 0)}
+									data-status={cmd.status}
+								>
+									{cmd.status}
+								</span>
+								{#if cmd.exitCode !== null}
+									<span class="exit-code">exit {cmd.exitCode}</span>
+								{/if}
+							</div>
+							{#if cmd.stdoutRef || cmd.stderrRef}
+								<details class="command-output" data-command-output>
+									<summary class="output-summary">Output</summary>
+									{#if cmd.stdoutRef}
+										<pre class="output-pre">{cmd.stdoutRef}</pre>
+									{/if}
+									{#if cmd.stderrRef}
+										<pre class="output-pre output-stderr">{cmd.stderrRef}</pre>
+									{/if}
+								</details>
 							{/if}
 						</li>
 					{/each}
@@ -237,6 +252,46 @@
 		margin: 0;
 		padding: 0;
 		list-style: none;
+	}
+
+	.command-item {
+		border: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+		border-radius: 5px;
+		background: Canvas;
+		overflow: hidden;
+	}
+
+	.command-item .item-row {
+		border: none;
+		border-radius: 0;
+	}
+
+	.command-output {
+		border-top: 1px solid color-mix(in srgb, CanvasText 8%, transparent);
+	}
+
+	.output-summary {
+		padding: 0.25rem 0.6rem;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: color-mix(in srgb, CanvasText 55%, transparent);
+		cursor: pointer;
+		user-select: none;
+	}
+
+	.output-pre {
+		overflow-x: auto;
+		max-height: 10rem;
+		margin: 0;
+		padding: 0.4rem 0.6rem;
+		background: color-mix(in srgb, CanvasText 5%, Canvas);
+		font-size: 0.75rem;
+		line-height: 1.4;
+		white-space: pre;
+	}
+
+	.output-stderr {
+		background: color-mix(in srgb, #7b1d1d 4%, Canvas);
 	}
 
 	.item-row {
