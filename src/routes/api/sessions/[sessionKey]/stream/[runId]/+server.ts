@@ -20,6 +20,21 @@ function readCursor(request: Request, url: URL): number {
 }
 
 /**
+ * Returns true when the event is a terminal lifecycle event — one whose payload
+ * carries a status in TERMINAL_STATUSES. Used to detect whether the subscriber
+ * has received the run-completion signal on the stream bus.
+ */
+function isTerminalLifecycleEvent(event: { kind: string; payload: string }): boolean {
+	if (event.kind !== 'lifecycle') return false;
+	try {
+		const payload = JSON.parse(event.payload) as { status?: string };
+		return typeof payload.status === 'string' && TERMINAL_STATUSES.has(payload.status);
+	} catch {
+		return false;
+	}
+}
+
+/**
  * SSE endpoint that live-tails stream_events for the given run.
  *
  * The handler opens a ReadableStream and polls the database every ~50 ms,
@@ -31,6 +46,15 @@ function readCursor(request: Request, url: URL): number {
  * Clients use the `cursor` query parameter (or the SSE `Last-Event-ID` header)
  * to resume from where they left off. Events published before the cursor are
  * not replayed.
+ *
+ * Race-condition guard: `recordRunCompleted` publishes the `lifecycle:complete`
+ * stream event and then immediately trims the stream bus. A subscriber whose
+ * poll lands after the trim sees an empty final drain and would miss the terminal
+ * signal. The `seenTerminalLifecycle` flag tracks whether any lifecycle event
+ * with a terminal status has been forwarded to the subscriber. If the flag is
+ * still false when the loop exits on terminal run status, the route synthesises
+ * a recovery `lifecycle` frame from the canonical run record, ensuring the
+ * subscriber always receives the terminal signal.
  */
 export const GET: RequestHandler = async ({ params, request, url }) => {
 	const { runId } = params;
@@ -41,11 +65,18 @@ export const GET: RequestHandler = async ({ params, request, url }) => {
 		async start(controller) {
 			const encoder = new TextEncoder();
 
+			// Tracks whether this subscriber has already received a terminal lifecycle
+			// event on the stream bus. Reset per connection, not per run.
+			let seenTerminalLifecycle = false;
+
 			while (!signal.aborted) {
 				// Read any new events since the cursor.
 				const replay = await readStreamEventsAfterCursor(db, { runId, afterId: cursor });
 
 				if (replay.events.length > 0) {
+					if (!seenTerminalLifecycle) {
+						seenTerminalLifecycle = replay.events.some(isTerminalLifecycleEvent);
+					}
 					controller.enqueue(encoder.encode(encodeServerSentEvents(replay)));
 					cursor = replay.events[replay.events.length - 1].id;
 				}
@@ -61,10 +92,26 @@ export const GET: RequestHandler = async ({ params, request, url }) => {
 					// Final drain: one more read to capture any events written between the
 					// last poll and the status check, preventing loss of the final event
 					// (e.g. the lifecycle:complete event) when trim and status update race.
-					const finalReplay = await readStreamEventsAfterCursor(db, { runId, afterId: cursor });
+					const finalReplay = await readStreamEventsAfterCursor(db, {
+						runId,
+						afterId: cursor
+					});
 					if (finalReplay.events.length > 0) {
+						if (!seenTerminalLifecycle) {
+							seenTerminalLifecycle = finalReplay.events.some(isTerminalLifecycleEvent);
+						}
 						controller.enqueue(encoder.encode(encodeServerSentEvents(finalReplay)));
 					}
+
+					// If the terminal lifecycle event was never received via the stream bus
+					// (published by recordRunCompleted then immediately trimmed before the
+					// subscriber's poll landed), reconstruct it from the canonical run record
+					// so the subscriber always receives a terminal signal.
+					if (!seenTerminalLifecycle) {
+						const recoveryPayload = JSON.stringify({ status: run.status });
+						controller.enqueue(encoder.encode(`event: lifecycle\ndata: ${recoveryPayload}\n\n`));
+					}
+
 					break;
 				}
 
