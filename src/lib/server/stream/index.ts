@@ -91,7 +91,10 @@ export async function publishAssistantDeltas(
 /**
  * Reads stream events for a run after a given cursor ID, ordered by autoincrement
  * ID. Detects gaps using two checks:
- * - Leading edge: the first returned event's ID is not immediately after the cursor.
+ * - Leading edge: the first returned event's per-run sequence is not immediately
+ *   after `afterSequence`. Requires `afterSequence > 0` to be meaningful; when
+ *   omitted or zero the check is skipped. Using per-run sequence (not global id)
+ *   avoids false positives from concurrent inserts by other runs.
  * - Interior: any consecutive pair of returned events has non-contiguous sequences.
  *
  * Either condition sets gapDetected=true so the client can request a full replay
@@ -99,9 +102,10 @@ export async function publishAssistantDeltas(
  */
 export async function readStreamEventsAfterCursor(
 	database: DatabaseClient,
-	input: { runId: string; afterId?: number; limit?: number }
+	input: { runId: string; afterId?: number; afterSequence?: number; limit?: number }
 ): Promise<StreamReplay> {
 	const afterId = input.afterId ?? 0;
+	const afterSequence = input.afterSequence ?? 0;
 	const events = await database
 		.select()
 		.from(streamEvents)
@@ -109,7 +113,8 @@ export async function readStreamEventsAfterCursor(
 		.orderBy(asc(streamEvents.id))
 		.limit(input.limit ?? 100);
 
-	const hasLeadingGap = events.length > 0 && afterId > 0 && events[0].id !== afterId + 1;
+	const hasLeadingGap =
+		events.length > 0 && afterSequence > 0 && events[0].sequence !== afterSequence + 1;
 	const hasInteriorGap = events.some(
 		(event, index) => index > 0 && event.sequence !== events[index - 1].sequence + 1
 	);

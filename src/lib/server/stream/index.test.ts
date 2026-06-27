@@ -85,42 +85,125 @@ describe('stream events', () => {
 	});
 
 	it('replays stream events after a cursor and detects leading-edge gaps', async () => {
+		// Publish two contiguous events for run-complete.
 		const first = await publishStreamEvent(database, {
 			runId: 'run-complete',
 			sessionId: 'session-001',
 			kind: 'lifecycle',
 			payload: JSON.stringify({ status: 'started' })
 		});
-		await publishStreamEvent(database, {
+		const second = await publishStreamEvent(database, {
 			runId: 'run-complete',
 			sessionId: 'session-001',
 			kind: 'assistant.message',
 			payload: JSON.stringify({ text: 'done' })
 		});
 
+		// Reading after first with afterSequence correctly set must not detect a gap.
 		const replay = await readStreamEventsAfterCursor(database, {
 			runId: 'run-complete',
-			afterId: first.id
+			afterId: first.id,
+			afterSequence: first.sequence
 		});
 
 		expect(replay.gapDetected).toBe(false);
 		expect(replay.events).toHaveLength(1);
+		expect(replay.events[0].id).toBe(second.id);
 
-		sqlite.prepare(`DELETE FROM stream_events WHERE id = ?`).run(first.id + 1);
-		const later = await publishStreamEvent(database, {
-			runId: 'run-complete',
-			sessionId: 'session-001',
-			kind: 'lifecycle',
-			payload: JSON.stringify({ status: 'complete' })
-		});
+		// Simulate a missing event by inserting via raw SQL with a sequence that skips
+		// ahead by 2, creating a genuine per-run sequence gap (sequence N+1 is absent).
+		// Deleting an event and re-inserting cannot reliably test this because
+		// publishStreamEvent recycles the sequence of the deleted row.
+		sqlite
+			.prepare(
+				`INSERT INTO stream_events (run_id, session_id, sequence, kind, payload, created_at)
+				 VALUES (?, ?, ?, ?, ?, ?)`
+			)
+			.run(
+				'run-complete',
+				'session-001',
+				second.sequence + 2,
+				'lifecycle',
+				JSON.stringify({ status: 'complete' }),
+				new Date().toISOString()
+			);
 
+		// Reading after second with afterSequence=second.sequence must detect the leading gap.
+		// The raw-inserted event has sequence second.sequence+2, skipping second.sequence+1.
 		const gapReplay = await readStreamEventsAfterCursor(database, {
 			runId: 'run-complete',
-			afterId: first.id
+			afterId: second.id,
+			afterSequence: second.sequence
 		});
-		expect(later.id).toBeGreaterThan(first.id + 1);
 		expect(gapReplay.gapDetected).toBe(true);
 		expect(encodeServerSentEvents(gapReplay)).toContain('event: stream.gap');
+	});
+
+	it('does not detect a leading-edge gap when another run advances the global id', async () => {
+		// Regression: a jump in the global autoincrement id caused by a concurrent
+		// run must NOT trigger a false-positive stream.gap for the target run.
+		// Two run-A events, one run-B event (advances global id), a third run-A event
+		// must yield gapDetected === false when afterSequence is threaded correctly.
+		sqlite
+			.prepare(
+				`INSERT INTO runs (id, session_id, workflow_id, status) VALUES (?, ?, ?, ?), (?, ?, ?, ?)`
+			)
+			.run(
+				'run-gap-a',
+				'session-001',
+				'agent-run:run-gap-a',
+				'running',
+				'run-gap-b',
+				'session-001',
+				'agent-run:run-gap-b',
+				'running'
+			);
+
+		const a1 = await publishStreamEvent(database, {
+			runId: 'run-gap-a',
+			sessionId: 'session-001',
+			kind: 'lifecycle',
+			payload: JSON.stringify({ status: 'started' })
+		});
+		const a2 = await publishStreamEvent(database, {
+			runId: 'run-gap-a',
+			sessionId: 'session-001',
+			kind: 'assistant.message',
+			payload: JSON.stringify({ text: 'first' })
+		});
+
+		// Run-B inserts an event, advancing the global autoincrement id by one.
+		await publishStreamEvent(database, {
+			runId: 'run-gap-b',
+			sessionId: 'session-001',
+			kind: 'lifecycle',
+			payload: JSON.stringify({ status: 'started' })
+		});
+
+		const a3 = await publishStreamEvent(database, {
+			runId: 'run-gap-a',
+			sessionId: 'session-001',
+			kind: 'assistant.message',
+			payload: JSON.stringify({ text: 'third' })
+		});
+
+		// The global id jumps between a2 and a3 because run-B inserted between them.
+		expect(a3.id).toBeGreaterThan(a2.id + 1);
+		// But the per-run sequences for run-A are contiguous (1, 2, 3).
+		expect(a1.sequence).toBe(1);
+		expect(a2.sequence).toBe(2);
+		expect(a3.sequence).toBe(3);
+
+		// Reading after a2 with afterSequence = a2.sequence must not report a gap.
+		const replay = await readStreamEventsAfterCursor(database, {
+			runId: 'run-gap-a',
+			afterId: a2.id,
+			afterSequence: a2.sequence
+		});
+
+		expect(replay.events).toHaveLength(1);
+		expect(replay.events[0].id).toBe(a3.id);
+		expect(replay.gapDetected).toBe(false);
 	});
 
 	it('detects interior gaps within a batch via per-run sequence', async () => {
