@@ -542,7 +542,10 @@ export async function executeRegisteredTool(input: {
 		}
 
 		const result =
-			input.call.idempotencyKey && input.database && input.runId
+			input.call.idempotencyKey &&
+			input.database &&
+			input.runId &&
+			decision.tool.metadata.idempotencyBehavior === 'key-required'
 				? await executeWithIdempotency({
 						database: input.database,
 						idempotencyKey: input.call.idempotencyKey,
