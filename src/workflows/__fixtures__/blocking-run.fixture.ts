@@ -9,7 +9,13 @@ import type {
 	ApprovalResolution,
 	ApprovalResolutionInput
 } from '@src/lib/types';
-import { allHandlersFinished, condition, defineQuery, defineSignal, setHandler } from '@temporalio/workflow';
+import {
+	allHandlersFinished,
+	condition,
+	defineQuery,
+	defineSignal,
+	setHandler
+} from '@temporalio/workflow';
 import { steeringSignal } from '../approval-contracts';
 import { resolveApprovalUpdate } from '../session-contracts';
 
@@ -30,6 +36,14 @@ export const receivedApprovalQuery = defineQuery<ApprovalResolutionInput | null,
 	'receivedApproval'
 );
 
+/**
+ * Query: returns the `delegateSubagents` value from the AgentRunInput this stub received.
+ * Used in tests to assert that the session correctly propagates the flag to child runs.
+ */
+export const getDelegateSubagentsQuery = defineQuery<boolean | undefined, []>(
+	'getDelegateSubagents'
+);
+
 export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunResult> {
 	let released = false;
 	const steeringBuffer: string[] = [];
@@ -45,6 +59,7 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 
 	void setHandler(getSteeringBufferQuery, () => steeringBuffer);
 	void setHandler(receivedApprovalQuery, () => receivedApproval);
+	void setHandler(getDelegateSubagentsQuery, () => input.delegateSubagents);
 
 	// Handle resolveApprovalUpdate so the approval-routing test can verify the
 	// session forwards the resolution to the run. Returns a mock ApprovalResolution.

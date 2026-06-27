@@ -78,7 +78,7 @@ const HANDLER_FINISH_TIMEOUT_MS = 60_000;
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type QueuedTurn = { runId: string; message: string };
+type QueuedTurn = { runId: string; message: string; delegateSubagents?: boolean };
 
 /**
  * Input for AgentSessionWorkflow.
@@ -167,7 +167,7 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 	void setHandler(submitTurnUpdate, (turn: SubmitTurnInput): SubmitTurnResult => {
 		submittedTurnCount++;
 		const runId = `${sessionKey}-run-${submittedTurnCount}`;
-		queue.push({ runId, message: turn.message });
+		queue.push({ runId, message: turn.message, delegateSubagents: turn.delegateSubagents });
 		return { accepted: true, runId };
 	});
 
@@ -251,7 +251,8 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 							{
 								sessionKey,
 								runId: turn.runId,
-								message: turn.message
+								message: turn.message,
+								delegateSubagents: turn.delegateSubagents
 							} satisfies AgentRunInput
 						]
 					});

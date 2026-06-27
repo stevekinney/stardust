@@ -3,6 +3,8 @@
 
 export type SubmitTurnInput = {
 	message: string;
+	/** When true, the run will fan out research, code, and critic child workflows. */
+	delegateSubagents?: boolean;
 };
 
 export type SubmitTurnResult = {
