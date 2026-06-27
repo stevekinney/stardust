@@ -248,6 +248,94 @@ describe('LocalSubprocessSandboxProvider', () => {
 		expect(result.killed).toBe(true);
 		expect(result.status).toBe('killed');
 	});
+
+	it('kills only the specific command when its AbortSignal fires, not other same-session processes', async () => {
+		expect.assertions(3);
+
+		const provider = new LocalSubprocessSandboxProvider({ workspaceRoot: temporaryRoot });
+		await provider.ensureWorkspace('session-a');
+
+		// Start a long-running background command for the same session — must survive.
+		const backgroundCommand = provider.runCommand({
+			sessionKey: 'session-a',
+			runId: 'run-bg',
+			command: 'bun',
+			args: ['-e', 'await new Promise(() => {})']
+		});
+
+		// Start a second command with its own AbortSignal.
+		const controller = new AbortController();
+		const foregroundCommand = provider.runCommand(
+			{
+				sessionKey: 'session-a',
+				runId: 'run-fg',
+				command: 'bun',
+				args: ['-e', 'await new Promise(() => {})']
+			},
+			{ signal: controller.signal }
+		);
+
+		await waitForTrackedProcesses(provider, 2);
+
+		// Abort only the foreground command.
+		controller.abort();
+		const foregroundResult = await foregroundCommand;
+
+		expect(foregroundResult.killed).toBe(true);
+		expect(foregroundResult.status).toBe('killed');
+		// The background process is still tracked — the signal did not kill it.
+		expect(provider.trackedProcessCount).toBe(1);
+
+		// Clean up.
+		await provider.cancelSession('session-a');
+		await backgroundCommand;
+	});
+
+	it('kills a running command when the AbortSignal fires', async () => {
+		expect.assertions(2);
+
+		const provider = new LocalSubprocessSandboxProvider({ workspaceRoot: temporaryRoot });
+		const controller = new AbortController();
+
+		const command = provider.runCommand(
+			{
+				sessionKey: 'session-a',
+				runId: 'run-a',
+				command: 'bun',
+				args: ['-e', 'await new Promise(() => {})']
+			},
+			{ signal: controller.signal }
+		);
+
+		await waitForTrackedProcesses(provider, 1);
+		controller.abort();
+
+		const result = await command;
+
+		expect(result.killed).toBe(true);
+		expect(result.status).toBe('killed');
+	});
+
+	it('kills a command immediately when given an already-aborted AbortSignal', async () => {
+		expect.assertions(2);
+
+		const provider = new LocalSubprocessSandboxProvider({ workspaceRoot: temporaryRoot });
+		const controller = new AbortController();
+		controller.abort();
+
+		const result = await provider.runCommand(
+			{
+				sessionKey: 'session-a',
+				runId: 'run-a',
+				command: 'bun',
+				args: ['-e', 'await new Promise(() => {})']
+			},
+			{ signal: controller.signal }
+		);
+
+		expect(result.killed).toBe(true);
+		expect(result.status).toBe('killed');
+	});
 });
 
 async function waitForTrackedProcesses(

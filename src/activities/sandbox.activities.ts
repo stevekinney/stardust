@@ -1,4 +1,4 @@
-import { heartbeat } from '@temporalio/activity';
+import { cancellationSignal, heartbeat } from '@temporalio/activity';
 import { db } from '@src/lib/server/db';
 import { getSandboxProvider } from '@src/lib/server/sandbox';
 import type {
@@ -26,12 +26,17 @@ export async function writeSandboxFile(input: SandboxWriteFileInput): Promise<vo
 }
 
 export async function runSandboxCommand(input: SandboxCommandInput): Promise<SandboxCommandResult> {
-	try {
-		heartbeat({ sessionKey: input.sessionKey, command: input.command });
-		return await sandboxProvider.runCommand(input);
-	} finally {
-		await sandboxProvider.cancelSession(input.sessionKey);
-	}
+	heartbeat({ sessionKey: input.sessionKey, command: input.command });
+	// Pass the Temporal cancellation signal so that Activity cancellation kills only
+	// this command's process. Other processes tracked for the same session (e.g. a
+	// background process started by process.start) are left running. Whole-session
+	// cleanup on run/session cancellation is the responsibility of a dedicated cancel
+	// activity, not this per-command invocation.
+	//
+	// Note: the Activity heartbeats only once. Ongoing heartbeats are needed for
+	// Temporal to reliably deliver the cancellation signal during long commands.
+	// That is a pre-existing gap; adding periodic heartbeats is a separate concern.
+	return sandboxProvider.runCommand(input, { signal: cancellationSignal() });
 }
 
 interface RunEphemeralSandboxCommandInput {

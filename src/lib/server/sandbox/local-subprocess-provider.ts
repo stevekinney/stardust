@@ -23,6 +23,7 @@ import type {
 	SandboxEphemeralSandbox,
 	SandboxFileInput,
 	SandboxProvider,
+	SandboxRunCommandOptions,
 	SandboxSnapshotInput,
 	SandboxSnapshotResult,
 	SandboxWriteFileInput
@@ -114,15 +115,19 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 		await writeFile(filePath, input.contents, 'utf8');
 	}
 
-	async runCommand(input: SandboxCommandInput): Promise<SandboxCommandResult> {
+	async runCommand(
+		input: SandboxCommandInput,
+		options?: SandboxRunCommandOptions
+	): Promise<SandboxCommandResult> {
 		const workspacePath = await this.ensureWorkspace(input.sessionKey);
-		return this.runCommandInWorkspace(input, workspacePath, this.workspaceRoot);
+		return this.runCommandInWorkspace(input, workspacePath, this.workspaceRoot, options?.signal);
 	}
 
 	private async runCommandInWorkspace(
 		input: SandboxCommandInput,
 		workspacePath: string,
-		homePath: string
+		homePath: string,
+		signal?: AbortSignal
 	): Promise<SandboxCommandResult> {
 		const id = randomUUID();
 		const args = input.args ?? [];
@@ -158,6 +163,20 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 				timedOut: false
 			};
 			this.trackedProcesses.set(id, tracked);
+
+			// Scope cancellation to this specific process. When the caller provides a
+			// signal (e.g. Temporal's cancellationSignal()), only this command is killed —
+			// other processes tracked for the same session are left running.
+			if (signal) {
+				if (signal.aborted) {
+					// Signal was already aborted before we started; kill immediately.
+					this.killTrackedProcess(tracked);
+				} else {
+					signal.addEventListener('abort', () => this.killTrackedProcess(tracked), {
+						once: true
+					});
+				}
+			}
 
 			const timeout = setTimeout(() => {
 				tracked.timedOut = true;
