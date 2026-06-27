@@ -87,12 +87,19 @@ type ToolActivities = {
 };
 
 type ObservabilityActivities = {
-	recordRunStarted(input: { sessionId: string; runId: string; message: string }): Promise<void>;
+	recordRunStarted(input: {
+		sessionId: string;
+		runId: string;
+		message: string;
+		model?: string;
+		budget?: RunBudget;
+	}): Promise<void>;
 	recordRunCompleted(input: {
 		sessionId: string;
 		runId: string;
 		status: AgentRunResult['status'];
 		finalAnswer: string;
+		usage?: ModelUsage;
 	}): Promise<void>;
 	recordSubagentStarted(input: {
 		sessionId: string;
@@ -426,12 +433,17 @@ async function runDelegatedSubagents(
 	};
 }
 
-async function completeRun(input: AgentRunInput, result: AgentRunResult): Promise<AgentRunResult> {
+async function completeRun(
+	input: AgentRunInput,
+	result: AgentRunResult,
+	usage?: ModelUsage
+): Promise<AgentRunResult> {
 	await observabilityActivities.recordRunCompleted({
 		sessionId: input.sessionKey,
 		runId: input.runId,
 		status: result.status,
-		finalAnswer: result.finalAnswer
+		finalAnswer: result.finalAnswer,
+		usage
 	});
 	return result;
 }
@@ -666,7 +678,9 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 	await observabilityActivities.recordRunStarted({
 		sessionId: input.sessionKey,
 		runId: input.runId,
-		message: input.message
+		message: input.message,
+		model: input.model ?? DEFAULT_MODEL,
+		budget
 	});
 
 	// ── Model → tool loop ──────────────────────────────────────────────────────
@@ -760,11 +774,15 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 
 			if (outcome.kind === 'terminal') {
 				await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
-				return completeRun(input, {
-					runId: input.runId,
-					status: outcome.status,
-					finalAnswer: outcome.finalAnswer
-				});
+				return completeRun(
+					input,
+					{
+						runId: input.runId,
+						status: outcome.status,
+						finalAnswer: outcome.finalAnswer
+					},
+					totalUsage
+				);
 			}
 
 			await observabilityActivities.persistToolResult({
@@ -807,13 +825,23 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 		})
 		.catch(() => undefined);
 
+	// Compute grand total usage: parent model calls + reconciled subagent usage.
+	const grandTotalUsage = addUsage(
+		totalUsage,
+		delegationResult?.budgetLedger.used ?? createEmptyUsage()
+	);
+
 	status = 'complete';
 	await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
-	return completeRun(input, {
-		runId: input.runId,
-		status: 'complete',
-		finalAnswer,
-		memoryRefs: [memoryRef],
-		...delegationResult
-	});
+	return completeRun(
+		input,
+		{
+			runId: input.runId,
+			status: 'complete',
+			finalAnswer,
+			memoryRefs: [memoryRef],
+			...delegationResult
+		},
+		grandTotalUsage
+	);
 }

@@ -75,12 +75,19 @@ describe('agentRunWorkflow approvals', () => {
 		requests: RecordApprovalRequestInput[];
 		resolutions: RecordApprovalResolutionInput[];
 		executions: Array<ToolExecutionInput & { approved?: boolean }>;
-		startedRuns: Array<{ sessionId: string; runId: string; message: string }>;
+		startedRuns: Array<{
+			sessionId: string;
+			runId: string;
+			message: string;
+			model?: string;
+			budget?: RunBudget;
+		}>;
 		completedRuns: Array<{
 			sessionId: string;
 			runId: string;
 			status: 'complete' | 'failed' | 'cancelled';
 			finalAnswer: string;
+			usage?: ModelUsage;
 		}>;
 	} = {
 		requests: [],
@@ -205,7 +212,13 @@ describe('agentRunWorkflow approvals', () => {
 			// No-op: transcript persistence is tested in context-builder.test.ts
 		},
 
-		async recordRunStarted(input: { sessionId: string; runId: string; message: string }) {
+		async recordRunStarted(input: {
+			sessionId: string;
+			runId: string;
+			message: string;
+			model?: string;
+			budget?: RunBudget;
+		}) {
 			activityState.startedRuns.push(input);
 		},
 
@@ -214,6 +227,7 @@ describe('agentRunWorkflow approvals', () => {
 			runId: string;
 			status: 'complete' | 'failed' | 'cancelled';
 			finalAnswer: string;
+			usage?: ModelUsage;
 		}) {
 			activityState.completedRuns.push(input);
 		},
@@ -412,6 +426,54 @@ describe('agentRunWorkflow approvals', () => {
 				expect.objectContaining({ action: 'expire', actor: 'system' })
 			]);
 			expect(activityState.executions).toHaveLength(0);
+		});
+	});
+
+	it('forwards resolved model, default budget, and accumulated usage to observability activities', async () => {
+		// Regression guard for task 7c867cdf: the workflow must pass model/budget
+		// to recordRunStarted and grand-total usage to recordRunCompleted. Reverting
+		// either call site would cause these assertions to fail.
+		await runWithWorkers(async () => {
+			const runId = `obs-wiring-${Date.now()}`;
+			const handle = await env.client.workflow.start('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [
+					{
+						sessionKey: 'session-001',
+						runId,
+						message: 'write the file',
+						approvalTtlMs: 60_000
+						// No model/budget specified → workflow uses DEFAULT_MODEL / DEFAULT_RUN_BUDGET
+					}
+				]
+			});
+
+			// Wait for the workflow to park in waiting_approval after the first model
+			// call (which returns a tool_use block per the callModel mock above).
+			const approvalId = `${runId}:tool-call-001:approval`;
+			for (let i = 0; i < 10; i++) {
+				const state = await handle.query(getAgentRunStateQuery);
+				if (state.pendingApproval?.approvalId === approvalId) break;
+				await env.sleep(100);
+			}
+
+			// Send a deny to bring the run to completion via the terminal path.
+			await handle.executeUpdate(resolveApprovalUpdate, {
+				args: [{ approvalId, action: 'deny', reason: 'stop for test' }]
+			});
+			await handle.result();
+
+			// Verify recordRunStarted received the resolved model and default budget.
+			expect(activityState.startedRuns).toHaveLength(1);
+			expect(activityState.startedRuns[0].model).toBe('claude-sonnet-4-5-20250929');
+			expect(activityState.startedRuns[0].budget).toBeDefined();
+			expect(activityState.startedRuns[0].budget?.maxModelCalls).toBe(10);
+
+			// Verify recordRunCompleted received the accumulated usage (one model call
+			// returned MOCK_MODEL_USAGE; the terminal deny path forwards totalUsage).
+			expect(activityState.completedRuns).toHaveLength(1);
+			expect(activityState.completedRuns[0].usage).toEqual(MOCK_MODEL_USAGE);
 		});
 	});
 });

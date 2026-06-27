@@ -10,6 +10,8 @@ const baseRun: RunInspectorProjection['run'] = {
 	status: 'complete',
 	model: 'claude-opus-4-5',
 	finalAnswer: 'Done.',
+	usage: null,
+	budget: null,
 	startedAt: '2026-06-26T00:00:00.000Z',
 	completedAt: '2026-06-26T00:01:00.000Z'
 };

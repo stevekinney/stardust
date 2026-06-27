@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../lib/server/db/client';
 import { runs, sessions } from '../lib/server/db/schema';
-import type { ModelUsage, SubagentKind } from '../lib/types';
+import type { ModelUsage, RunBudget, SubagentKind } from '../lib/types';
 import {
 	appendTranscriptEvent,
 	persistToolResult as runPersistToolResult,
@@ -15,6 +15,10 @@ export async function recordRunStarted(input: {
 	sessionId: string;
 	runId: string;
 	message: string;
+	/** Resolved model ID (caller should supply the actual model, not the raw optional input). */
+	model?: string;
+	/** Budget caps snapshot to persist alongside the run start. */
+	budget?: RunBudget;
 }): Promise<void> {
 	const now = new Date().toISOString();
 	await db
@@ -35,7 +39,9 @@ export async function recordRunStarted(input: {
 			sessionId: input.sessionId,
 			workflowId: `agent-run:${input.runId}`,
 			status: 'running',
+			model: input.model ?? null,
 			input: JSON.stringify({ message: input.message }),
+			budget: input.budget != null ? JSON.stringify(input.budget) : null,
 			startedAt: now,
 			createdAt: now,
 			updatedAt: now
@@ -44,6 +50,8 @@ export async function recordRunStarted(input: {
 			target: runs.id,
 			set: {
 				status: 'running',
+				model: input.model ?? null,
+				budget: input.budget != null ? JSON.stringify(input.budget) : null,
 				startedAt: now,
 				updatedAt: now
 			}
@@ -146,6 +154,8 @@ export async function recordRunCompleted(input: {
 	runId: string;
 	status: RunCompletionStatus;
 	finalAnswer: string;
+	/** Grand total token usage (parent model calls + reconciled subagent usage). */
+	usage?: ModelUsage;
 }): Promise<void> {
 	const now = new Date().toISOString();
 	await db
@@ -153,6 +163,7 @@ export async function recordRunCompleted(input: {
 		.set({
 			status: input.status,
 			finalAnswer: input.finalAnswer,
+			usage: input.usage != null ? JSON.stringify(input.usage) : null,
 			completedAt: now,
 			updatedAt: now
 		})

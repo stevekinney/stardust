@@ -7,7 +7,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import * as schema from '../lib/server/db/schema';
 import { publishStreamEvent, readStreamEventsAfterCursor } from '../lib/server/stream';
-import { recordRunCompleted } from './observability.activities';
+import { recordRunCompleted, recordRunStarted } from './observability.activities';
 
 const TEST_DB_DIR = join(tmpdir(), 'stardust-observability-activities-test');
 const TEST_DB_PATH = join(TEST_DB_DIR, 'test.db');
@@ -94,5 +94,81 @@ describe('recordRunCompleted', () => {
 		// Failed runs should retain stream events (canonical state may be needed for debugging).
 		const remaining = await readStreamEventsAfterCursor(database, { runId: 'run-failed' });
 		expect(remaining.events.length).toBeGreaterThan(0);
+	});
+
+	it('persists usage totals when provided', async () => {
+		sqlite
+			.prepare(`INSERT INTO runs (id, session_id, workflow_id, status) VALUES (?, ?, ?, ?)`)
+			.run('run-usage', 'obs-session', 'agent-run:run-usage', 'running');
+
+		await recordRunCompleted({
+			sessionId: 'obs-session',
+			runId: 'run-usage',
+			status: 'complete',
+			finalAnswer: 'done',
+			usage: { inputTokens: 150, outputTokens: 50, estimatedCostUsd: 0.003 }
+		});
+
+		const row = sqlite.prepare('SELECT usage FROM runs WHERE id = ?').get('run-usage') as {
+			usage: string;
+		};
+		expect(JSON.parse(row.usage)).toEqual({
+			inputTokens: 150,
+			outputTokens: 50,
+			estimatedCostUsd: 0.003
+		});
+	});
+});
+
+describe('recordRunStarted', () => {
+	it('persists model and budget when provided', async () => {
+		// recordRunStarted creates the session row (idempotent) and the run row.
+		// Use a fresh session + run to avoid collisions.
+		sqlite
+			.prepare(`INSERT INTO sessions (id, session_key, status, workflow_id) VALUES (?, ?, ?, ?)`)
+			.run('obs-session-b', 'obs-session-b', 'active', 'agent-session:obs-session-b');
+
+		await recordRunStarted({
+			sessionId: 'obs-session-b',
+			runId: 'run-started-model',
+			message: 'hello',
+			model: 'claude-sonnet-4-5-20250929',
+			budget: {
+				maxModelCalls: 10,
+				maxToolCalls: 20,
+				maxChildWorkflows: 3,
+				maxTokens: 100_000,
+				maxActions: 30,
+				maxActiveWallClockMs: 600_000,
+				maxEstimatedCostUsd: 1.0
+			}
+		});
+
+		const row = sqlite
+			.prepare('SELECT model, budget FROM runs WHERE id = ?')
+			.get('run-started-model') as { model: string; budget: string };
+
+		expect(row.model).toBe('claude-sonnet-4-5-20250929');
+		const budget = JSON.parse(row.budget);
+		expect(budget.maxModelCalls).toBe(10);
+		expect(budget.maxEstimatedCostUsd).toBe(1.0);
+	});
+
+	it('creates a run row even without model or budget (backwards-compatible)', async () => {
+		sqlite
+			.prepare(`INSERT INTO sessions (id, session_key, status, workflow_id) VALUES (?, ?, ?, ?)`)
+			.run('obs-session-c', 'obs-session-c', 'active', 'agent-session:obs-session-c');
+
+		await recordRunStarted({
+			sessionId: 'obs-session-c',
+			runId: 'run-started-minimal',
+			message: 'hello'
+		});
+
+		const row = sqlite
+			.prepare('SELECT id, status FROM runs WHERE id = ?')
+			.get('run-started-minimal') as { id: string; status: string };
+		expect(row.id).toBe('run-started-minimal');
+		expect(row.status).toBe('running');
 	});
 });
