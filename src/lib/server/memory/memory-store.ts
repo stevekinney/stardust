@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import type { DatabaseClient } from '../db';
 import { memoryNotes, streamEvents } from '../db';
 
@@ -121,6 +121,12 @@ export class MemoryStore {
 		const id = input.id ?? randomUUID();
 		const createdAt = input.createdAt ?? now;
 		const updatedAt = input.updatedAt ?? createdAt;
+		// Use `!== undefined` (not `??`) so an explicit null is stored as NULL in the
+		// database rather than silently defaulting to the current timestamp. Callers
+		// that omit confirmedAt (undefined) still get the current timestamp, but
+		// callers that pass null (e.g. compactSessionMemory for unconfirmed candidates)
+		// correctly store a NULL row that can be filtered from retrieval.
+		const confirmedAt = input.confirmedAt !== undefined ? input.confirmedAt : now;
 		await this.database.insert(memoryNotes).values({
 			id,
 			sessionId: input.sessionId,
@@ -128,7 +134,7 @@ export class MemoryStore {
 			content: input.content,
 			tags: JSON.stringify(input.tags ?? []),
 			runId: input.runId ?? null,
-			confirmedAt: input.confirmedAt ?? now,
+			confirmedAt,
 			createdAt,
 			updatedAt
 		});
@@ -150,7 +156,10 @@ export class MemoryStore {
 	}
 
 	async listBySession(sessionId: string, layers?: MemoryLayer[]): Promise<MemoryNote[]> {
-		const filters = [eq(memoryNotes.sessionId, sessionId)];
+		// Only confirmed notes (confirmedAt IS NOT NULL) are returned.
+		// Unconfirmed compaction candidates must not surface in retrieval or the
+		// memory panel until a user explicitly confirms them.
+		const filters = [eq(memoryNotes.sessionId, sessionId), isNotNull(memoryNotes.confirmedAt)];
 		if (layers && layers.length > 0) {
 			filters.push(
 				inArray(
@@ -201,6 +210,7 @@ export class MemoryStore {
 			JOIN memory_notes m ON m.id = memory_notes_fts.id
 			WHERE memory_notes_fts MATCH ${ftsQuery}
 				AND m.session_id = ${input.sessionId}
+				AND m.confirmed_at IS NOT NULL
 				AND ${layerFilter}
 			ORDER BY lexicalRank ASC, m.created_at DESC
 			LIMIT ${limit}
@@ -276,6 +286,7 @@ export class MemoryStore {
 			FROM memory_note_embeddings e
 			JOIN memory_notes m ON m.id = e.note_id
 			WHERE m.session_id = ${input.sessionId}
+				AND m.confirmed_at IS NOT NULL
 				AND ${layerFilter}
 		`);
 
@@ -332,6 +343,7 @@ export class MemoryStore {
 			WHERE v.embedding MATCH ${JSON.stringify(input.embedding)}
 				AND k = ${limit}
 				AND m.session_id = ${input.sessionId}
+				AND m.confirmed_at IS NOT NULL
 				AND ${layerFilter}
 			ORDER BY v.distance ASC
 			LIMIT ${limit}

@@ -7,7 +7,7 @@ import type {
 	CompactMemoryResult,
 	MemoryCompactionActivities
 } from '@src/lib/types';
-import { TASK_QUEUE_ORCHESTRATOR } from '@src/lib/types';
+import { TASK_QUEUE_MEMORY, TASK_QUEUE_ORCHESTRATOR } from '@src/lib/types';
 
 describe('memoryCompactionWorkflow', () => {
 	let env: TestWorkflowEnvironment;
@@ -62,15 +62,24 @@ describe('memoryCompactionWorkflow', () => {
 			}
 		};
 
-		const worker = await Worker.create({
+		// The workflow runs on the orchestrator queue; activities are dispatched to
+		// TASK_QUEUE_MEMORY. The test uses two separate workers to exercise the real
+		// queue routing — a single worker on TASK_QUEUE_ORCHESTRATOR would accept
+		// the activities locally, hiding any missing taskQueue bug.
+		const orchestratorWorker = await Worker.create({
 			connection: env.nativeConnection,
 			namespace: 'default',
 			taskQueue: TASK_QUEUE_ORCHESTRATOR,
-			workflowsPath: fileURLToPath(new URL('./index.ts', import.meta.url)),
+			workflowsPath: fileURLToPath(new URL('./index.ts', import.meta.url))
+		});
+		const memoryWorker = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_MEMORY,
 			activities
 		});
 
-		await worker.runUntil(async () => {
+		const workflowTask = orchestratorWorker.runUntil(async () => {
 			const result: CompactMemoryResult = await env.client.workflow.execute(
 				'memoryCompactionWorkflow',
 				{
@@ -95,5 +104,9 @@ describe('memoryCompactionWorkflow', () => {
 				transcriptCursor: 42
 			});
 		});
+
+		// Run the memory worker in parallel — it handles activities dispatched to TASK_QUEUE_MEMORY.
+		const memoryTask = memoryWorker.runUntil(workflowTask.catch(() => undefined));
+		await Promise.all([workflowTask, memoryTask]);
 	});
 });

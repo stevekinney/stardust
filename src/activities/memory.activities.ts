@@ -14,6 +14,7 @@ import type {
 	MemoryCompactionSummary,
 	PersistMemoryCompactionInput
 } from '../lib/types';
+import { summarizeCompaction } from '../lib/server/memory/compaction-summarizer';
 
 const memoryStore = new MemoryStore(db);
 
@@ -93,15 +94,7 @@ export async function loadMemoryCompactionInput(
 export async function summarizeMemoryCompaction(
 	input: LoadedMemoryCompactionInput
 ): Promise<MemoryCompactionSummary> {
-	const summary =
-		input.transcript.length === 0
-			? 'No new transcript events to compact.'
-			: input.transcript.slice(0, 6).join('\n');
-
-	return {
-		summary,
-		candidates: []
-	};
+	return summarizeCompaction(input);
 }
 
 export async function persistMemoryCompaction(input: PersistMemoryCompactionInput) {
