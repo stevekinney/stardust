@@ -462,6 +462,7 @@ async function handleToolCall(
 		const result = await sandboxActivities.executeTool({
 			call: toolCall,
 			sessionId: input.sessionKey,
+			sessionKey: input.sessionKey,
 			runId: input.runId,
 			workspacePath: input.workspacePath
 		});
@@ -546,6 +547,7 @@ async function handleToolCall(
 	const result = await sandboxActivities.executeTool({
 		call: { ...toolCall, arguments: recordedResolution.canonicalArguments },
 		sessionId: input.sessionKey,
+		sessionKey: input.sessionKey,
 		runId: input.runId,
 		workspacePath: input.workspacePath,
 		approved: true
