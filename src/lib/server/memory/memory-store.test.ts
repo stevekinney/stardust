@@ -7,8 +7,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadSqliteVecExtension } from '../db/sqlite-vec';
 import * as schema from '../db/schema';
-import { MemoryStore, createEmptyEmbedding } from './memory-store';
+import { MemoryStore, createEmptyEmbedding, EMBEDDING_DIMENSION } from './memory-store';
 import { retrieveMemory } from './retrieval';
+import { generateLocalEmbedding } from './embedding';
 
 const TEST_DB_DIR = join(tmpdir(), 'stardust-t7-memory-test');
 const TEST_DB_PATH = join(TEST_DB_DIR, 'test.db');
@@ -279,6 +280,97 @@ describe('MemoryStore', () => {
 
 		expect(await store.findById(note.id)).toMatchObject({ id: note.id });
 		expect(results[0]?.id).toBe(note.id);
+	});
+});
+
+/**
+ * Real-embedding tests that use the actual Xenova/all-MiniLM-L6-v2 model.
+ * These tests prove that hybrid retrieval finds semantically related content
+ * that lexical-only (FTS5) search misses.
+ */
+describe('Real embeddings (Xenova/all-MiniLM-L6-v2)', () => {
+	// Warm up the model once for all tests in this block. The model is cached
+	// under ~/.stardust/transformers-cache after the first download (47ms when cached,
+	// a few seconds on first use). The 30-second limit covers a cold-cache download.
+	beforeAll(async () => {
+		await generateLocalEmbedding('warm up');
+	}, 30_000);
+
+	it('produces 384-dimensional normalized vectors', async () => {
+		const embedding = await generateLocalEmbedding('Hello, world!');
+
+		expect(embedding).toHaveLength(EMBEDDING_DIMENSION);
+		expect(embedding.every((v) => Number.isFinite(v))).toBe(true);
+
+		const magnitude = Math.sqrt(embedding.reduce((sum, v) => sum + v * v, 0));
+		expect(magnitude).toBeCloseTo(1.0, 5);
+	});
+
+	it('hybrid retrieval finds semantically related content that lexical search misses', async () => {
+		// Fixture: query is about computing throughput / GPU acceleration.
+		// Target note is semantically related but shares ZERO lexical tokens with the query.
+		// FTS5 cannot find the target (no token overlap); vector search can.
+		//
+		// Verified empirically: cosine similarity between query and target ≈ 0.46
+		// (see spike-fixture3.ts; "accelerated computing throughput" vs
+		//  "GPU reduces latency on neural inference workloads.")
+		const sessionId = 'session-real-embeddings-hybrid';
+		const query = 'accelerated computing throughput';
+		const targetContent = 'GPU reduces latency on neural inference workloads.';
+
+		await store.createNote({
+			id: 'real-embed-target',
+			sessionId,
+			layer: 'durable',
+			content: targetContent
+		});
+
+		const targetEmbedding = await generateLocalEmbedding(targetContent);
+		await store.upsertEmbedding({
+			noteId: 'real-embed-target',
+			embedding: targetEmbedding,
+			model: 'Xenova/all-MiniLM-L6-v2'
+		});
+
+		const queryEmbedding = await generateLocalEmbedding(query);
+
+		// FTS-only: query tokens are accelerated*, computing*, throughput*.
+		// Target has none of these → zero lexical results.
+		const ftsOnly = await retrieveMemory({ store, sessionId, query });
+
+		// Hybrid: vector search finds the target through semantic similarity.
+		const hybrid = await retrieveMemory({ store, sessionId, query, queryEmbedding });
+
+		expect(ftsOnly.map((r) => r.id)).not.toContain('real-embed-target');
+		expect(hybrid.map((r) => r.id)).toContain('real-embed-target');
+	});
+
+	it('gracefully falls back to FTS when no embedding is stored for a note', async () => {
+		// A note with no stored embedding still appears in FTS results.
+		// When the query embedding is provided but the note has no vector,
+		// the vector search returns no results for that note; FTS covers it.
+		const sessionId = 'session-real-embeddings-fallback';
+		const content = 'The deployment pipeline uses continuous integration.';
+
+		await store.createNote({
+			id: 'real-embed-no-vector',
+			sessionId,
+			layer: 'durable',
+			content
+		});
+
+		// No call to upsertEmbedding — this note has no stored vector.
+
+		const query = 'deployment pipeline';
+		const queryEmbedding = await generateLocalEmbedding(query);
+
+		// FTS finds the note (matches "deployment*" and "pipeline*").
+		const ftsResults = await retrieveMemory({ store, sessionId, query });
+		// Hybrid also finds it via FTS even though no vector is stored.
+		const hybridResults = await retrieveMemory({ store, sessionId, query, queryEmbedding });
+
+		expect(ftsResults.map((r) => r.id)).toContain('real-embed-no-vector');
+		expect(hybridResults.map((r) => r.id)).toContain('real-embed-no-vector');
 	});
 });
 

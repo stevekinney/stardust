@@ -1,11 +1,7 @@
 import { db } from '../lib/server/db';
 import { sessions, transcriptEvents } from '../lib/server/db';
-import { MemoryStore, retrieveMemory } from '../lib/server/memory';
-import {
-	createEmptyEmbedding,
-	EMBEDDING_DIMENSION,
-	LOCAL_EMBEDDING_MODEL
-} from '../lib/server/memory';
+import { MemoryStore, retrieveMemory, generateLocalEmbedding } from '../lib/server/memory';
+import { LOCAL_EMBEDDING_MODEL } from '../lib/server/memory';
 import type {
 	CreateMemoryNoteInput,
 	LexicalMemorySearchInput,
@@ -58,7 +54,7 @@ export async function confirmMemoryCandidate(input: CreateMemoryNoteInput) {
 export async function generateEmbedding(input: { text: string }) {
 	return {
 		model: LOCAL_EMBEDDING_MODEL,
-		embedding: generateLocalEmbedding(input.text)
+		embedding: await generateLocalEmbedding(input.text)
 	};
 }
 
@@ -118,37 +114,6 @@ async function tryGenerateEmbedding(text: string) {
 	} catch {
 		return null;
 	}
-}
-
-function generateLocalEmbedding(text: string) {
-	const embedding = createEmptyEmbedding();
-	for (const token of tokenize(text)) {
-		const hash = hashToken(token);
-		const index = Math.abs(hash) % EMBEDDING_DIMENSION;
-		embedding[index] += hash < 0 ? -1 : 1;
-	}
-
-	const magnitude = Math.sqrt(embedding.reduce((sum, value) => sum + value * value, 0));
-	if (magnitude === 0) {
-		return embedding;
-	}
-
-	return embedding.map((value) => value / magnitude);
-}
-
-function tokenize(text: string) {
-	return text
-		.toLowerCase()
-		.split(/[^a-z0-9]+/u)
-		.filter(Boolean);
-}
-
-function hashToken(token: string) {
-	let hash = 0;
-	for (const character of token) {
-		hash = (hash * 31 + character.charCodeAt(0)) | 0;
-	}
-	return hash;
 }
 
 function parseMemoryRefs(value: string | null | undefined): string[] {
