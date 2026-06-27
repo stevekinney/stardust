@@ -19,14 +19,66 @@
 	// — SSE abort controller —
 	let abortController: AbortController | null = null;
 
-	// Auto-submit the initial message when navigating from the home composer.
+	// Auto-submit the initial message when navigating from the home composer,
+	// or rehydrate the conversation from the transcript when resuming.
 	onMount(() => {
 		if (data.startMessage) {
 			// Clear the ?start= param from the URL immediately so refresh doesn't re-submit.
 			void goto(resolve(`/sessions/${encodeURIComponent(sessionKey)}`), { replaceState: true });
 			void handleSubmit(data.startMessage);
+		} else {
+			void loadTranscript();
 		}
 	});
+
+	/**
+	 * Fetch the canonical transcript for this session and populate the render state.
+	 * Transcript kinds use underscore-style (e.g. tool_call); the ConversationView
+	 * expects dot-style (e.g. tool.call), so we normalise on the way in.
+	 */
+	async function loadTranscript() {
+		try {
+			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/transcript`);
+			if (!response.ok) return; // 404 = new session, that's fine
+
+			const body = (await response.json()) as {
+				events: Array<{ id: string; kind: string; payload: string; sequence: number }>;
+			};
+
+			// Extract the last user_message as the current user message header.
+			const userMsgEvents = body.events.filter((e) => e.kind === 'user_message');
+			if (userMsgEvents.length > 0) {
+				const lastUserMsg = userMsgEvents[userMsgEvents.length - 1];
+				try {
+					const parsed = JSON.parse(lastUserMsg.payload) as { message?: string };
+					currentUserMessage = parsed.message ?? null;
+				} catch {
+					// ignore malformed payload
+				}
+			}
+
+			// Map transcript kinds (underscore) → stream event kinds (dot).
+			const KIND_MAP: Record<string, string> = {
+				assistant_message: 'assistant.message',
+				tool_call: 'tool.call',
+				tool_result: 'tool.result',
+				approval_request: 'approval.request',
+				approval_resolution: 'approval.resolution',
+				lifecycle: 'lifecycle'
+				// user_message is rendered via currentUserMessage above
+			};
+
+			events = body.events
+				.filter((e) => e.kind !== 'user_message')
+				.map((e, index) => ({
+					id: index,
+					kind: KIND_MAP[e.kind] ?? e.kind,
+					payload: e.payload
+				}));
+		} catch {
+			// Non-fatal: the conversation simply starts fresh if transcript can't be loaded.
+		}
+	}
 
 	async function handleSubmit(message: string) {
 		if (running) return;
@@ -130,19 +182,26 @@
 	}
 
 	async function handleSteer(message: string) {
-		try {
-			await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/steer`, {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ message })
-			});
-		} catch {
-			// Non-fatal: steering is best-effort
-		}
+		await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/steer`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ message })
+		});
 	}
 
-	function handleInterrupt() {
+	async function handleInterrupt() {
+		// Abort the client-side SSE read first so the UI stops waiting.
 		abortController?.abort();
+		// Then tell the server to cancel the active run.
+		try {
+			await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/interrupt`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({})
+			});
+		} catch {
+			// Non-fatal: the run will time out naturally if this fails.
+		}
 	}
 </script>
 
