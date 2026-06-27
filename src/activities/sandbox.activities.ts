@@ -25,18 +25,49 @@ export async function writeSandboxFile(input: SandboxWriteFileInput): Promise<vo
 	await sandboxProvider.writeFile(input);
 }
 
+/**
+ * How often (in milliseconds) the activity heartbeats while a sandbox command is running.
+ * Temporal needs periodic heartbeats to detect a stalled or cancelled activity; this value
+ * should be well under the `heartbeatTimeout` configured on the activity schedule.
+ */
+const SANDBOX_HEARTBEAT_INTERVAL_MS = 5_000;
+
 export async function runSandboxCommand(input: SandboxCommandInput): Promise<SandboxCommandResult> {
-	heartbeat({ sessionKey: input.sessionKey, command: input.command });
 	// Pass the Temporal cancellation signal so that Activity cancellation kills only
 	// this command's process. Other processes tracked for the same session (e.g. a
 	// background process started by process.start) are left running. Whole-session
 	// cleanup on run/session cancellation is the responsibility of a dedicated cancel
 	// activity, not this per-command invocation.
-	//
-	// Note: the Activity heartbeats only once. Ongoing heartbeats are needed for
-	// Temporal to reliably deliver the cancellation signal during long commands.
-	// That is a pre-existing gap; adding periodic heartbeats is a separate concern.
-	return sandboxProvider.runCommand(input, { signal: cancellationSignal() });
+	let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+
+	try {
+		return await sandboxProvider.runCommand(input, {
+			signal: cancellationSignal(),
+			onStart: ({ id, pid }) => {
+				// Fire one heartbeat immediately so Temporal knows the activity is alive
+				// and which subprocess to diagnose if the worker crashes.
+				heartbeat({ sessionKey: input.sessionKey, commandId: id, command: input.command, pid });
+
+				// Continue heartbeating on a fixed interval for as long as the subprocess
+				// runs. This ensures Temporal can deliver cancellation reliably even for
+				// commands that take longer than heartbeatTimeout to complete.
+				heartbeatTimer = setInterval(() => {
+					heartbeat({
+						sessionKey: input.sessionKey,
+						commandId: id,
+						command: input.command,
+						pid
+					});
+				}, SANDBOX_HEARTBEAT_INTERVAL_MS);
+
+				// Do not keep the Node process alive if the activity exits for any reason
+				// while the interval is still registered.
+				heartbeatTimer.unref();
+			}
+		});
+	} finally {
+		clearInterval(heartbeatTimer);
+	}
 }
 
 interface RunEphemeralSandboxCommandInput {

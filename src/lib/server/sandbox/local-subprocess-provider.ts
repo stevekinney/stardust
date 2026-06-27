@@ -120,14 +120,21 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 		options?: SandboxRunCommandOptions
 	): Promise<SandboxCommandResult> {
 		const workspacePath = await this.ensureWorkspace(input.sessionKey);
-		return this.runCommandInWorkspace(input, workspacePath, this.workspaceRoot, options?.signal);
+		return this.runCommandInWorkspace(
+			input,
+			workspacePath,
+			this.workspaceRoot,
+			options?.signal,
+			options?.onStart
+		);
 	}
 
 	private async runCommandInWorkspace(
 		input: SandboxCommandInput,
 		workspacePath: string,
 		homePath: string,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		onStart?: (info: { id: string; pid: number | undefined }) => void
 	): Promise<SandboxCommandResult> {
 		const id = randomUUID();
 		const args = input.args ?? [];
@@ -163,6 +170,11 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 				timedOut: false
 			};
 			this.trackedProcesses.set(id, tracked);
+
+			// Notify the caller that the subprocess is alive. This is the earliest point
+			// at which the command id and pid are both known, so the caller can begin a
+			// heartbeat loop keyed on these values.
+			onStart?.({ id, pid: child.pid });
 
 			// Scope cancellation to this specific process. When the caller provides a
 			// signal (e.g. Temporal's cancellationSignal()), only this command is killed —

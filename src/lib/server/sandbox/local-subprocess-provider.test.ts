@@ -336,6 +336,64 @@ describe('LocalSubprocessSandboxProvider', () => {
 		expect(result.killed).toBe(true);
 		expect(result.status).toBe('killed');
 	});
+
+	it('calls onStart with a UUID command id and numeric pid once the subprocess is spawned', async () => {
+		expect.assertions(3);
+
+		const provider = new LocalSubprocessSandboxProvider({ workspaceRoot: temporaryRoot });
+		let startInfo: { id: string; pid: number | undefined } | undefined;
+
+		await provider.runCommand(
+			{
+				sessionKey: 'session-a',
+				runId: 'run-a',
+				command: 'bun',
+				args: ['-e', "console.log('hi')"]
+			},
+			{
+				onStart: (info) => {
+					startInfo = info;
+				}
+			}
+		);
+
+		expect(startInfo).toBeDefined();
+		expect(startInfo!.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+		expect(typeof startInfo!.pid).toBe('number');
+	});
+
+	it('calls onStart before the command exits so a heartbeat loop can track a long-running command', async () => {
+		expect.assertions(2);
+
+		const provider = new LocalSubprocessSandboxProvider({ workspaceRoot: temporaryRoot });
+		// Pre-initialize the workspace so the git-init overhead does not race with the
+		// subprocess starting; `runCommand` otherwise initializes it async before spawning.
+		await provider.ensureWorkspace('session-a');
+
+		let onStartCalledBeforeCompletion = false;
+
+		const command = provider.runCommand(
+			{
+				sessionKey: 'session-a',
+				runId: 'run-a',
+				command: 'bun',
+				args: ['-e', 'await new Promise(() => {})']
+			},
+			{
+				onStart: () => {
+					onStartCalledBeforeCompletion = true;
+				}
+			}
+		);
+
+		await waitForTrackedProcesses(provider, 1);
+		expect(onStartCalledBeforeCompletion).toBe(true);
+
+		// Clean up the long-running process.
+		await provider.cancelSession('session-a');
+		const result = await command;
+		expect(result.status).toBe('killed');
+	});
 });
 
 async function waitForTrackedProcesses(
