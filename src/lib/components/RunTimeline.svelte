@@ -16,6 +16,7 @@
 		transcript,
 		actionMeter,
 		temporalWebUrl,
+		taskQueue,
 		recoveryMarkers,
 		timelineLanes,
 		toolInvocations
@@ -136,6 +137,10 @@
 				<div>
 					<dt>Workflow ID</dt>
 					<dd><code>{run.workflowId}</code></dd>
+				</div>
+				<div data-task-queue>
+					<dt>Task Queue</dt>
+					<dd><code>{taskQueue}</code></dd>
 				</div>
 				<div>
 					<dt>Tool invocations</dt>

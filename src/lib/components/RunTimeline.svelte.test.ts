@@ -1,6 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { RunInspectorProjection } from '$lib/server/observability/projection';
+import { TASK_QUEUE_ORCHESTRATOR } from '$lib/server/temporal/task-queues';
 import RunTimeline from './RunTimeline.svelte';
 
 const baseRun: RunInspectorProjection['run'] = {
@@ -54,6 +55,7 @@ const actionMeter: RunInspectorProjection['actionMeter'] = {
 const projection: RunInspectorProjection = {
 	run: baseRun,
 	temporalWebUrl: 'http://localhost:8233/namespaces/default/workflows/agent-run%3Arun-001/history',
+	taskQueue: TASK_QUEUE_ORCHESTRATOR,
 	actionMeter,
 	transcript,
 	toolInvocations: [],
@@ -211,6 +213,30 @@ describe('RunTimeline', () => {
 		});
 
 		expect(document.querySelector('[data-engineer-overlay]')).not.toBeNull();
+
+		unmount(component);
+	});
+
+	it('renders task queue row in engineer overlay when engineerView is true', () => {
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection, engineerView: true }
+		});
+
+		const taskQueueRow = document.querySelector('[data-task-queue]');
+		expect(taskQueueRow).not.toBeNull();
+		expect(taskQueueRow?.textContent).toContain(TASK_QUEUE_ORCHESTRATOR);
+
+		unmount(component);
+	});
+
+	it('omits task queue row when engineerView is false', () => {
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection }
+		});
+
+		expect(document.querySelector('[data-task-queue]')).toBeNull();
 
 		unmount(component);
 	});

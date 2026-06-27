@@ -11,6 +11,7 @@ import {
 	transcriptEvents
 } from '../db/schema';
 import { TEMPORAL_NAMESPACE } from '../config';
+import { TASK_QUEUE_ORCHESTRATOR } from '../temporal/task-queues';
 
 export type ActionMeterBreakdown = {
 	transcriptEvents: number;
@@ -44,6 +45,13 @@ export type RunInspectorProjection = {
 		completedAt: string | null;
 	};
 	temporalWebUrl: string;
+	/**
+	 * The Temporal task queue on which the AgentRunWorkflow executes.
+	 * Always `agent-orchestrator` — the workflow queue is structurally fixed.
+	 * Individual activities fan out to tools/sandbox/model/memory queues,
+	 * already visible per-row via `tool_invocations.taskQueue`.
+	 */
+	taskQueue: string;
 	actionMeter: {
 		total: number;
 		breakdown: ActionMeterBreakdown;
@@ -230,6 +238,7 @@ export async function readRunInspectorProjection(
 			completedAt: run.completedAt
 		},
 		temporalWebUrl: buildTemporalWebWorkflowUrl({ workflowId: run.workflowId }),
+		taskQueue: TASK_QUEUE_ORCHESTRATOR,
 		actionMeter: { total, breakdown },
 		transcript: transcript.map((event) => ({
 			id: event.id,

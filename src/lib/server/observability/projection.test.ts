@@ -8,6 +8,7 @@ import { join } from 'path';
 import * as schema from '../db/schema';
 import { appendTranscriptEvent, publishStreamEvent } from '../stream';
 import { buildTemporalWebWorkflowUrl, queryRuns, readRunInspectorProjection } from './projection';
+import { TASK_QUEUE_ORCHESTRATOR } from '../temporal/task-queues';
 
 const TEST_DB_DIR = join(tmpdir(), 'stardust-observability-test');
 const TEST_DB_PATH = join(TEST_DB_DIR, 'test.db');
@@ -49,6 +50,11 @@ describe('run inspector projection', () => {
 	it('returns undefined timelineLanes when no subagent events exist', async () => {
 		const projection = await readRunInspectorProjection(database, 'run-001');
 		expect(projection?.timelineLanes).toBeUndefined();
+	});
+
+	it('exposes taskQueue as the orchestrator queue for all runs', async () => {
+		const projection = await readRunInspectorProjection(database, 'run-001');
+		expect(projection?.taskQueue).toBe(TASK_QUEUE_ORCHESTRATOR);
 	});
 
 	it('builds timelineLanes from subagent.start and subagent.complete stream events', async () => {
