@@ -419,29 +419,47 @@ describe('agentRunWorkflow approvals', () => {
 // ── Steering suite ────────────────────────────────────────────────────────────
 
 /**
- * Tests that steering messages injected via `steeringSignal` are captured in
- * the next `callModel` input and absent in subsequent calls (drained exactly once).
+ * Tests that:
+ * 1. Steering messages injected via `steeringSignal` are captured in the next
+ *    `callModel` input and absent in the first / subsequent calls (drained once).
+ * 2. Memory retrieval (`searchMemory`) is called with the current turn's message
+ *    as the query, and the returned notes flow to `callModel.memoryNotes`.
  *
  * The approval-gate synchronisation pattern is reused: the model returns a
  * tool_use on the first call, parking the workflow in `waiting_approval`.
- * The test sends the steering signal in that window, then approves the tool,
- * and verifies that the second `callModel` invocation carries `steeringMessages`.
+ * The test can send signals / inspect state in that window before approving.
  */
 describe('agentRunWorkflow steering', () => {
 	let env: TestWorkflowEnvironment;
 
 	/** Per-call capture of ModelCallInput.steeringMessages (undefined = not present). */
 	const capturedSteeringPerCall: Array<string[] | undefined> = [];
+	/** Per-call capture of ModelCallInput.memoryNotes (undefined = not present). */
 	const capturedMemoryPerCall: Array<unknown[] | undefined> = [];
+	/** All queries received by searchMemory across the run. */
+	const capturedSearchMemoryQueries: string[] = [];
 
 	const modelCallCounts = new Map<string, number>();
+
+	/**
+	 * A known memory note returned by `searchMemory` in the memory retrieval test.
+	 * Used to assert that retrieved notes are forwarded to `callModel.memoryNotes`.
+	 */
+	const KNOWN_MEMORY_NOTE = {
+		id: 'mem-test-001',
+		layer: 'durable',
+		content: 'User prefers concise answers.',
+		tags: ['preferences']
+	};
 
 	function resetCaptures() {
 		capturedSteeringPerCall.length = 0;
 		capturedMemoryPerCall.length = 0;
+		capturedSearchMemoryQueries.length = 0;
 		modelCallCounts.clear();
 	}
 
+	/** Base activities used by the two-model-call tests. */
 	const steeringTestActivities = {
 		async callModel(input: ModelCallInput): Promise<ModelCallResult> {
 			const count = (modelCallCounts.get(input.runId) ?? 0) + 1;
@@ -473,6 +491,14 @@ describe('agentRunWorkflow steering', () => {
 			}
 			// Second call (post-approval) returns the final text answer.
 			return { ...base, message: { text: 'Done.', toolCalls: [] } };
+		},
+
+		async searchMemory(input: {
+			sessionId: string;
+			query: string;
+		}): Promise<(typeof KNOWN_MEMORY_NOTE)[]> {
+			capturedSearchMemoryQueries.push(input.query);
+			return [KNOWN_MEMORY_NOTE];
 		},
 
 		async evaluateToolCallPolicy(input: { call: ToolCallInput }): Promise<ToolPolicyDecision> {
@@ -530,10 +556,7 @@ describe('agentRunWorkflow steering', () => {
 		async recordRunCompleted(): Promise<void> {},
 		async recordSubagentStarted(): Promise<void> {},
 		async recordSubagentCompleted(): Promise<void> {},
-		async writeMemoryCandidate(): Promise<void> {},
-		async searchMemory(): Promise<[]> {
-			return [];
-		}
+		async writeMemoryCandidate(): Promise<void> {}
 	};
 
 	beforeAll(async () => {
@@ -548,7 +571,11 @@ describe('agentRunWorkflow steering', () => {
 		resetCaptures();
 	});
 
-	it('steering signal sent during waiting_approval appears in the next callModel input and is absent thereafter', async () => {
+	/** Spins up all five task-queue workers and runs `callback` inside the orchestrator's scope. */
+	async function runSteeringWorkers<T>(
+		activities: typeof steeringTestActivities,
+		callback: () => Promise<T>
+	): Promise<T> {
 		const orchestrator = await Worker.create({
 			connection: env.nativeConnection,
 			namespace: 'default',
@@ -559,30 +586,94 @@ describe('agentRunWorkflow steering', () => {
 			connection: env.nativeConnection,
 			namespace: 'default',
 			taskQueue: TASK_QUEUE_TOOLS,
-			activities: steeringTestActivities
+			activities
 		});
 		const sandbox = await Worker.create({
 			connection: env.nativeConnection,
 			namespace: 'default',
 			taskQueue: TASK_QUEUE_SANDBOX,
-			activities: steeringTestActivities
+			activities
 		});
 		const model = await Worker.create({
 			connection: env.nativeConnection,
 			namespace: 'default',
 			taskQueue: TASK_QUEUE_MODEL,
-			activities: steeringTestActivities
+			activities
 		});
 		const memory = await Worker.create({
 			connection: env.nativeConnection,
 			namespace: 'default',
 			taskQueue: TASK_QUEUE_MEMORY,
-			activities: steeringTestActivities
+			activities
 		});
 
+		const task = orchestrator.runUntil(callback);
+		await Promise.all([
+			tools.runUntil(task.catch(() => undefined)),
+			sandbox.runUntil(task.catch(() => undefined)),
+			model.runUntil(task.catch(() => undefined)),
+			memory.runUntil(task.catch(() => undefined))
+		]);
+		return task;
+	}
+
+	it('memory retrieval is called with the current turn message as query, and notes flow to callModel', async () => {
+		const runId = `memory-${Date.now()}`;
+
+		const result = await runSteeringWorkers(steeringTestActivities, async () => {
+			const handle = await env.client.workflow.start('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [
+					{
+						sessionKey: 'session-memory',
+						runId,
+						message: 'do some work',
+						approvalTtlMs: 60_000
+					}
+				]
+			});
+
+			// Wait for waiting_approval (first model call done, searchMemory already called).
+			let state = await handle.query(getAgentRunStateQuery);
+			for (let i = 0; i < 20 && state.status !== 'waiting_approval'; i++) {
+				await env.sleep(50);
+				state = await handle.query(getAgentRunStateQuery);
+			}
+
+			// Approve so the run completes.
+			await handle.executeUpdate(resolveApprovalUpdate, {
+				args: [
+					{
+						approvalId: `${runId}:steer-tool-001:approval`,
+						action: 'approve',
+						remember: false
+					}
+				]
+			});
+
+			return handle.result();
+		});
+
+		expect(result.status).toBe('complete');
+
+		// searchMemory was called before each model call, using input.message as the query.
+		expect(capturedSearchMemoryQueries.length).toBeGreaterThanOrEqual(1);
+		expect(capturedSearchMemoryQueries[0]).toBe('do some work');
+
+		// The known note returned by searchMemory must appear in every callModel input.
+		expect(capturedMemoryPerCall[0]).toEqual(
+			expect.arrayContaining([expect.objectContaining({ id: 'mem-test-001', layer: 'durable' })])
+		);
+		expect(capturedMemoryPerCall[1]).toEqual(
+			expect.arrayContaining([expect.objectContaining({ id: 'mem-test-001', layer: 'durable' })])
+		);
+	});
+
+	it('steering signal sent during waiting_approval appears in the next callModel input and is absent in the first', async () => {
 		const runId = `steering-${Date.now()}`;
 
-		const task = orchestrator.runUntil(async () => {
+		const result = await runSteeringWorkers(steeringTestActivities, async () => {
 			const handle = await env.client.workflow.start('agentRunWorkflow', {
 				taskQueue: TASK_QUEUE_ORCHESTRATOR,
 				workflowId: `agent-run:${runId}`,
@@ -621,24 +712,141 @@ describe('agentRunWorkflow steering', () => {
 			return handle.result();
 		});
 
-		const toolsTask = tools.runUntil(task.catch(() => undefined));
-		const sandboxTask = sandbox.runUntil(task.catch(() => undefined));
-		const modelTask = model.runUntil(task.catch(() => undefined));
-		const memoryTask = memory.runUntil(task.catch(() => undefined));
-
-		const [result] = await Promise.all([task, toolsTask, sandboxTask, modelTask, memoryTask]);
-
 		expect(result.status).toBe('complete');
 		expect(result.finalAnswer).toBe('Done.');
 
 		// Two model calls happened.
 		expect(capturedSteeringPerCall).toHaveLength(2);
 
-		// First call: no steering messages (sent after model call 1 started).
+		// First call: no steering messages (signal sent after call 1 started).
 		expect(capturedSteeringPerCall[0]).toBeUndefined();
 
 		// Second call: steering message present (drained from buffer before call 2).
 		expect(capturedSteeringPerCall[1]).toEqual(['focus on the budget']);
+	});
+
+	it('steering message is drained exactly once — absent in the third model call', async () => {
+		// Local per-test captures to isolate from the shared describe-level arrays.
+		const perTestSteering: Array<string[] | undefined> = [];
+		const localCounts = new Map<string, number>();
+
+		const threeCallActivities = {
+			...steeringTestActivities,
+
+			async callModel(input: ModelCallInput): Promise<ModelCallResult> {
+				const count = (localCounts.get(input.runId) ?? 0) + 1;
+				localCounts.set(input.runId, count);
+				perTestSteering.push(input.steeringMessages);
+
+				const base = {
+					runId: input.runId,
+					model: input.model ?? 'claude-sonnet-4-5-20250929',
+					usage: { inputTokens: 10, outputTokens: 5, estimatedCostUsd: 0.0001 } as ModelUsage
+				};
+
+				if (count === 1) {
+					// Call 1: tool_use — triggers first approval gate.
+					return {
+						...base,
+						message: {
+							text: '',
+							toolCalls: [{ id: 'drain-001', name: 'workspace.writeFile', input: {} }]
+						}
+					};
+				}
+				if (count === 2) {
+					// Call 2: another tool_use — triggers second approval gate (no new signal).
+					return {
+						...base,
+						message: {
+							text: '',
+							toolCalls: [{ id: 'drain-002', name: 'workspace.writeFile', input: {} }]
+						}
+					};
+				}
+				// Call 3: final text answer — no steering expected.
+				return { ...base, message: { text: 'All done.', toolCalls: [] } };
+			},
+
+			// Disable memory retrieval for this test to keep captures clean.
+			async searchMemory(): Promise<[]> {
+				return [];
+			}
+		};
+
+		const runId = `drain-${Date.now()}`;
+
+		const result = await runSteeringWorkers(
+			threeCallActivities as typeof steeringTestActivities,
+			async () => {
+				const handle = await env.client.workflow.start('agentRunWorkflow', {
+					taskQueue: TASK_QUEUE_ORCHESTRATOR,
+					workflowId: `agent-run:${runId}`,
+					args: [
+						{
+							sessionKey: 'session-drain',
+							runId,
+							message: 'drain me',
+							approvalTtlMs: 60_000
+						}
+					]
+				});
+
+				// ── Wait for first approval gate (call 1 produced tool drain-001). ─
+				let state = await handle.query(getAgentRunStateQuery);
+				for (let i = 0; i < 20 && state.status !== 'waiting_approval'; i++) {
+					await env.sleep(50);
+					state = await handle.query(getAgentRunStateQuery);
+				}
+				expect(state.status).toBe('waiting_approval');
+
+				// Send the steering message before call 2.
+				await handle.signal(steeringSignal, 'steer before call 2');
+
+				// Approve drain-001.
+				await handle.executeUpdate(resolveApprovalUpdate, {
+					args: [
+						{
+							approvalId: `${runId}:drain-001:approval`,
+							action: 'approve',
+							remember: false
+						}
+					]
+				});
+
+				// ── Wait for second approval gate (call 2 produced tool drain-002). ─
+				state = await handle.query(getAgentRunStateQuery);
+				for (let i = 0; i < 20 && state.status !== 'waiting_approval'; i++) {
+					await env.sleep(50);
+					state = await handle.query(getAgentRunStateQuery);
+				}
+				expect(state.status).toBe('waiting_approval');
+
+				// Do NOT send a new signal — drain must be empty for call 3.
+				await handle.executeUpdate(resolveApprovalUpdate, {
+					args: [
+						{
+							approvalId: `${runId}:drain-002:approval`,
+							action: 'approve',
+							remember: false
+						}
+					]
+				});
+
+				return handle.result();
+			}
+		);
+
+		expect(result.status).toBe('complete');
+		expect(result.finalAnswer).toBe('All done.');
+		expect(perTestSteering).toHaveLength(3);
+
+		// Call 1: no steering (signal not yet sent).
+		expect(perTestSteering[0]).toBeUndefined();
+		// Call 2: steering present (buffered between call 1 approval and call 2).
+		expect(perTestSteering[1]).toEqual(['steer before call 2']);
+		// Call 3: steering absent — buffer was drained exactly once; no new signal sent.
+		expect(perTestSteering[2]).toBeUndefined();
 	});
 });
 
