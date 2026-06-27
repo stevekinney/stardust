@@ -136,6 +136,21 @@ describe('stream route', () => {
 		expect(body).toContain('data: {"text":"live delivery"}');
 	});
 
+	it('returns 404 for a never-inserted runId without polling', async () => {
+		// Regression: an unknown runId must reject immediately with a 404 error.
+		// Before the fix, db.select() resolved to undefined and the terminal-status
+		// guard was permanently false, so the 50ms poll loop ran indefinitely.
+		await expect(
+			GET({
+				params: { sessionKey: 'route-session-001', runId: 'ghost-run-404' },
+				request: new Request(
+					'http://localhost/api/sessions/route-session-001/stream/ghost-run-404'
+				),
+				url: new URL('http://localhost/api/sessions/route-session-001/stream/ghost-run-404')
+			} as Parameters<typeof GET>[0])
+		).rejects.toMatchObject({ status: 404 });
+	});
+
 	it('delivers the terminal lifecycle event even when stream events were trimmed before the poll landed', async () => {
 		// This is the trim-race regression test.
 		//
