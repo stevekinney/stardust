@@ -234,8 +234,8 @@ describe('agentRunWorkflow approvals', () => {
 
 		async recordSubagentStarted() {},
 		async recordSubagentCompleted() {},
-		async writeMemoryCandidate() {
-			return { id: 'mock-candidate-id' };
+		async writeMemoryCandidate(input: { layer: 'session' | 'durable' | 'action_sensitive' }) {
+			return { id: `${input.layer}-candidate` };
 		},
 		async searchMemory(): Promise<[]> {
 			return [];
@@ -428,6 +428,42 @@ describe('agentRunWorkflow approvals', () => {
 				expect.objectContaining({ action: 'expire', actor: 'system' })
 			]);
 			expect(activityState.executions).toHaveLength(0);
+		});
+	});
+
+	it('emits an action_sensitive candidate when a tool is approved with remember: true', async () => {
+		await runWithWorkers(async () => {
+			const runId = `approval-remember-${Date.now()}`;
+			const handle = await env.client.workflow.start('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [
+					{
+						sessionKey: 'session-001',
+						runId,
+						message: 'write the file',
+						approvalTtlMs: 60_000
+					}
+				]
+			});
+
+			const approvalId = `${runId}:tool-call-001:approval`;
+			for (let i = 0; i < 10; i++) {
+				const state = await handle.query(getAgentRunStateQuery);
+				if (state.pendingApproval?.approvalId === approvalId) break;
+				await env.sleep(100);
+			}
+
+			await handle.executeUpdate(resolveApprovalUpdate, {
+				args: [{ approvalId, action: 'approve', remember: true }]
+			});
+			const result = await handle.result();
+
+			expect(result.status).toBe('complete');
+			// action_sensitive candidate written via the remember=true approval path.
+			expect(result.memoryRefs).toContain('action_sensitive-candidate');
+			// session summary candidate always written at end of run.
+			expect(result.memoryRefs).toContain('session-candidate');
 		});
 	});
 
