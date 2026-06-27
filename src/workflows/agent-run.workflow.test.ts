@@ -514,6 +514,45 @@ describe('agentRunWorkflow approvals', () => {
 			expect(activityState.completedRuns[0].usage).toEqual(MOCK_MODEL_USAGE);
 		});
 	});
+
+	it('sets idempotencyKey on the tool call delivered to executeTool as runId:toolCallId', async () => {
+		// Regression guard for the idempotencyKey wiring fix: the workflow must
+		// include idempotencyKey in the ToolCallInput it delivers to executeTool
+		// so the registry can route key-required tools through executeWithIdempotency.
+		// Without the fix at agent-run.workflow.ts:765-769 this assertion fails.
+		await runWithWorkers(async () => {
+			const runId = `idem-key-${Date.now()}`;
+			const handle = await env.client.workflow.start('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [
+					{
+						sessionKey: 'session-001',
+						runId,
+						message: 'write the file',
+						approvalTtlMs: 60_000
+					}
+				]
+			});
+
+			const approvalId = `${runId}:tool-call-001:approval`;
+			for (let i = 0; i < 10; i++) {
+				const state = await handle.query(getAgentRunStateQuery);
+				if (state.pendingApproval?.approvalId === approvalId) break;
+				await env.sleep(100);
+			}
+
+			await handle.executeUpdate(resolveApprovalUpdate, {
+				args: [{ approvalId, action: 'approve', remember: false }]
+			});
+			await handle.result();
+
+			// The executeTool activity must receive the idempotency key wired as
+			// `${runId}:${toolCallId}` where toolCallId is 'tool-call-001'.
+			expect(activityState.executions).toHaveLength(1);
+			expect(activityState.executions[0].call.idempotencyKey).toBe(`${runId}:tool-call-001`);
+		});
+	});
 });
 
 // ── Memory writeback suite ────────────────────────────────────────────────────

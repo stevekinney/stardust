@@ -765,7 +765,11 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 			const toolCall: ToolCallInput = {
 				id: normalizedToolCall.id,
 				name: normalizedToolCall.name,
-				arguments: normalizedToolCall.input
+				arguments: normalizedToolCall.input,
+				// Stable across Temporal retries: the model response (and therefore
+				// normalizedToolCall.id) is recorded in workflow history, so this key
+				// is identical on every replay of the same execution.
+				idempotencyKey: `${input.runId}:${normalizedToolCall.id}`
 			};
 
 			if (toolCallCount >= budget.maxToolCalls) {

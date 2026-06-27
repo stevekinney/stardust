@@ -617,6 +617,74 @@ describe('tool registry', () => {
 		}
 	});
 
+	// ── Idempotency path ─────────────────────────────────────────────────────────
+
+	it('routes key-required tools through executeWithIdempotency and writes an idempotency_ledger row', async () => {
+		// (a) executeWithIdempotency is called for a key-required tool; (b) a second
+		// call with the same key returns the cached result without re-executing; (c) an
+		// idempotency_ledger row is written.
+		expect.assertions(6);
+
+		const dbDir = mkdtempSync(join(tmpdir(), 'stardust-idempotency-registry-'));
+		const sqlite = new Database(join(dbDir, 'test.db'));
+		sqlite.pragma('journal_mode = WAL');
+		const database = drizzle(sqlite, { schema });
+		migrate(database, { migrationsFolder: './drizzle' });
+
+		const snapshotSpy = vi.spyOn(provider, 'snapshot');
+
+		try {
+			const call = {
+				id: 'call-idem-001',
+				name: 'workspace.writeFile',
+				arguments: { path: 'idempotency-test.txt', content: 'idempotent write' },
+				idempotencyKey: 'run-idem-001:call-idem-001'
+			};
+
+			// First call — executes the tool, inserts a ledger row, returns success.
+			const first = await executeRegisteredTool({
+				sessionKey: TEST_SESSION,
+				sessionId: TEST_SESSION,
+				sandboxProvider: provider,
+				database,
+				runId: 'run-idem-001',
+				approved: true,
+				call
+			});
+
+			// (a) First call should execute and reach the provider (snapshot taken).
+			expect(first.outcome).toBe('success');
+			expect(snapshotSpy).toHaveBeenCalledTimes(1);
+
+			// (c) A row must exist in idempotency_ledger after the first call.
+			const ledgerRows = sqlite
+				.prepare('SELECT * FROM idempotency_ledger WHERE idempotency_key = ?')
+				.all('run-idem-001:call-idem-001');
+			expect(ledgerRows.length).toBe(1);
+
+			// Second call — same idempotencyKey, same call id.
+			const second = await executeRegisteredTool({
+				sessionKey: TEST_SESSION,
+				sessionId: TEST_SESSION,
+				sandboxProvider: provider,
+				database,
+				runId: 'run-idem-001',
+				approved: true,
+				call
+			});
+
+			// (b) Second call must return replayed result without executing the provider again.
+			expect(second.metadata?.idempotencyReplayed).toBe(true);
+			// Snapshot should still be 1 — not called a second time.
+			expect(snapshotSpy).toHaveBeenCalledTimes(1);
+			// Outcome is 'success' (replayed carries the cached success state).
+			expect(second.outcome).toBe('success');
+		} finally {
+			sqlite.close();
+			rmSync(dbDir, { recursive: true, force: true });
+		}
+	});
+
 	// ── Spill path ───────────────────────────────────────────────────────────────
 
 	it('spills large tool output to artifact store when artifactStore and session IDs are provided', async () => {
