@@ -81,7 +81,7 @@ describe('model activity', () => {
 
 	it('refuses unknown model ids before calling the provider', async () => {
 		const provider: ModelProviderClient = {
-			createMessage: vi.fn()
+			createMessage: vi.fn() as ModelProviderClient['createMessage']
 		};
 
 		await expect(
@@ -97,7 +97,7 @@ describe('model activity', () => {
 		expect(provider.createMessage).not.toHaveBeenCalled();
 	});
 
-	it('loads the API key at call time, normalizes output, computes cost, and stores deltas', async () => {
+	it('calls onDelta incrementally and stores each delta as a separate stream event', async () => {
 		await appendTranscriptEvent(database, {
 			id: 'transcript-001',
 			runId: 'run-001',
@@ -109,10 +109,11 @@ describe('model activity', () => {
 
 		vi.stubEnv('MODEL_API_KEY', 'runtime-key');
 		const provider: ModelProviderClient = {
-			createMessage: vi.fn(async (request) => {
+			createMessage: vi.fn(async (request, onDelta) => {
 				expect(request.messages).toEqual([{ role: 'user', content: 'Say hello.' }]);
+				await onDelta('hel');
+				await onDelta('lo');
 				return {
-					deltas: ['hel', 'lo'],
 					message: {
 						role: 'assistant' as const,
 						content: [{ type: 'text' as const, text: 'hello' }],
@@ -148,9 +149,69 @@ describe('model activity', () => {
 				estimatedCostUsd: 0.006
 			}
 		});
-		expect(replay.events).toHaveLength(1);
+		// Each onDelta call publishes one assistant.delta event, not one coalesced event.
+		expect(replay.events).toHaveLength(2);
 		expect(replay.events[0]?.kind).toBe('assistant.delta');
-		expect(JSON.parse(replay.events[0]!.payload)).toEqual({ text: 'hello' });
+		expect(JSON.parse(replay.events[0]!.payload)).toEqual({ text: 'hel' });
+		expect(replay.events[1]?.kind).toBe('assistant.delta');
+		expect(JSON.parse(replay.events[1]!.payload)).toEqual({ text: 'lo' });
+	});
+
+	it('publishes incremental deltas to stream_events before the final result resolves', async () => {
+		await appendTranscriptEvent(database, {
+			id: 'transcript-001',
+			runId: 'run-001',
+			sessionId: 'session-001',
+			kind: 'user_message',
+			payload: JSON.stringify({ text: 'Count to two.' }),
+			createdAt: '2026-01-01T00:00:00.000Z'
+		});
+
+		// Snapshot the DB inside the mock while createMessage is still executing to
+		// prove deltas land in stream_events before the final result is returned.
+		const snapshotsAfterEachDelta: number[] = [];
+
+		const provider: ModelProviderClient = {
+			createMessage: vi.fn(
+				async (...args: Parameters<ModelProviderClient['createMessage']>) => {
+					const onDelta = args[1];
+					await onDelta('one ');
+					snapshotsAfterEachDelta.push(
+						(await readStreamEventsAfterCursor(database, { runId: 'run-001' })).events.filter(
+							(e) => e.kind === 'assistant.delta'
+						).length
+					);
+					await onDelta('two');
+					snapshotsAfterEachDelta.push(
+						(await readStreamEventsAfterCursor(database, { runId: 'run-001' })).events.filter(
+							(e) => e.kind === 'assistant.delta'
+						).length
+					);
+					return {
+						message: {
+							role: 'assistant' as const,
+							content: [{ type: 'text' as const, text: 'one two' }],
+							usage: { input_tokens: 10, output_tokens: 5 }
+						}
+					};
+				}
+			)
+		};
+
+		await runModelCall(
+			{ sessionId: 'session-001', runId: 'run-001', model: 'claude-sonnet-4-5-20250929' },
+			{ database, provider, apiKey: 'test-key' }
+		);
+
+		// Delta events were persisted before createMessage returned its final result.
+		expect(snapshotsAfterEachDelta[0]).toBe(1); // after first onDelta call
+		expect(snapshotsAfterEachDelta[1]).toBe(2); // after second onDelta call
+
+		const finalReplay = await readStreamEventsAfterCursor(database, { runId: 'run-001' });
+		const deltaEvents = finalReplay.events.filter((e) => e.kind === 'assistant.delta');
+		expect(deltaEvents).toHaveLength(2);
+		expect(JSON.parse(deltaEvents[0]!.payload)).toEqual({ text: 'one ' });
+		expect(JSON.parse(deltaEvents[1]!.payload)).toEqual({ text: 'two' });
 	});
 
 	it('writes a tool_call transcript event and tool.call stream events when the model requests tools', async () => {
@@ -165,7 +226,6 @@ describe('model activity', () => {
 
 		const provider: ModelProviderClient = {
 			createMessage: vi.fn(async () => ({
-				deltas: [],
 				message: {
 					role: 'assistant' as const,
 					content: [

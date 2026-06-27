@@ -31,11 +31,18 @@ type ProviderRequest = {
 
 type ProviderResult = {
 	message: AnthropicMessageResponse;
-	deltas?: string[];
 };
 
+/** Called by the provider for each text token as it arrives from the model stream. */
+type OnDelta = (delta: string) => Promise<void>;
+
 export type ModelProviderClient = {
-	createMessage(input: ProviderRequest): Promise<ProviderResult>;
+	/**
+	 * Sends a message request to the model provider. As text tokens arrive from
+	 * the provider stream, `onDelta` is called with each token so callers can
+	 * persist or forward them before the final result is available.
+	 */
+	createMessage(input: ProviderRequest, onDelta: OnDelta): Promise<ProviderResult>;
 };
 
 export type RunModelCallDependencies = {
@@ -74,19 +81,25 @@ function createAnthropicProvider(apiKey: string): ModelProviderClient {
 	const client = new Anthropic({ apiKey });
 
 	return {
-		async createMessage(input) {
-			const message = (await client.messages.create({
+		async createMessage(input, onDelta) {
+			const stream = client.messages.stream({
 				model: input.model,
 				max_tokens: input.maxTokens,
 				...(input.system ? { system: input.system } : {}),
 				messages: input.messages as never,
 				...(input.tools?.length ? { tools: input.tools as never } : {})
-			})) as AnthropicMessageResponse;
-			const normalized = normalizeAnthropicMessage(message);
-			return {
-				message,
-				deltas: normalized.text ? [normalized.text] : []
-			};
+			});
+
+			// Publish each text token to the stream bus as it arrives, before the
+			// final structured result is available to the workflow.
+			for await (const event of stream) {
+				if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+					await onDelta(event.delta.text);
+				}
+			}
+
+			const message = (await stream.finalMessage()) as AnthropicMessageResponse;
+			return { message };
 		}
 	};
 }
@@ -117,24 +130,30 @@ export async function runModelCall(
 		systemPrompt: input.systemPrompt
 	});
 	const tools = formatToolsForAnthropic(input.tools);
-	const result = await provider.createMessage({
-		model: input.model,
-		maxTokens: input.maxTokens ?? 1024,
-		...(context.anthropic.system ? { system: context.anthropic.system } : {}),
-		messages: context.anthropic.messages,
-		...(tools.length ? { tools } : {})
-	});
+
+	// Publish each incoming text token to the live stream bus before the final
+	// model result is available, so the UI can render assistant text incrementally.
+	const onDelta: OnDelta = async (delta) => {
+		await publishAssistantDeltas(database, {
+			sessionId: input.sessionId,
+			runId: input.runId,
+			chunks: [delta]
+		});
+	};
+
+	const result = await provider.createMessage(
+		{
+			model: input.model,
+			maxTokens: input.maxTokens ?? 1024,
+			...(context.anthropic.system ? { system: context.anthropic.system } : {}),
+			messages: context.anthropic.messages,
+			...(tools.length ? { tools } : {})
+		},
+		onDelta
+	);
 	const usageTokens = readAnthropicUsage(result.message);
 	const message: NormalizedModelMessage = normalizeAnthropicMessage(result.message);
-	const deltas = result.deltas ?? (message.text ? [message.text] : []);
 	const now = new Date().toISOString();
-
-	// Publish assistant deltas to the live stream bus for SSE rendering.
-	await publishAssistantDeltas(database, {
-		sessionId: input.sessionId,
-		runId: input.runId,
-		chunks: deltas
-	});
 
 	if (message.toolCalls.length > 0) {
 		// Intermediate turn: the model is requesting tool execution.
