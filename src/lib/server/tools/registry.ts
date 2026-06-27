@@ -1,6 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
-import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import {
 	createRegistry,
@@ -41,6 +39,7 @@ import {
 import { fetchWithSsrfGuard } from '../policy/ssrf';
 import type { ArtifactStore } from '../artifacts/artifact-store';
 import { spillLargeOutput } from '../artifacts/spill';
+import type { SandboxProvider } from '../sandbox/sandbox-provider';
 
 const webFetchInput = z.object({
 	url: z.string().url(),
@@ -256,8 +255,25 @@ for (const tool of registeredTools) {
 	);
 }
 
+/**
+ * Tools that are registered for policy/metadata routing but not yet backed by a
+ * real implementation. They are hidden from `getToolManifest()` (and therefore
+ * from the model) until the backing infrastructure exists. Hiding is preferable to
+ * returning a stub result that the model may misinterpret as real output.
+ */
+const UNIMPLEMENTED_TOOLS = new Set([
+	'web.search',
+	'memory.search',
+	'memory.writeCandidate',
+	'process.start',
+	'process.kill',
+	'delegate.research',
+	'delegate.code',
+	'delegate.critic'
+]);
+
 function isToolConfigured(tool: RegisteredTool): boolean {
-	return tool.name !== 'web.search' || Boolean(process.env.TAVILY_API_KEY);
+	return !UNIMPLEMENTED_TOOLS.has(tool.name);
 }
 
 function getConfiguredTools(): RegisteredTool[] {
@@ -282,100 +298,43 @@ export function getAnthropicToolManifest(input: { allowedToolNames?: string[] } 
 	return toAnthropicTools(definitions);
 }
 
-function resolveWorkspacePath(workspacePath: string | undefined, filePath: string): string {
-	const workspaceRoot = resolve(workspacePath ?? process.cwd());
-	const targetPath = resolve(workspaceRoot, filePath);
-	if (!targetPath.startsWith(workspaceRoot)) {
-		throw new Error(`Workspace path escapes root: ${filePath}`);
-	}
-	return targetPath;
-}
-
-async function runShell(input: z.infer<typeof shellExecInput>, workspacePath?: string) {
-	return new Promise<{ exitCode: number | null; stdout: string; stderr: string }>(
-		(resolvePromise) => {
-			const child = spawn(input.command, input.args, {
-				cwd: workspacePath ?? process.cwd(),
-				stdio: ['ignore', 'pipe', 'pipe']
-			});
-			const chunks = { stdout: '', stderr: '' };
-			const timeout = setTimeout(() => {
-				child.kill('SIGTERM');
-			}, input.timeoutMs ?? SHELL_EXEC_TOOL.timeoutMs);
-
-			child.stdout.on('data', (chunk) => {
-				chunks.stdout += String(chunk);
-			});
-			child.stderr.on('data', (chunk) => {
-				chunks.stderr += String(chunk);
-			});
-			child.on('close', (exitCode) => {
-				clearTimeout(timeout);
-				resolvePromise({ exitCode, ...chunks });
-			});
-		}
-	);
-}
-
 /**
- * Apply a unified diff patch to a file using the system `patch` command.
- * The target file path is provided explicitly so the diff headers are ignored.
- * Throws if the patch command exits non-zero (patch failed or produced a `.rej` file).
+ * Require a sandbox provider and session key for operations that must execute
+ * through the provider boundary. Throws with a descriptive error if either is
+ * missing — this is a programming error, not a user-facing error.
+ *
+ * Returns `[provider, sessionKey]` as a typed tuple so callers can destructure
+ * and let TypeScript narrow both to non-optional types.
  */
-async function applyUnifiedPatch(targetPath: string, patchContent: string): Promise<void> {
-	return new Promise((resolvePromise, rejectPromise) => {
-		// --no-backup-if-mismatch: do not create .orig backups on success
-		// --reject-file=-: write reject hunks to /dev/stderr instead of a .rej file
-		const child = spawn('patch', ['--no-backup-if-mismatch', '--reject-file=-', targetPath], {
-			stdio: ['pipe', 'pipe', 'pipe']
-		});
-
-		let stdout = '';
-		let stderr = '';
-
-		child.stdout.on('data', (chunk) => {
-			stdout += String(chunk);
-		});
-		child.stderr.on('data', (chunk) => {
-			stderr += String(chunk);
-		});
-
-		child.stdin.write(patchContent, 'utf8');
-		child.stdin.end();
-
-		child.on('close', (exitCode) => {
-			if (exitCode === 0) {
-				resolvePromise();
-			} else {
-				rejectPromise(new Error(`patch failed (exit ${exitCode}): ${stderr || stdout}`.trimEnd()));
-			}
-		});
-
-		child.on('error', (err) => {
-			rejectPromise(new Error(`Failed to spawn patch: ${err.message}`));
-		});
-	});
-}
-
-function buildToolStubResult(toolName: string, argumentsValue: unknown) {
-	return {
-		status: 'registered',
-		toolName,
-		arguments: argumentsValue,
-		message: `${toolName} is registered for policy and manifest routing; execution is handled by a later activity integration.`
-	};
+function requireSandbox(
+	sandboxProvider: SandboxProvider | undefined,
+	sessionKey: string | undefined
+): [SandboxProvider, string] {
+	if (!sandboxProvider) {
+		throw new Error('sandboxProvider is required for this tool but was not provided');
+	}
+	if (!sessionKey) {
+		throw new Error('sessionKey is required for sandbox-routed tools but was not provided');
+	}
+	return [sandboxProvider, sessionKey];
 }
 
 export async function executeRegisteredTool(input: {
 	call: ToolCallInput;
 	sessionId?: string;
+	/** Session key used as the sandbox workspace key (UUIDv4 for normal sessions,
+	 *  `sched-{scheduleId}` for scheduled sessions). */
 	sessionKey?: string;
 	runId?: string;
+	/** Retained for callers that still pass the workspace path for system-prompt construction.
+	 *  Workspace operations now route through `sandboxProvider` using `sessionKey`. */
 	workspacePath?: string;
 	fetcher?: typeof fetch;
 	approved?: boolean;
 	database?: DatabaseClient;
 	artifactStore?: ArtifactStore;
+	/** Sandbox provider used for all workspace, shell, and snapshot tool operations. */
+	sandboxProvider?: SandboxProvider;
 }): Promise<ToolExecutionResult> {
 	const decision = validateToolCall(getConfiguredTools(), input.call);
 	if (decision.status === 'denied') {
@@ -405,74 +364,133 @@ export async function executeRegisteredTool(input: {
 				);
 				break;
 			case 'workspace.readFile': {
+				const [sandbox, sessionKey] = requireSandbox(input.sandboxProvider, input.sessionKey);
 				const args = pathInput.parse(input.call.arguments);
-				content = await readFile(resolveWorkspacePath(input.workspacePath, args.path), 'utf8');
+				content = await sandbox.readFile({ sessionKey, path: args.path });
 				break;
 			}
 			case 'workspace.writeFile': {
+				const [sandbox, sessionKey] = requireSandbox(input.sandboxProvider, input.sessionKey);
 				const args = writeFileInput.parse(input.call.arguments);
-				const targetPath = resolveWorkspacePath(input.workspacePath, args.path);
-				await mkdir(dirname(targetPath), { recursive: true });
-				await writeFile(targetPath, args.content, 'utf8');
-				content = { path: args.path, bytes: Buffer.byteLength(args.content) };
+				// Snapshot the workspace before mutation so it can be restored if needed.
+				await sandbox.snapshot({
+					sessionKey,
+					runId: input.runId,
+					toolCallId: input.call.id,
+					reason: `pre-write: ${args.path}`
+				});
+				await sandbox.writeFile({ sessionKey, path: args.path, contents: args.content });
+				const written = await sandbox.readFile({ sessionKey, path: args.path });
+				content = { path: args.path, bytes: Buffer.byteLength(written) };
 				break;
 			}
 			case 'workspace.applyPatch': {
+				const [sandbox, sessionKey] = requireSandbox(input.sandboxProvider, input.sessionKey);
 				const args = applyPatchInput.parse(input.call.arguments);
-				const targetPath = resolveWorkspacePath(input.workspacePath, args.path);
-				await mkdir(dirname(targetPath), { recursive: true });
-				await applyUnifiedPatch(targetPath, args.patch);
-				const patched = await readFile(targetPath, 'utf8');
+				// Write the patch content to a temp file inside the workspace.  The
+				// provider's runCommand has no stdin support, so we use `patch -i
+				// <tempfile>` rather than piping to stdin.
+				const tempPatchPath = `.stardust-patch-${randomUUID()}.patch`;
+				await sandbox.writeFile({ sessionKey, path: tempPatchPath, contents: args.patch });
+				// Snapshot before the patch is applied.
+				await sandbox.snapshot({
+					sessionKey,
+					runId: input.runId,
+					toolCallId: input.call.id,
+					reason: `pre-apply-patch: ${args.path}`
+				});
+				try {
+					const patchResult = await sandbox.runCommand({
+						sessionKey,
+						runId: input.runId ?? 'tool',
+						command: 'patch',
+						args: ['--no-backup-if-mismatch', '--reject-file=-', '-i', tempPatchPath, args.path],
+						toolCallId: input.call.id
+					});
+					if (patchResult.exitCode !== 0) {
+						throw new Error(
+							`patch failed (exit ${patchResult.exitCode}): ${patchResult.stderr || patchResult.stdout}`.trimEnd()
+						);
+					}
+				} finally {
+					// Best-effort cleanup of the temporary patch file.
+					try {
+						await sandbox.runCommand({
+							sessionKey,
+							runId: input.runId ?? 'tool',
+							command: 'rm',
+							args: ['-f', tempPatchPath],
+							toolCallId: `${input.call.id}-cleanup`
+						});
+					} catch {
+						// Cleanup failures are non-fatal; the sandbox snapshot absorbs the temp file.
+					}
+				}
+				const patched = await sandbox.readFile({ sessionKey, path: args.path });
 				content = { path: args.path, bytes: Buffer.byteLength(patched) };
 				break;
 			}
-			case 'shell.exec':
-				content = await runShell(shellExecInput.parse(input.call.arguments), input.workspacePath);
+			case 'shell.exec': {
+				const [sandbox, sessionKey] = requireSandbox(input.sandboxProvider, input.sessionKey);
+				const args = shellExecInput.parse(input.call.arguments);
+				// Snapshot before arbitrary shell execution so the workspace state is
+				// recoverable regardless of what the command does.
+				await sandbox.snapshot({
+					sessionKey,
+					runId: input.runId,
+					toolCallId: input.call.id,
+					reason: `pre-shell: ${args.command}`
+				});
+				const result = await sandbox.runCommand({
+					sessionKey,
+					runId: input.runId ?? 'tool',
+					command: args.command,
+					args: args.args,
+					timeoutMs: args.timeoutMs,
+					toolCallId: input.call.id
+				});
+				content = {
+					exitCode: result.exitCode,
+					stdout: result.stdout,
+					stderr: result.stderr,
+					timedOut: result.timedOut,
+					status: result.status
+				};
 				break;
-			case 'web.search':
-				content = buildToolStubResult(input.call.name, webSearchInput.parse(input.call.arguments));
+			}
+			case 'workspace.searchFiles': {
+				const [sandbox, sessionKey] = requireSandbox(input.sandboxProvider, input.sessionKey);
+				const args = searchFilesInput.parse(input.call.arguments);
+				const findResult = await sandbox.runCommand({
+					sessionKey,
+					runId: input.runId ?? 'tool',
+					command: 'find',
+					args: [args.path ?? '.', '-name', args.pattern, '-type', 'f'],
+					toolCallId: input.call.id
+				});
+				content = {
+					files: findResult.stdout.split('\n').filter(Boolean),
+					pattern: args.pattern
+				};
 				break;
-			case 'workspace.searchFiles':
-				content = buildToolStubResult(
-					input.call.name,
-					searchFilesInput.parse(input.call.arguments)
-				);
+			}
+			case 'sandbox.snapshot': {
+				const [sandbox, sessionKey] = requireSandbox(input.sandboxProvider, input.sessionKey);
+				const args = sandboxSnapshotInput.parse(input.call.arguments);
+				const snapshot = await sandbox.snapshot({
+					sessionKey,
+					runId: input.runId,
+					toolCallId: input.call.id,
+					reason: args.description ? `${args.label}: ${args.description}` : args.label
+				});
+				content = {
+					id: snapshot.id,
+					label: args.label,
+					gitCommitSha: snapshot.gitCommitSha,
+					createdAt: snapshot.createdAt
+				};
 				break;
-			case 'memory.search':
-				content = buildToolStubResult(
-					input.call.name,
-					memorySearchInput.parse(input.call.arguments)
-				);
-				break;
-			case 'process.start':
-				content = buildToolStubResult(
-					input.call.name,
-					processStartInput.parse(input.call.arguments)
-				);
-				break;
-			case 'process.kill':
-				content = buildToolStubResult(
-					input.call.name,
-					processKillInput.parse(input.call.arguments)
-				);
-				break;
-			case 'sandbox.snapshot':
-				content = buildToolStubResult(
-					input.call.name,
-					sandboxSnapshotInput.parse(input.call.arguments)
-				);
-				break;
-			case 'memory.writeCandidate':
-				content = buildToolStubResult(
-					input.call.name,
-					memoryWriteCandidateInput.parse(input.call.arguments)
-				);
-				break;
-			case 'delegate.research':
-			case 'delegate.code':
-			case 'delegate.critic':
-				content = buildToolStubResult(input.call.name, delegateInput.parse(input.call.arguments));
-				break;
+			}
 			default:
 				throw new Error(`Unknown tool: ${input.call.name}`);
 		}
