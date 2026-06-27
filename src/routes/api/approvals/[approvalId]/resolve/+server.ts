@@ -4,7 +4,7 @@ import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db/client';
 import { ApprovalsRepository } from '$lib/server/policy/approvals';
 import { getTemporalClient } from '$lib/server/temporal/client';
-import { resolveApprovalUpdate } from '@src/workflows/approval-contracts';
+import { resolveApprovalUpdate } from '@src/workflows/session-contracts';
 
 const APPROVAL_ACTIONS = new Set(['approve', 'approve_with_edits', 'deny', 'remember', 'cancel']);
 
@@ -30,8 +30,11 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		actor: 'user'
 	};
 
+	// Route through the session workflow (agent-session:{sessionId}) so the session
+	// sits on the approval-resolution path per ARCHITECTURE.md:155.
+	// approval.sessionId equals the sessionKey used to start the session.
 	const client = await getTemporalClient();
-	const handle = client.workflow.getHandle(`agent-run:${approval.runId}`);
+	const handle = client.workflow.getHandle(`agent-session:${approval.sessionId}`);
 	const resolution = await handle.executeUpdate(resolveApprovalUpdate, {
 		args: [resolutionInput]
 	});

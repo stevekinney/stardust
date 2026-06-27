@@ -3,20 +3,31 @@ import { Worker } from '@temporalio/worker';
 import { ApplicationFailure } from '@temporalio/common';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { SessionMemorySnapshot, SessionState, SubmitTurnResult } from '@src/lib/types';
-import { TASK_QUEUE_ORCHESTRATOR } from '@src/lib/types';
+import type {
+	ApprovalResolution,
+	ApprovalResolutionInput,
+	SessionMemorySnapshot,
+	SessionState,
+	SubmitTurnResult
+} from '@src/lib/types';
+import { TASK_QUEUE_ORCHESTRATOR, TASK_QUEUE_TOOLS } from '@src/lib/types';
 import {
 	cancelRunSignal,
 	getActiveRunQuery,
 	getMemorySnapshotQuery,
 	getPendingApprovalsQuery,
+	resolveApprovalUpdate,
 	getSandboxSnapshotQuery,
 	getSessionStateQuery,
 	interruptRunUpdate,
 	submitSteeringUpdate,
 	submitTurnUpdate
 } from './session-contracts';
-import { getSteeringBufferQuery, releaseRunSignal } from './__fixtures__/blocking-run.fixture';
+import {
+	getSteeringBufferQuery,
+	receivedApprovalQuery,
+	releaseRunSignal
+} from './__fixtures__/blocking-run.fixture';
 
 const testActivities = {
 	async noop(): Promise<void> {}
@@ -617,4 +628,128 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 			expect(snapshot.memoryRefs).toContain(`mem:${turn2.runId}`);
 		});
 	}, 60_000);
+});
+
+// ── Approval routing suite — verifies session sits on the approval resolution path ──
+
+describe('agentSessionWorkflow — approval routing', () => {
+	let env: TestWorkflowEnvironment;
+
+	beforeAll(async () => {
+		env = await TestWorkflowEnvironment.createTimeSkipping();
+	});
+
+	afterAll(async () => {
+		await env.teardown();
+	});
+
+	async function pollUntil(
+		condition: () => Promise<boolean>,
+		maxAttempts = 20,
+		intervalMs = 50
+	): Promise<void> {
+		for (let i = 0; i < maxAttempts; i++) {
+			if (await condition()) return;
+			await env.sleep(intervalMs);
+		}
+		throw ApplicationFailure.nonRetryable('pollUntil: condition not met within allowed attempts');
+	}
+
+	it('resolveApprovalUpdate routes through the session and confirms it reaches the active run', async () => {
+		// The forwardApprovalToRun activity (on TASK_QUEUE_TOOLS) uses env.client to
+		// call resolveApprovalUpdate on the run. The blocking fixture handles the update
+		// and records the input for assertion via receivedApprovalQuery.
+		const approvalForwardingActivities = {
+			async forwardApprovalToRun(input: {
+				runId: string;
+				resolution: ApprovalResolutionInput;
+			}): Promise<ApprovalResolution> {
+				const handle = env.client.workflow.getHandle(`agent-run:${input.runId}`);
+				return handle.executeUpdate(resolveApprovalUpdate, { args: [input.resolution] });
+			}
+		};
+
+		const orchestratorWorker = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_ORCHESTRATOR,
+			workflowsPath: fileURLToPath(
+				new URL('./__fixtures__/blocking-run.fixture.ts', import.meta.url)
+			),
+			activities: { noop: async () => {} }
+		});
+
+		const toolsWorker = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_TOOLS,
+			activities: approvalForwardingActivities
+		});
+
+		const sessionKey = 'test-approval-routing';
+		const orchestratorTask = orchestratorWorker.runUntil(async () => {
+			const handle = await env.client.workflow.start('agentSessionWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-session:${sessionKey}-${Date.now()}`,
+				args: [{ sessionKey }]
+			});
+
+			const turn: SubmitTurnResult = await handle.executeUpdate(submitTurnUpdate, {
+				args: [{ message: 'do something' }]
+			});
+
+			// Wait for the run to become active.
+			await pollUntil(async () => {
+				const state = await handle.query(getSessionStateQuery);
+				return state.activeRunId === turn.runId;
+			});
+
+			// Resolve via the session — this is the path the architecture spec requires.
+			const approvalId = `${turn.runId}:tool-001:approval`;
+			const resolution: ApprovalResolution = await handle.executeUpdate(resolveApprovalUpdate, {
+				args: [{ approvalId, action: 'approve', actor: 'user' }]
+			});
+
+			// The session returned the ApprovalResolution from the run.
+			expect(resolution.approvalId).toBe(approvalId);
+			expect(resolution.action).toBe('approve');
+			expect(resolution.terminalState).toBe('approved');
+
+			// Verify the run actually received the resolution (not bypassed).
+			const runHandle = env.client.workflow.getHandle(`agent-run:${turn.runId}`);
+			const received = await runHandle.query(receivedApprovalQuery);
+			expect(received?.approvalId).toBe(approvalId);
+			expect(received?.action).toBe('approve');
+
+			// Clean up.
+			await runHandle.signal(releaseRunSignal, turn.runId);
+		});
+
+		const toolsTask = toolsWorker.runUntil(orchestratorTask.catch(() => undefined));
+		await Promise.all([orchestratorTask, toolsTask]);
+	}, 60_000);
+
+	it('resolveApprovalUpdate throws when no run is active', async () => {
+		const worker = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_ORCHESTRATOR,
+			workflowsPath: fileURLToPath(new URL('./index.ts', import.meta.url)),
+			activities: { noop: async () => {} }
+		});
+
+		await worker.runUntil(async () => {
+			const handle = await env.client.workflow.start('agentSessionWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-session:test-approval-idle-${Date.now()}`,
+				args: [{ sessionKey: 'test-approval-idle' }]
+			});
+
+			await expect(
+				handle.executeUpdate(resolveApprovalUpdate, {
+					args: [{ approvalId: 'approval-001', action: 'approve', actor: 'user' }]
+				})
+			).rejects.toThrow();
+		});
+	});
 });

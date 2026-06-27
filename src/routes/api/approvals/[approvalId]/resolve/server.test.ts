@@ -26,9 +26,10 @@ vi.mock('$lib/server/temporal/client', () => ({
 }));
 
 describe('approval resolve route', () => {
-	it('routes the approval decision to the owning run workflow', async () => {
+	it('routes the approval decision through the session workflow (not the run directly)', async () => {
 		mocks.findById.mockResolvedValueOnce({
 			approvalId: 'approval-001',
+			sessionId: 'session-001',
 			runId: 'run-001'
 		});
 		mocks.executeUpdate.mockResolvedValueOnce({
@@ -53,7 +54,9 @@ describe('approval resolve route', () => {
 		} as Parameters<typeof POST>[0]);
 
 		expect(response.status).toBe(200);
-		expect(mocks.getHandle).toHaveBeenCalledWith('agent-run:run-001');
+		// Must target the session workflow, not the run directly.
+		expect(mocks.getHandle).toHaveBeenCalledWith('agent-session:session-001');
+		expect(mocks.getHandle).not.toHaveBeenCalledWith('agent-run:run-001');
 		expect(mocks.executeUpdate).toHaveBeenCalledWith(expect.anything(), {
 			args: [
 				{

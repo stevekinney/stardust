@@ -3,9 +3,15 @@
 // can observe mid-flight session state before releasing the run.
 export { agentSessionWorkflow } from '../agent-session.workflow';
 
-import type { AgentRunInput, AgentRunResult } from '@src/lib/types';
-import { condition, defineQuery, defineSignal, setHandler } from '@temporalio/workflow';
+import type {
+	AgentRunInput,
+	AgentRunResult,
+	ApprovalResolution,
+	ApprovalResolutionInput
+} from '@src/lib/types';
+import { allHandlersFinished, condition, defineQuery, defineSignal, setHandler } from '@temporalio/workflow';
 import { steeringSignal } from '../approval-contracts';
+import { resolveApprovalUpdate } from '../session-contracts';
 
 /** Send this signal (with the target runId) to the agentRunWorkflow child to unblock it. */
 export const releaseRunSignal = defineSignal<[string]>('releaseRun');
@@ -16,9 +22,18 @@ export const releaseRunSignal = defineSignal<[string]>('releaseRun');
  */
 export const getSteeringBufferQuery = defineQuery<string[], []>('getSteeringBuffer');
 
+/**
+ * Query: returns the last ApprovalResolutionInput received via resolveApprovalUpdate, or null.
+ * Used in tests to assert that the session correctly forwarded an approval resolution.
+ */
+export const receivedApprovalQuery = defineQuery<ApprovalResolutionInput | null, []>(
+	'receivedApproval'
+);
+
 export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunResult> {
 	let released = false;
 	const steeringBuffer: string[] = [];
+	let receivedApproval: ApprovalResolutionInput | null = null;
 
 	void setHandler(releaseRunSignal, (targetRunId: string) => {
 		if (targetRunId === input.runId) released = true;
@@ -29,8 +44,40 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 	});
 
 	void setHandler(getSteeringBufferQuery, () => steeringBuffer);
+	void setHandler(receivedApprovalQuery, () => receivedApproval);
+
+	// Handle resolveApprovalUpdate so the approval-routing test can verify the
+	// session forwards the resolution to the run. Returns a mock ApprovalResolution.
+	void setHandler(
+		resolveApprovalUpdate,
+		async (resolution: ApprovalResolutionInput): Promise<ApprovalResolution> => {
+			receivedApproval = resolution;
+			const terminalState =
+				resolution.action === 'approve' || resolution.action === 'approve_with_edits'
+					? 'approved'
+					: resolution.action === 'deny'
+						? 'denied'
+						: resolution.action === 'remember'
+							? 'remembered'
+							: 'cancelled';
+			return {
+				approvalId: resolution.approvalId,
+				action: resolution.action,
+				terminalState,
+				canonicalArguments: resolution.editedArguments ?? {},
+				proposedArguments: {},
+				remember: resolution.remember ?? false,
+				actor: resolution.actor ?? 'user',
+				resolvedAt: new Date().toISOString()
+			};
+		}
+	);
 
 	await condition(() => released, 24 * 60 * 60 * 1000);
+	// Drain any in-flight async update handlers (e.g. resolveApprovalUpdate) before
+	// completing so a resolution in-flight at exit does not produce an
+	// unfinished-handler warning.
+	await condition(allHandlersFinished, '60 seconds');
 	return {
 		runId: input.runId,
 		status: 'complete',

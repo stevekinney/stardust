@@ -1,5 +1,7 @@
 import type {
 	ApprovalCardState,
+	ApprovalResolution,
+	ApprovalResolutionInput,
 	InterruptRunInput,
 	InterruptRunResult,
 	SessionMemorySnapshot,
@@ -16,6 +18,16 @@ import { defineQuery, defineSignal, defineUpdate } from '@temporalio/workflow';
 
 /** Update: submit a new user turn; returns accepted=true and a fresh runId. */
 export const submitTurnUpdate = defineUpdate<SubmitTurnResult, [SubmitTurnInput]>('submitTurn');
+
+/**
+ * Update: resolve a pending approval on the active run, routed through the session.
+ * The session forwards the resolution to the run via an activity that uses the
+ * Temporal client. Returns the recorded `ApprovalResolution` on success.
+ * Throws if no run is currently active or if the run's update handler rejects.
+ */
+export const resolveApprovalUpdate = defineUpdate<ApprovalResolution, [ApprovalResolutionInput]>(
+	'resolveApproval'
+);
 
 /**
  * Update: inject a steering message into the currently active run.
