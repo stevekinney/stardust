@@ -19,6 +19,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	if (!message) {
 		throw error(400, 'message is required');
 	}
+	const delegateSubagents = body?.delegateSubagents === true ? true : undefined;
 
 	const client = await getTemporalClient();
 	const workflowId = `agent-session:${sessionKey}`;
@@ -33,7 +34,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 
 	const handle = client.workflow.getHandle(workflowId);
 	const result = await handle.executeUpdate(submitTurnUpdate, {
-		args: [{ message }]
+		args: [{ message, delegateSubagents }]
 	});
 
 	return json({

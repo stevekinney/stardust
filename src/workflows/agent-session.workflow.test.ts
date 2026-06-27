@@ -24,6 +24,7 @@ import {
 	submitTurnUpdate
 } from './session-contracts';
 import {
+	getDelegateSubagentsQuery,
 	getSteeringBufferQuery,
 	receivedApprovalQuery,
 	releaseRunSignal
@@ -628,6 +629,65 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 			expect(snapshot.memoryRefs).toContain(`mem:${turn2.runId}`);
 		});
 	}, 60_000);
+
+	// ── delegateSubagents propagation ──────────────────────────────────────────
+
+	it('propagates delegateSubagents: true from SubmitTurnInput to AgentRunInput', async () => {
+		await runWithBlockingWorker(async () => {
+			const sessionKey = 'test-delegate-true';
+			const handle = await env.client.workflow.start('agentSessionWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-session:${sessionKey}-${Date.now()}`,
+				args: [{ sessionKey }]
+			});
+
+			const turn: SubmitTurnResult = await handle.executeUpdate(submitTurnUpdate, {
+				args: [{ message: 'delegate this', delegateSubagents: true }]
+			});
+			expect(turn.accepted).toBe(true);
+
+			// Wait for the run to become active.
+			await pollUntil(async () => {
+				const state = await handle.query(getSessionStateQuery);
+				return state.activeRunId === turn.runId;
+			});
+
+			// The blocking stub exposes the delegateSubagents flag via query.
+			const runHandle = env.client.workflow.getHandle(`agent-run:${turn.runId}`);
+			const delegated = await runHandle.query(getDelegateSubagentsQuery);
+			expect(delegated).toBe(true);
+
+			await runHandle.signal(releaseRunSignal, turn.runId);
+		});
+	});
+
+	it('leaves delegateSubagents undefined in AgentRunInput when not set in SubmitTurnInput', async () => {
+		await runWithBlockingWorker(async () => {
+			const sessionKey = 'test-delegate-absent';
+			const handle = await env.client.workflow.start('agentSessionWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-session:${sessionKey}-${Date.now()}`,
+				args: [{ sessionKey }]
+			});
+
+			const turn: SubmitTurnResult = await handle.executeUpdate(submitTurnUpdate, {
+				args: [{ message: 'no delegation' }]
+			});
+			expect(turn.accepted).toBe(true);
+
+			await pollUntil(async () => {
+				const state = await handle.query(getSessionStateQuery);
+				return state.activeRunId === turn.runId;
+			});
+
+			const runHandle = env.client.workflow.getHandle(`agent-run:${turn.runId}`);
+			const delegated = await runHandle.query(getDelegateSubagentsQuery);
+			// Absent flag must not accidentally enable delegation.
+			expect(delegated).toBeUndefined();
+
+			await runHandle.signal(releaseRunSignal, turn.runId);
+		});
+	});
 });
 
 // ── Approval routing suite — verifies session sits on the approval resolution path ──
