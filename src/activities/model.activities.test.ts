@@ -172,30 +172,28 @@ describe('model activity', () => {
 		const snapshotsAfterEachDelta: number[] = [];
 
 		const provider: ModelProviderClient = {
-			createMessage: vi.fn(
-				async (...args: Parameters<ModelProviderClient['createMessage']>) => {
-					const onDelta = args[1];
-					await onDelta('one ');
-					snapshotsAfterEachDelta.push(
-						(await readStreamEventsAfterCursor(database, { runId: 'run-001' })).events.filter(
-							(e) => e.kind === 'assistant.delta'
-						).length
-					);
-					await onDelta('two');
-					snapshotsAfterEachDelta.push(
-						(await readStreamEventsAfterCursor(database, { runId: 'run-001' })).events.filter(
-							(e) => e.kind === 'assistant.delta'
-						).length
-					);
-					return {
-						message: {
-							role: 'assistant' as const,
-							content: [{ type: 'text' as const, text: 'one two' }],
-							usage: { input_tokens: 10, output_tokens: 5 }
-						}
-					};
-				}
-			)
+			createMessage: vi.fn(async (...args: Parameters<ModelProviderClient['createMessage']>) => {
+				const onDelta = args[1];
+				await onDelta('one ');
+				snapshotsAfterEachDelta.push(
+					(await readStreamEventsAfterCursor(database, { runId: 'run-001' })).events.filter(
+						(e) => e.kind === 'assistant.delta'
+					).length
+				);
+				await onDelta('two');
+				snapshotsAfterEachDelta.push(
+					(await readStreamEventsAfterCursor(database, { runId: 'run-001' })).events.filter(
+						(e) => e.kind === 'assistant.delta'
+					).length
+				);
+				return {
+					message: {
+						role: 'assistant' as const,
+						content: [{ type: 'text' as const, text: 'one two' }],
+						usage: { input_tokens: 10, output_tokens: 5 }
+					}
+				};
+			})
 		};
 
 		await runModelCall(
@@ -294,5 +292,146 @@ describe('model activity', () => {
 		expect(classifyModelProviderError({ status: 503 })).toBe('transient');
 		expect(classifyModelProviderError({ status: 400 })).toBe('permanent');
 		expect(classifyModelProviderError(new Error('bad request'))).toBe('permanent');
+	});
+
+	it('includes steering messages as user turns in the provider request', async () => {
+		await appendTranscriptEvent(database, {
+			id: 'transcript-001',
+			runId: 'run-001',
+			sessionId: 'session-001',
+			kind: 'user_message',
+			payload: JSON.stringify({ text: 'Analyse the data.' }),
+			createdAt: '2026-01-01T00:00:00.000Z'
+		});
+		await appendTranscriptEvent(database, {
+			id: 'transcript-002',
+			runId: 'run-001',
+			sessionId: 'session-001',
+			kind: 'assistant_message',
+			payload: JSON.stringify({ text: 'Analysing…' }),
+			createdAt: '2026-01-01T00:00:01.000Z'
+		});
+
+		let capturedRequest: Parameters<ModelProviderClient['createMessage']>[0] | undefined;
+		const provider: ModelProviderClient = {
+			createMessage: vi.fn(async (request) => {
+				capturedRequest = request;
+				return {
+					message: {
+						role: 'assistant' as const,
+						content: [{ type: 'text' as const, text: 'Done.' }],
+						usage: { input_tokens: 10, output_tokens: 5 }
+					}
+				};
+			})
+		};
+
+		await runModelCall(
+			{
+				sessionId: 'session-001',
+				runId: 'run-001',
+				model: 'claude-sonnet-4-5-20250929',
+				steeringMessages: ['focus on the budget']
+			},
+			{ database, provider, apiKey: 'test-key' }
+		);
+
+		// The provider request must carry the steering message as a user turn.
+		expect(capturedRequest).toBeDefined();
+		const messagesStr = JSON.stringify(capturedRequest!.messages);
+		expect(messagesStr).toContain('[Steering] focus on the budget');
+		// The final turn must be a user message (so the model can respond).
+		const lastMessage = capturedRequest!.messages.at(-1) as { role: string };
+		expect(lastMessage.role).toBe('user');
+	});
+
+	it('includes memory notes in the provider request system prompt', async () => {
+		await appendTranscriptEvent(database, {
+			id: 'transcript-001',
+			runId: 'run-001',
+			sessionId: 'session-001',
+			kind: 'user_message',
+			payload: JSON.stringify({ text: 'What do you know about me?' }),
+			createdAt: '2026-01-01T00:00:00.000Z'
+		});
+
+		let capturedRequest: Parameters<ModelProviderClient['createMessage']>[0] | undefined;
+		const provider: ModelProviderClient = {
+			createMessage: vi.fn(async (request) => {
+				capturedRequest = request;
+				return {
+					message: {
+						role: 'assistant' as const,
+						content: [{ type: 'text' as const, text: 'You prefer TypeScript.' }],
+						usage: { input_tokens: 20, output_tokens: 10 }
+					}
+				};
+			})
+		};
+
+		await runModelCall(
+			{
+				sessionId: 'session-001',
+				runId: 'run-001',
+				model: 'claude-sonnet-4-5-20250929',
+				systemPrompt: 'You are a helpful assistant.',
+				memoryNotes: [
+					{
+						id: 'mem-abc',
+						layer: 'durable',
+						content: 'User prefers TypeScript.',
+						tags: ['preferences']
+					}
+				]
+			},
+			{ database, provider, apiKey: 'test-key' }
+		);
+
+		// Memory section must appear in the system prompt sent to the provider.
+		expect(capturedRequest).toBeDefined();
+		expect(capturedRequest!.system).toContain('<memory>');
+		expect(capturedRequest!.system).toContain('User prefers TypeScript.');
+		expect(capturedRequest!.system).toContain('id: mem-abc');
+		expect(capturedRequest!.system).toContain('[durable]');
+		expect(capturedRequest!.system).toContain('tags: preferences');
+	});
+
+	it('includes workspace reference in the provider request system prompt', async () => {
+		await appendTranscriptEvent(database, {
+			id: 'transcript-001',
+			runId: 'run-001',
+			sessionId: 'session-001',
+			kind: 'user_message',
+			payload: JSON.stringify({ text: 'list files' }),
+			createdAt: '2026-01-01T00:00:00.000Z'
+		});
+
+		let capturedRequest: Parameters<ModelProviderClient['createMessage']>[0] | undefined;
+		const provider: ModelProviderClient = {
+			createMessage: vi.fn(async (request) => {
+				capturedRequest = request;
+				return {
+					message: {
+						role: 'assistant' as const,
+						content: [{ type: 'text' as const, text: 'Files listed.' }],
+						usage: { input_tokens: 5, output_tokens: 3 }
+					}
+				};
+			})
+		};
+
+		await runModelCall(
+			{
+				sessionId: 'session-001',
+				runId: 'run-001',
+				model: 'claude-sonnet-4-5-20250929',
+				workspacePath: '/workspace/session-xyz'
+			},
+			{ database, provider, apiKey: 'test-key' }
+		);
+
+		expect(capturedRequest).toBeDefined();
+		expect(capturedRequest!.system).toContain('<workspace>');
+		expect(capturedRequest!.system).toContain('/workspace/session-xyz');
 	});
 });

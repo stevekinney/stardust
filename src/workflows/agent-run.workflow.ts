@@ -6,6 +6,7 @@ import type {
 	ApprovalResolutionInput,
 	BudgetLedgerEntry,
 	BudgetLedgerSnapshot,
+	ContextMemoryNote,
 	CriticAnnotation,
 	ModelCallInput,
 	ModelCallResult,
@@ -131,6 +132,16 @@ type MemoryActivities = {
 		tags?: string[];
 		reason?: string | null;
 	}): Promise<unknown>;
+	/**
+	 * Retrieves confirmed memory notes relevant to the given query using the
+	 * FTS5 + sqlite-vec reciprocal-rank-fusion path. Results include session
+	 * summaries, durable notes, and action-sensitive notes, scoped to this session.
+	 */
+	searchMemory(input: {
+		sessionId: string;
+		query: string;
+		limit?: number;
+	}): Promise<ContextMemoryNote[]>;
 };
 
 const policyActivities = proxyActivities<PolicyActivities>({
@@ -693,6 +704,19 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 
 		// Drain any steering messages queued since the last model call.
 		const pendingSteering = steeringBuffer.splice(0);
+
+		// Retrieve confirmed memory relevant to this turn before calling the model.
+		// searchMemory runs on the memory task queue where the embedding model lives,
+		// keeping heavy ML work off the model worker.  Failures are non-fatal: an
+		// empty results array means the model call proceeds without memory context.
+		const retrievedMemory = await memoryActivities
+			.searchMemory({
+				sessionId: input.sessionKey,
+				query: input.message,
+				limit: 5
+			})
+			.catch((): ContextMemoryNote[] => []);
+
 		const modelResult = await modelActivities.callModel({
 			sessionId: input.sessionKey,
 			runId: input.runId,
@@ -700,7 +724,9 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 			tools: input.tools,
 			systemPrompt: input.systemPrompt,
 			maxTokens: 4096,
-			...(pendingSteering.length > 0 ? { steeringMessages: pendingSteering } : {})
+			...(pendingSteering.length > 0 ? { steeringMessages: pendingSteering } : {}),
+			...(retrievedMemory.length > 0 ? { memoryNotes: retrievedMemory } : {}),
+			...(input.workspacePath ? { workspacePath: input.workspacePath } : {})
 		});
 		modelCallCount++;
 		totalUsage = addUsage(totalUsage, modelResult.usage);

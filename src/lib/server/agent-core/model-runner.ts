@@ -127,7 +127,10 @@ export async function runModelCall(
 	const provider = dependencies.provider ?? createAnthropicProvider(apiKey);
 	const context = await buildModelContext(database, {
 		sessionId: input.sessionId,
-		systemPrompt: input.systemPrompt
+		systemPrompt: input.systemPrompt,
+		steeringMessages: input.steeringMessages,
+		memoryNotes: input.memoryNotes,
+		workspacePath: input.workspacePath
 	});
 	const tools = formatToolsForAnthropic(input.tools);
 
