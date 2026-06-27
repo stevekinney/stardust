@@ -61,13 +61,28 @@ export interface SandboxEphemeralSandbox {
 	terminate(): Promise<void>;
 }
 
+/** Options for running a sandbox command. */
+export interface SandboxRunCommandOptions {
+	/**
+	 * An AbortSignal scoped to this command invocation. When the signal fires, only
+	 * this command's process is killed — other processes tracked for the same session
+	 * are left untouched. Pass `Context.current().cancellationSignal` (or the
+	 * `cancellationSignal()` shorthand) from `@temporalio/activity` to integrate with
+	 * Temporal Activity cancellation without tearing down the whole session.
+	 */
+	signal?: AbortSignal;
+}
+
 export interface SandboxProvider {
 	readonly name: SandboxProviderName;
 
 	ensureWorkspace(sessionKey: string): Promise<string>;
 	readFile(input: SandboxFileInput): Promise<string>;
 	writeFile(input: SandboxWriteFileInput): Promise<void>;
-	runCommand(input: SandboxCommandInput): Promise<SandboxCommandResult>;
+	runCommand(
+		input: SandboxCommandInput,
+		options?: SandboxRunCommandOptions
+	): Promise<SandboxCommandResult>;
 	snapshot(input: SandboxSnapshotInput): Promise<SandboxSnapshotResult>;
 	restore(sessionKey: string, gitCommitSha: string): Promise<void>;
 	createEphemeralSandbox(sessionKey: string): Promise<SandboxEphemeralSandbox>;
