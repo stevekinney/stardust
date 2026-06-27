@@ -52,6 +52,10 @@
 		return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 	}
 
+	function formatMs(ms: number): string {
+		return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+	}
+
 	/** Returns a compact symbol for each transcript event kind, for engineer-view markers. */
 	function kindMarker(kind: string): string {
 		const markers: Record<string, string> = {
@@ -211,6 +215,16 @@
 							{/if}
 							<span class="kind-badge">{kindLabel(event.kind)}</span>
 							<span class="sequence">#{event.sequence}</span>
+							{#if event.durationMs !== undefined}
+								<span class="step-duration" data-step-duration aria-label="duration"
+									>{formatMs(event.durationMs)}</span
+								>
+							{/if}
+							{#if event.attempts !== undefined && event.attempts > 1}
+								<span class="step-attempts" data-step-attempts aria-label="attempts"
+									>×{event.attempts}</span
+								>
+							{/if}
 							<time class="timestamp" datetime={event.createdAt}>
 								{formatTimestamp(event.createdAt)}
 							</time>
@@ -537,6 +551,26 @@
 		color: color-mix(in srgb, CanvasText 45%, transparent);
 		font-size: 0.75rem;
 		font-family: ui-monospace, monospace;
+	}
+
+	.step-duration {
+		padding: 0.1rem 0.4rem;
+		border-radius: 4px;
+		background: color-mix(in srgb, #0369a1 10%, transparent);
+		color: #0369a1;
+		font-size: 0.72rem;
+		font-family: ui-monospace, monospace;
+		font-weight: 600;
+	}
+
+	.step-attempts {
+		padding: 0.1rem 0.4rem;
+		border-radius: 4px;
+		background: color-mix(in srgb, #c2410c 10%, transparent);
+		color: #c2410c;
+		font-size: 0.72rem;
+		font-family: ui-monospace, monospace;
+		font-weight: 700;
 	}
 
 	.timestamp {

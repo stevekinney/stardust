@@ -27,6 +27,18 @@ export type RunInspectorEvent = {
 	sequence: number;
 	createdAt: string;
 	payload: unknown;
+	/**
+	 * Wall-clock duration in milliseconds from the tool_call event's createdAt to
+	 * the latest matching tool_result. Only present on tool_call events where at
+	 * least one tool_result with a matching callId exists in the transcript.
+	 */
+	durationMs?: number;
+	/**
+	 * Number of execution attempts for this tool_call batch, including Temporal
+	 * activity retries. Only present on tool_call events. Value > 1 means at least
+	 * one retry occurred; the badge is shown when this is > 1.
+	 */
+	attempts?: number;
 };
 
 export type RunInspectorProjection = {
@@ -137,6 +149,94 @@ function buildTimelineLanes(
 	return [parentLane];
 }
 
+/** Shape of the `tool_call` transcript event payload written by model-runner. */
+type ToolCallEventPayload = {
+	text?: string;
+	calls: Array<{ id: string; name: string; input: unknown }>;
+};
+
+/** Shape of the `tool_result` transcript event payload written by persistToolResult. */
+type ToolResultEventPayload = {
+	callId: string;
+	content: unknown;
+	isError: boolean;
+};
+
+function isToolCallPayload(value: unknown): value is ToolCallEventPayload {
+	return (
+		value !== null &&
+		typeof value === 'object' &&
+		'calls' in value &&
+		Array.isArray((value as Record<string, unknown>).calls)
+	);
+}
+
+function isToolResultPayload(value: unknown): value is ToolResultEventPayload {
+	return (
+		value !== null &&
+		typeof value === 'object' &&
+		'callId' in value &&
+		typeof (value as Record<string, unknown>).callId === 'string'
+	);
+}
+
+/**
+ * Enriches transcript events with per-step timing and attempt counts derived
+ * from tool_call/tool_result pairing by callId.
+ *
+ * Strategy:
+ * - Build a map of callId → list of tool_result events (multiple = retries).
+ * - For each tool_call event, compute:
+ *   - durationMs: from tool_call.createdAt to the latest tool_result for any
+ *     callId in its calls[] batch.
+ *   - attempts: max count of tool_result rows sharing a callId across the batch.
+ */
+function enrichTranscriptEvents(
+	events: Array<{ kind: string; createdAt: string; payload: string }>
+): Array<{ durationMs: number | undefined; attempts: number | undefined }> {
+	// Build callId → [{createdAt}] map from tool_result events.
+	const resultsByCallId = new Map<string, string[]>();
+	for (const event of events) {
+		if (event.kind !== 'tool_result') continue;
+		const parsed = parsePayload(event.payload);
+		if (!isToolResultPayload(parsed)) continue;
+		const existing = resultsByCallId.get(parsed.callId);
+		if (existing) {
+			existing.push(event.createdAt);
+		} else {
+			resultsByCallId.set(parsed.callId, [event.createdAt]);
+		}
+	}
+
+	return events.map((event) => {
+		if (event.kind !== 'tool_call') {
+			return { durationMs: undefined, attempts: undefined };
+		}
+		const parsed = parsePayload(event.payload);
+		if (!isToolCallPayload(parsed) || parsed.calls.length === 0) {
+			return { durationMs: undefined, attempts: undefined };
+		}
+
+		const callStartMs = new Date(event.createdAt).getTime();
+		let maxAttempts = 0;
+		let latestResultMs = 0;
+
+		for (const call of parsed.calls) {
+			const results = resultsByCallId.get(call.id);
+			if (!results || results.length === 0) continue;
+			maxAttempts = Math.max(maxAttempts, results.length);
+			for (const resultCreatedAt of results) {
+				latestResultMs = Math.max(latestResultMs, new Date(resultCreatedAt).getTime());
+			}
+		}
+
+		return {
+			durationMs: latestResultMs > 0 ? latestResultMs - callStartMs : undefined,
+			attempts: maxAttempts > 0 ? maxAttempts : undefined
+		};
+	});
+}
+
 function parsePayload(value: string): unknown {
 	try {
 		return JSON.parse(value) as unknown;
@@ -223,6 +323,7 @@ export async function readRunInspectorProjection(
 	const lifecycleEvents = transcript.filter((event) => event.kind === 'lifecycle');
 
 	const timelineLanes = buildTimelineLanes(runId, subagentEventRows);
+	const enrichments = enrichTranscriptEvents(transcript);
 
 	return {
 		run: {
@@ -240,12 +341,13 @@ export async function readRunInspectorProjection(
 		temporalWebUrl: buildTemporalWebWorkflowUrl({ workflowId: run.workflowId }),
 		taskQueue: TASK_QUEUE_ORCHESTRATOR,
 		actionMeter: { total, breakdown },
-		transcript: transcript.map((event) => ({
+		transcript: transcript.map((event, index) => ({
 			id: event.id,
 			kind: event.kind,
 			sequence: event.sequence,
 			createdAt: event.createdAt,
-			payload: parsePayload(event.payload)
+			payload: parsePayload(event.payload),
+			...enrichments[index]
 		})),
 		toolInvocations: toolRows,
 		approvalRequests: approvalRows,
