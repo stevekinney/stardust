@@ -38,20 +38,29 @@
 		void goto(resolve(`/sessions/${encodeURIComponent(session.sessionKey)}`));
 	}
 
+	async function mintSessionKey(): Promise<string> {
+		const response = await fetch('/api/sessions', { method: 'POST' });
+		if (!response.ok) throw new Error('Failed to create session');
+		const body = (await response.json()) as { sessionKey: string };
+		return body.sessionKey;
+	}
+
 	function handleCreateSession() {
-		// Navigate to a fresh session page with a random session key.
-		const sessionKey = crypto.randomUUID();
-		void goto(resolve(`/sessions/${encodeURIComponent(sessionKey)}`));
+		// Request a server-minted session key so the browser never decides the key.
+		void mintSessionKey().then((sessionKey) => {
+			void goto(resolve(`/sessions/${encodeURIComponent(sessionKey)}`));
+		});
 	}
 
 	function handleHomeSubmit(message: string) {
-		// Create a session key and navigate to the conversation page,
-		// passing the message so the page can auto-submit the first turn.
-		const sessionKey = crypto.randomUUID();
-		const url = resolve(
-			`/sessions/${encodeURIComponent(sessionKey)}?start=${encodeURIComponent(message)}`
-		);
-		void goto(url);
+		// Request a server-minted session key, then navigate to the conversation
+		// page with the first message pre-loaded so it auto-submits the first turn.
+		void mintSessionKey().then((sessionKey) => {
+			const url = resolve(
+				`/sessions/${encodeURIComponent(sessionKey)}?start=${encodeURIComponent(message)}`
+			);
+			void goto(url);
+		});
 	}
 </script>
 

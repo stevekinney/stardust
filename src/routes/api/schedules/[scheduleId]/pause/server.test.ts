@@ -11,7 +11,7 @@ describe('schedule pause route', () => {
 		vi.mocked(pauseTemporalSchedule).mockResolvedValueOnce({
 			id: 'schedule-001',
 			temporalScheduleId: 'schedule-001',
-			targetSessionKey: 'scheduled:schedule-001',
+			targetSessionKey: 'sched-schedule-001',
 			name: 'Daily digest',
 			description: null,
 			cronExpression: '0 9 * * *',

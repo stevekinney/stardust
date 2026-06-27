@@ -1,13 +1,10 @@
 import { join, resolve, sep } from 'node:path';
-import { SandboxPathError, SandboxSessionKeyError } from './sandbox-errors';
+import { assertValidSessionKey } from '../session-key';
+import { SandboxPathError } from './sandbox-errors';
 
-const SESSION_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
-
-export function assertValidSessionKey(sessionKey: string): void {
-	if (!SESSION_KEY_PATTERN.test(sessionKey)) {
-		throw new SandboxSessionKeyError(sessionKey);
-	}
-}
+// Re-export so callers that import assertValidSessionKey from the sandbox namespace
+// still resolve to the single canonical implementation.
+export { assertValidSessionKey } from '../session-key';
 
 export function sandboxNameForSession(sessionKey: string): string {
 	assertValidSessionKey(sessionKey);
