@@ -5,7 +5,7 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TASK_QUEUE_SANDBOX, type ToolManifestEntry } from '@src/lib/types';
+import { TASK_QUEUE_SANDBOX, TASK_QUEUE_TOOLS, type ToolManifestEntry } from '@src/lib/types';
 import * as schema from '../db/schema';
 import { ApprovalsRepository, hashApprovalArguments } from './approvals';
 
@@ -79,6 +79,80 @@ describe('ApprovalsRepository', () => {
 			.prepare('SELECT kind FROM transcript_events WHERE id = ?')
 			.all('approval-001:request');
 		expect(transcriptRows).toEqual([{ kind: 'approval_request' }]);
+	});
+
+	it('toCardState reads tool metadata from the registry for a known low-risk tool', async () => {
+		// web.fetch is LOW_RISK_TOOL: risk='low', taskQueue=TASK_QUEUE_TOOLS, timeoutMs=10_000
+		// The bug hardcodes risk='high', taskQueue=TASK_QUEUE_SANDBOX, timeoutMs=0, description=toolName.
+		const webFetchTool: ToolManifestEntry = {
+			name: 'web.fetch',
+			description: 'Fetch an HTTP or HTTPS URL with SSRF protection.',
+			inputSchema: {},
+			metadata: {
+				risk: 'low',
+				requiresApproval: false,
+				taskQueue: TASK_QUEUE_TOOLS,
+				timeoutMs: 10_000,
+				retry: { maximumAttempts: 2 },
+				idempotencyBehavior: 'safe'
+			}
+		};
+
+		await approvals.recordRequest({
+			approvalId: 'approval-low-risk',
+			sessionId: 'session-001',
+			runId: 'run-001',
+			toolCall: { id: 'tc-low-risk', name: 'web.fetch', arguments: { url: 'https://example.com' } },
+			tool: webFetchTool,
+			policyVersion: '2026-06-26',
+			proposedArguments: { url: 'https://example.com' },
+			expiresAt: '2026-06-27T00:00:00.000Z',
+			createdAt: '2026-06-26T00:00:00.000Z'
+		});
+
+		const card = await approvals.findById('approval-low-risk');
+		expect(card).not.toBeNull();
+		// Registry values must be used — not hardcoded defaults.
+		expect(card!.tool.description).toBe('Fetch an HTTP or HTTPS URL with SSRF protection.');
+		expect(card!.tool.metadata.risk).toBe('low');
+		expect(card!.tool.metadata.taskQueue).toBe(TASK_QUEUE_TOOLS);
+		expect(card!.tool.metadata.timeoutMs).toBe(10_000);
+		expect(card!.tool.metadata.idempotencyBehavior).toBe('safe');
+	});
+
+	it('toCardState falls back to conservative defaults for an unrecognized tool name', async () => {
+		const unknownTool: ToolManifestEntry = {
+			name: 'unknown.tool',
+			description: 'Some tool no longer in the registry.',
+			inputSchema: {},
+			metadata: {
+				risk: 'high',
+				requiresApproval: true,
+				taskQueue: TASK_QUEUE_SANDBOX,
+				timeoutMs: 5_000,
+				retry: { maximumAttempts: 1 },
+				idempotencyBehavior: 'key-required'
+			}
+		};
+
+		await approvals.recordRequest({
+			approvalId: 'approval-unknown',
+			sessionId: 'session-001',
+			runId: 'run-001',
+			toolCall: { id: 'tc-unknown', name: 'unknown.tool', arguments: {} },
+			tool: unknownTool,
+			policyVersion: '2026-06-26',
+			proposedArguments: {},
+			expiresAt: '2026-06-27T00:00:00.000Z',
+			createdAt: '2026-06-26T00:00:00.000Z'
+		});
+
+		const card = await approvals.findById('approval-unknown');
+		expect(card).not.toBeNull();
+		// Unknown tools fall back to conservative (high-risk) defaults to stay safe.
+		expect(card!.tool.name).toBe('unknown.tool');
+		expect(card!.tool.metadata.risk).toBe('high');
+		expect(card!.tool.metadata.requiresApproval).toBe(true);
 	});
 
 	it('makes edited arguments canonical while preserving proposed arguments', async () => {

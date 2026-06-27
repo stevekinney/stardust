@@ -88,6 +88,9 @@
 		<div>
 			<p class="eyebrow">Approval required</p>
 			<h2 id="approval-card-title">{approval.tool.name}</h2>
+			{#if approval.tool.description && approval.tool.description !== approval.tool.name}
+				<p class="tool-description">{approval.tool.description}</p>
+			{/if}
 		</div>
 		<span class="status">{approval.status}</span>
 	</header>
@@ -96,6 +99,10 @@
 		<div>
 			<dt>Expires</dt>
 			<dd>{expiryText}</dd>
+		</div>
+		<div>
+			<dt>Risk</dt>
+			<dd>{approval.tool.metadata.risk}</dd>
 		</div>
 		<div>
 			<dt>Policy version</dt>

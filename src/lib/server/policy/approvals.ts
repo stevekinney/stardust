@@ -6,12 +6,22 @@ import type {
 	ApprovalResolution,
 	ApprovalTerminalState,
 	RecordApprovalRequestInput,
-	RecordApprovalResolutionInput
+	RecordApprovalResolutionInput,
+	ToolManifestEntry
 } from '@src/lib/types';
 import { TASK_QUEUE_SANDBOX } from '@src/lib/types';
 import type { DatabaseClient } from '../db/client';
 import { approvalRequests, auditEvents, runs } from '../db/schema';
 import { appendTranscriptEvent, publishStreamEvent } from '../stream';
+import { registeredTools } from '../tools/registry';
+
+/** Module-level lookup map so the linear scan runs once at startup, not per row. */
+const toolsByName = new Map<string, ToolManifestEntry>(
+	registeredTools.map((t) => [
+		t.name,
+		{ name: t.name, description: t.description, inputSchema: t.inputSchema, metadata: t.metadata }
+	])
+);
 
 type ApprovalRequestRow = typeof approvalRequests.$inferSelect;
 
@@ -94,7 +104,7 @@ function toCardState(row: ApprovalRequestRow): ApprovalCardState {
 			name: row.toolName,
 			arguments: proposedArguments
 		},
-		tool: {
+		tool: toolsByName.get(row.toolName) ?? {
 			name: row.toolName,
 			description: row.toolName,
 			inputSchema: {},
