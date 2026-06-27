@@ -83,9 +83,18 @@ export const GET: RequestHandler = async ({ params, request, url }) => {
 			// event on the stream bus. Reset per connection, not per run.
 			let seenTerminalLifecycle = false;
 
+			// Tracks the per-run sequence of the last event delivered to this subscriber.
+			// Passed as afterSequence so gap detection uses per-run sequence rather than
+			// the global autoincrement id, avoiding false positives from concurrent runs.
+			let lastSequence = 0;
+
 			while (!signal.aborted) {
 				// Read any new events since the cursor.
-				const replay = await readStreamEventsAfterCursor(db, { runId, afterId: cursor });
+				const replay = await readStreamEventsAfterCursor(db, {
+					runId,
+					afterId: cursor,
+					afterSequence: lastSequence
+				});
 
 				if (replay.events.length > 0) {
 					if (!seenTerminalLifecycle) {
@@ -93,6 +102,7 @@ export const GET: RequestHandler = async ({ params, request, url }) => {
 					}
 					controller.enqueue(encoder.encode(encodeServerSentEvents(replay)));
 					cursor = replay.events[replay.events.length - 1].id;
+					lastSequence = replay.events[replay.events.length - 1].sequence;
 				}
 
 				// Check whether the run has reached a terminal state.
@@ -108,7 +118,8 @@ export const GET: RequestHandler = async ({ params, request, url }) => {
 					// (e.g. the lifecycle:complete event) when trim and status update race.
 					const finalReplay = await readStreamEventsAfterCursor(db, {
 						runId,
-						afterId: cursor
+						afterId: cursor,
+						afterSequence: lastSequence
 					});
 					if (finalReplay.events.length > 0) {
 						if (!seenTerminalLifecycle) {
