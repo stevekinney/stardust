@@ -61,6 +61,14 @@ export interface SandboxEphemeralSandbox {
 	terminate(): Promise<void>;
 }
 
+/** Information about a sandbox subprocess that has been spawned. */
+export interface SandboxCommandStartInfo {
+	/** Internal UUID assigned to this command invocation. */
+	id: string;
+	/** OS process id of the spawned subprocess, if available. */
+	pid: number | undefined;
+}
+
 /** Options for running a sandbox command. */
 export interface SandboxRunCommandOptions {
 	/**
@@ -71,6 +79,12 @@ export interface SandboxRunCommandOptions {
 	 * Temporal Activity cancellation without tearing down the whole session.
 	 */
 	signal?: AbortSignal;
+	/**
+	 * Called once the subprocess has been spawned, before it exits. Use this to start
+	 * a heartbeat loop keyed on the command id and pid, so that the caller can detect
+	 * and cancel the command even if it runs for a long time.
+	 */
+	onStart?: (info: SandboxCommandStartInfo) => void;
 }
 
 export interface SandboxProvider {
