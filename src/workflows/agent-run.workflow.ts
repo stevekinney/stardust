@@ -564,9 +564,9 @@ async function handleToolCall(
  * waits durably for approval, executes tools, publishes stream events, persists
  * canonical transcript events, and produces memory candidates.
  *
- * Streaming decision: the model-runner awaits the full response then emits one
- * coalesced delta rather than streaming tokens as they arrive. Real streaming
- * is tracked separately as a fast-follow.
+ * Streaming: the model-runner uses the Anthropic streaming API to publish token
+ * deltas to stream_events while the provider stream is active, before the final
+ * structured result is returned to the workflow.
  */
 export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunResult> {
 	const budget = input.budget ?? DEFAULT_RUN_BUDGET;
