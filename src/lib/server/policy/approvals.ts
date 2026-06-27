@@ -103,7 +103,8 @@ function toCardState(row: ApprovalRequestRow): ApprovalCardState {
 				requiresApproval: true,
 				taskQueue: TASK_QUEUE_SANDBOX,
 				timeoutMs: 0,
-				retry: { maximumAttempts: 1 }
+				retry: { maximumAttempts: 1 },
+				idempotencyBehavior: 'key-required'
 			}
 		},
 		policyVersion: row.policyVersion,

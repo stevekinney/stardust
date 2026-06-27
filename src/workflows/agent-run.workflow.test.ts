@@ -39,7 +39,8 @@ const riskyTool: ToolManifestEntry = {
 		requiresApproval: true,
 		taskQueue: TASK_QUEUE_SANDBOX,
 		timeoutMs: 15_000,
-		retry: { maximumAttempts: 1 }
+		retry: { maximumAttempts: 1 },
+		idempotencyBehavior: 'key-required'
 	}
 };
 
@@ -616,7 +617,8 @@ describe('agentRunWorkflow budget caps', () => {
 			requiresApproval: false,
 			taskQueue: TASK_QUEUE_SANDBOX,
 			timeoutMs: 5_000,
-			retry: { maximumAttempts: 1 }
+			retry: { maximumAttempts: 1 },
+			idempotencyBehavior: 'safe'
 		}
 	};
 
