@@ -2,6 +2,8 @@ import type {
 	AgentRunInput,
 	AgentRunResult,
 	ApprovalCardState,
+	ApprovalResolution,
+	ApprovalResolutionInput,
 	InterruptRunInput,
 	InterruptRunResult,
 	SessionMemorySnapshot,
@@ -20,9 +22,11 @@ import {
 	executeChild,
 	getExternalWorkflowHandle,
 	isCancellation,
+	proxyActivities,
 	setHandler,
 	workflowInfo
 } from '@temporalio/workflow';
+import { ApplicationFailure } from '@temporalio/common';
 import { steeringSignal } from './approval-contracts';
 import { agentRunWorkflow } from './agent-run.workflow';
 import {
@@ -33,10 +37,30 @@ import {
 	getSandboxSnapshotQuery,
 	getSessionStateQuery,
 	interruptRunUpdate,
+	resolveApprovalUpdate,
 	streamDisconnectedSignal,
 	submitSteeringUpdate,
 	submitTurnUpdate
 } from './session-contracts';
+
+// ── Activity proxies ───────────────────────────────────────────────────────────
+
+// Inline string to avoid importing a runtime value from @src/lib/types across
+// the workflow sandbox boundary. Matches TASK_QUEUE_TOOLS ('tools-general').
+const TASK_QUEUE_TOOLS = 'tools-general';
+
+type ForwardApprovalActivities = {
+	forwardApprovalToRun(input: {
+		runId: string;
+		resolution: ApprovalResolutionInput;
+	}): Promise<ApprovalResolution>;
+};
+
+const forwardApprovalActivities = proxyActivities<ForwardApprovalActivities>({
+	taskQueue: TASK_QUEUE_TOOLS,
+	startToCloseTimeout: '30 seconds',
+	retry: { maximumAttempts: 1 }
+});
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -174,6 +198,23 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 		}
 		return { interrupted: true };
 	});
+
+	void setHandler(
+		resolveApprovalUpdate,
+		async (resolution: ApprovalResolutionInput): Promise<ApprovalResolution> => {
+			if (!activeRunId) {
+				throw ApplicationFailure.nonRetryable('No active run to forward approval resolution to');
+			}
+			// Route the resolution through the tools-worker activity, which uses the
+			// Temporal client to call resolveApprovalUpdate on the active run.
+			// getExternalWorkflowHandle supports only signal/cancel, not executeUpdate,
+			// so the activity bridge is necessary.
+			return forwardApprovalActivities.forwardApprovalToRun({
+				runId: activeRunId,
+				resolution
+			});
+		}
+	);
 
 	// ── Signal handlers ──────────────────────────────────────────────────────
 
