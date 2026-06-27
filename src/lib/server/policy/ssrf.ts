@@ -19,18 +19,46 @@ function isPrivateIpv4(hostname: string): boolean {
 	if (a === 10) return true;
 	if (a === 127) return true;
 	if (a === 169 && b === 254) return true;
-	if (a === 172 && b >= 16 && b <= 31) return true;
+	if (a === 172 && b !== undefined && b >= 16 && b <= 31) return true;
 	if (a === 192 && b === 168) return true;
 	return false;
 }
 
+/**
+ * Extracts the embedded IPv4 address from an IPv6-mapped IPv4 address in the
+ * form `::ffff:hhhh:hhhh`, which is what the WHATWG URL parser always produces.
+ * Returns the dotted-quad string, or null if the address is not IPv4-mapped.
+ */
+function extractIpv4FromIpv6Mapped(normalized: string): string | null {
+	// WHATWG URL serializer always emits hex groups — never mixed dotted-quad notation.
+	const match = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(normalized);
+	if (!match) return null;
+	const high = parseInt(match[1]!, 16);
+	const low = parseInt(match[2]!, 16);
+	return `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
+}
+
 function isBlockedHostname(hostname: string): boolean {
-	const normalized = hostname.toLowerCase();
+	// `new URL(...).hostname` wraps IPv6 addresses in brackets (e.g. "[::1]").
+	// Strip them so net.isIP() can recognise the address correctly.
+	const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+
 	if (normalized === 'localhost') return true;
 	if (normalized === METADATA_HOST) return true;
+
 	if (net.isIP(normalized) === 6) {
-		return normalized === '::1' || normalized.startsWith('fc') || normalized.startsWith('fd');
+		// Loopback (::1)
+		if (normalized === '::1') return true;
+		// Unique-local fc00::/7 (fc and fd prefixes, RFC 4193)
+		if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+		// Link-local fe80::/10 (fe80 through febf, RFC 4291)
+		if (/^fe[89ab][0-9a-f]/i.test(normalized)) return true;
+		// IPv4-mapped (::ffff:x.x.x.x) — check the embedded address against private ranges
+		const embeddedIpv4 = extractIpv4FromIpv6Mapped(normalized);
+		if (embeddedIpv4 !== null && isPrivateIpv4(embeddedIpv4)) return true;
+		return false;
 	}
+
 	return isPrivateIpv4(normalized);
 }
 

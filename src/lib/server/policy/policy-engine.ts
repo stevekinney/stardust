@@ -6,6 +6,7 @@ import type {
 	ToolMetadata,
 	ToolPolicyDecision
 } from '@src/lib/types';
+import { detectPromptInjection } from './prompt-injection';
 import { POLICY_VERSION, riskRequiresApproval } from './risk';
 
 const MAX_INLINE_OUTPUT_CHARACTERS = 8_000;
@@ -45,6 +46,12 @@ export function validateToolCall(tools: RegisteredTool[], call: ToolCallInput): 
 			status: 'denied',
 			reason: `Malformed arguments for ${call.name}: ${parsed.error.issues[0]?.message ?? 'invalid input'}`
 		};
+	}
+
+	// Stage 2: reject prompt-injection-shaped calls before the approval/allowed branch.
+	const injectionReason = detectPromptInjection(call);
+	if (injectionReason !== null) {
+		return { status: 'denied', reason: injectionReason };
 	}
 
 	if (tool.metadata.requiresApproval || riskRequiresApproval(tool.metadata.risk)) {
