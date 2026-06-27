@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execSync } from 'node:child_process';
 import {
 	TASK_QUEUE_MEMORY,
 	TASK_QUEUE_ORCHESTRATOR,
@@ -34,6 +35,7 @@ describe('tool registry', () => {
 			'delegate.code',
 			'delegate.critic',
 			'delegate.research',
+			'memory.search',
 			'memory.writeCandidate',
 			'process.kill',
 			'process.start',
@@ -42,6 +44,7 @@ describe('tool registry', () => {
 			'web.fetch',
 			'workspace.applyPatch',
 			'workspace.readFile',
+			'workspace.searchFiles',
 			'workspace.writeFile'
 		]);
 		expect(manifest.find((tool) => tool.name === 'shell.exec')?.metadata).toMatchObject({
@@ -53,6 +56,22 @@ describe('tool registry', () => {
 			risk: 'low',
 			requiresApproval: false,
 			taskQueue: TASK_QUEUE_TOOLS
+		});
+	});
+
+	it('assigns high risk to workspace.writeFile and workspace.applyPatch per the MVP spec', () => {
+		const manifest = getToolManifest();
+		const toolsByName = new Map(manifest.map((tool) => [tool.name, tool]));
+
+		expect(toolsByName.get('workspace.writeFile')?.metadata).toMatchObject({
+			risk: 'high',
+			requiresApproval: true,
+			taskQueue: TASK_QUEUE_SANDBOX
+		});
+		expect(toolsByName.get('workspace.applyPatch')?.metadata).toMatchObject({
+			risk: 'high',
+			requiresApproval: true,
+			taskQueue: TASK_QUEUE_SANDBOX
 		});
 	});
 
@@ -74,9 +93,10 @@ describe('tool registry', () => {
 				})
 			})
 		});
+		// process.kill is Medium per the MVP spec (not High)
 		expect(toolsByName.get('process.kill')).toMatchObject({
 			metadata: {
-				risk: 'high',
+				risk: 'medium',
 				requiresApproval: true,
 				taskQueue: TASK_QUEUE_SANDBOX,
 				timeoutMs: 10_000,
@@ -112,6 +132,50 @@ describe('tool registry', () => {
 				},
 				inputSchema: expect.objectContaining({ type: 'object' })
 			});
+		}
+	});
+
+	it('exposes memory.search and workspace.searchFiles with low risk', () => {
+		const toolsByName = new Map(getToolManifest().map((tool) => [tool.name, tool]));
+
+		expect(toolsByName.get('memory.search')).toMatchObject({
+			metadata: {
+				risk: 'low',
+				requiresApproval: false,
+				taskQueue: TASK_QUEUE_TOOLS,
+				idempotencyBehavior: 'safe'
+			},
+			inputSchema: expect.objectContaining({
+				type: 'object',
+				properties: expect.objectContaining({
+					query: expect.any(Object),
+					sessionId: expect.any(Object)
+				})
+			})
+		});
+
+		expect(toolsByName.get('workspace.searchFiles')).toMatchObject({
+			metadata: {
+				risk: 'low',
+				requiresApproval: false,
+				taskQueue: TASK_QUEUE_TOOLS,
+				idempotencyBehavior: 'safe'
+			},
+			inputSchema: expect.objectContaining({
+				type: 'object',
+				properties: expect.objectContaining({
+					pattern: expect.any(Object)
+				})
+			})
+		});
+	});
+
+	it('carries idempotencyBehavior on every registered tool', () => {
+		for (const tool of registeredTools) {
+			expect(
+				tool.metadata.idempotencyBehavior,
+				`${tool.name} is missing idempotencyBehavior`
+			).toMatch(/^(safe|key-required|unsafe)$/);
 		}
 	});
 
@@ -199,6 +263,77 @@ describe('tool registry', () => {
 		});
 		expect(approved.outcome).toBe('success');
 		await expect(readFile(join(workspacePath, 'notes/hello.txt'), 'utf8')).resolves.toBe('hello');
+	});
+
+	it('applies a real unified diff patch to an existing workspace file', async () => {
+		// Write the original file
+		const originalContent = 'line one\nline two\nline three\n';
+		const targetContent = 'line one\nline TWO\nline three\n';
+		const filePath = join(workspacePath, 'patch-target.txt');
+		await writeFile(filePath, originalContent, 'utf8');
+
+		// Generate a valid unified diff from the two versions using `diff -u`
+		const patchContent = (() => {
+			try {
+				execSync(`diff -u "${filePath}" -`, {
+					input: targetContent,
+					stdio: ['pipe', 'pipe', 'pipe']
+				});
+				return ''; // diff exit 0 means identical — should not happen
+			} catch (err: unknown) {
+				// diff exits 1 when files differ — that is the expected case
+				const spawnErr = err as { stdout?: Buffer | string };
+				return String(spawnErr.stdout ?? '');
+			}
+		})();
+
+		expect(patchContent).toContain('line two');
+		expect(patchContent).toContain('line TWO');
+
+		// workspace.applyPatch requires approval
+		const waiting = await executeRegisteredTool({
+			workspacePath,
+			call: {
+				id: 'call-patch-01',
+				name: 'workspace.applyPatch',
+				arguments: { path: 'patch-target.txt', patch: patchContent }
+			}
+		});
+		expect(waiting.outcome).toBe('approval_required');
+
+		// After approval the patch is applied
+		const result = await executeRegisteredTool({
+			workspacePath,
+			approved: true,
+			call: {
+				id: 'call-patch-01',
+				name: 'workspace.applyPatch',
+				arguments: { path: 'patch-target.txt', patch: patchContent }
+			}
+		});
+		expect(result.outcome).toBe('success');
+
+		const patched = await readFile(filePath, 'utf8');
+		expect(patched).toBe(targetContent);
+	});
+
+	it('returns an error outcome when the patch does not apply cleanly', async () => {
+		const filePath = join(workspacePath, 'bad-patch.txt');
+		await writeFile(filePath, 'alpha\nbeta\ngamma\n', 'utf8');
+
+		// A patch referencing lines that do not exist in the file
+		const badPatch = `--- a/bad-patch.txt\n+++ b/bad-patch.txt\n@@ -1,3 +1,3 @@\n nonexistent\n-line\n+replacement\n`;
+
+		const result = await executeRegisteredTool({
+			workspacePath,
+			approved: true,
+			call: {
+				id: 'call-patch-02',
+				name: 'workspace.applyPatch',
+				arguments: { path: 'bad-patch.txt', patch: badPatch }
+			}
+		});
+		expect(result.outcome).toBe('error');
 	});
 
 	it('routes process and snapshot tools through approval policy', async () => {

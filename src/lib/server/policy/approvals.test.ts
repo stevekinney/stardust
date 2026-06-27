@@ -21,7 +21,8 @@ const tool: ToolManifestEntry = {
 		requiresApproval: true,
 		taskQueue: TASK_QUEUE_SANDBOX,
 		timeoutMs: 15_000,
-		retry: { maximumAttempts: 1 }
+		retry: { maximumAttempts: 1 },
+		idempotencyBehavior: 'key-required'
 	}
 };
 

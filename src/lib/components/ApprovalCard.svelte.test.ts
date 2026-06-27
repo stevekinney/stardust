@@ -25,7 +25,8 @@ const approval: ApprovalCardState = {
 			requiresApproval: true,
 			taskQueue: TASK_QUEUE_SANDBOX,
 			timeoutMs: 15_000,
-			retry: { maximumAttempts: 1 }
+			retry: { maximumAttempts: 1 },
+			idempotencyBehavior: 'key-required'
 		}
 	},
 	policyVersion: '2026-06-26',

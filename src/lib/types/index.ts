@@ -252,6 +252,14 @@ export type ModelCallResult = {
 
 export type ToolRiskLevel = 'low' | 'medium' | 'high';
 
+/**
+ * Describes how an idempotency key should be used when retrying this tool:
+ * - `'safe'`: Tool is read-only; replaying without a key is safe.
+ * - `'key-required'`: Tool has side effects that must be deduplicated; an idempotency key is required for safe retry.
+ * - `'unsafe'`: Tool has state-dependent side effects that cannot be safely deduplicated even with a key.
+ */
+export type IdempotencyBehavior = 'safe' | 'key-required' | 'unsafe';
+
 export type ToolMetadata = {
 	risk: ToolRiskLevel;
 	requiresApproval: boolean;
@@ -260,6 +268,8 @@ export type ToolMetadata = {
 	retry: {
 		maximumAttempts: number;
 	};
+	/** Describes how this tool interacts with Temporal's idempotency ledger on retry. */
+	idempotencyBehavior: IdempotencyBehavior;
 };
 
 export type ToolManifestEntry = {

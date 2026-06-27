@@ -32,7 +32,6 @@ import type { DatabaseClient } from '../db/client';
 import { toolInvocations } from '../db/schema';
 import { executeWithIdempotency } from '../observability/idempotency';
 import {
-	assertSideEffectAllowed,
 	fenceUntrustedOutput,
 	filterToolManifest,
 	truncateToolOutput,
@@ -62,8 +61,24 @@ const writeFileInput = pathInput.extend({
 	content: z.string()
 });
 
+/**
+ * Input for `workspace.applyPatch`. The `patch` field must be a valid unified diff
+ * (output of `diff -u` or `git diff`). The `path` field is the workspace-relative
+ * target file path. The patch is applied with the system `patch` command.
+ */
 const applyPatchInput = pathInput.extend({
-	content: z.string()
+	patch: z.string().min(1)
+});
+
+const searchFilesInput = z.object({
+	pattern: z.string().min(1),
+	path: z.string().optional()
+});
+
+const memorySearchInput = z.object({
+	query: z.string().min(1),
+	sessionId: z.string().min(1),
+	limit: z.number().int().positive().max(20).default(10)
 });
 
 const shellExecInput = z.object({
@@ -101,6 +116,7 @@ const delegateInput = z.object({
 	maxTokens: z.number().int().positive().max(8_000).optional()
 });
 
+/** Build a `RegisteredTool` record backed by an armorer definition. */
 function defineStardustTool(input: {
 	name: string;
 	description: string;
@@ -145,7 +161,8 @@ function defineCoreTools(): RegisteredTool[] {
 		}),
 		defineStardustTool({
 			name: 'workspace.applyPatch',
-			description: 'Replace a workspace file with patched content.',
+			description:
+				'Apply a unified diff patch (from `diff -u` or `git diff`) to a file in the current workspace. Requires approval because it modifies files.',
 			schema: applyPatchInput,
 			metadata: MUTATING_WORKSPACE_TOOL
 		}),
@@ -164,6 +181,18 @@ function defineExtendedTools(): RegisteredTool[] {
 			name: 'web.search',
 			description: 'Search the web with Tavily.',
 			schema: webSearchInput,
+			metadata: LOW_RISK_TOOL
+		}),
+		defineStardustTool({
+			name: 'workspace.searchFiles',
+			description: 'Search for files matching a glob pattern in the current workspace.',
+			schema: searchFilesInput,
+			metadata: LOW_RISK_TOOL
+		}),
+		defineStardustTool({
+			name: 'memory.search',
+			description: 'Search session memory using FTS5 lexical retrieval.',
+			schema: memorySearchInput,
 			metadata: LOW_RISK_TOOL
 		}),
 		defineStardustTool({
@@ -286,6 +315,46 @@ async function runShell(input: z.infer<typeof shellExecInput>, workspacePath?: s
 	);
 }
 
+/**
+ * Apply a unified diff patch to a file using the system `patch` command.
+ * The target file path is provided explicitly so the diff headers are ignored.
+ * Throws if the patch command exits non-zero (patch failed or produced a `.rej` file).
+ */
+async function applyUnifiedPatch(targetPath: string, patchContent: string): Promise<void> {
+	return new Promise((resolvePromise, rejectPromise) => {
+		// --no-backup-if-mismatch: do not create .orig backups on success
+		// --reject-file=-: write reject hunks to /dev/stderr instead of a .rej file
+		const child = spawn('patch', ['--no-backup-if-mismatch', '--reject-file=-', targetPath], {
+			stdio: ['pipe', 'pipe', 'pipe']
+		});
+
+		let stdout = '';
+		let stderr = '';
+
+		child.stdout.on('data', (chunk) => {
+			stdout += String(chunk);
+		});
+		child.stderr.on('data', (chunk) => {
+			stderr += String(chunk);
+		});
+
+		child.stdin.write(patchContent, 'utf8');
+		child.stdin.end();
+
+		child.on('close', (exitCode) => {
+			if (exitCode === 0) {
+				resolvePromise();
+			} else {
+				rejectPromise(new Error(`patch failed (exit ${exitCode}): ${stderr || stdout}`.trimEnd()));
+			}
+		});
+
+		child.on('error', (err) => {
+			rejectPromise(new Error(`Failed to spawn patch: ${err.message}`));
+		});
+	});
+}
+
 function buildToolStubResult(toolName: string, argumentsValue: unknown) {
 	return {
 		status: 'registered',
@@ -321,14 +390,6 @@ export async function executeRegisteredTool(input: {
 			content: { policyVersion: decision.policyVersion, metadata: decision.tool.metadata }
 		};
 	}
-	if (assertSideEffectAllowed(decision.tool.metadata) === 'approval_required' && !input.approved) {
-		return {
-			callId: input.call.id,
-			toolName: input.call.name,
-			outcome: 'approval_required',
-			content: { policyVersion: '2026-06-26', metadata: decision.tool.metadata }
-		};
-	}
 
 	async function executeAllowedTool(): Promise<ToolExecutionResult> {
 		let content: unknown;
@@ -356,8 +417,9 @@ export async function executeRegisteredTool(input: {
 				const args = applyPatchInput.parse(input.call.arguments);
 				const targetPath = resolveWorkspacePath(input.workspacePath, args.path);
 				await mkdir(dirname(targetPath), { recursive: true });
-				await writeFile(targetPath, args.content, 'utf8');
-				content = { path: args.path, bytes: Buffer.byteLength(args.content) };
+				await applyUnifiedPatch(targetPath, args.patch);
+				const patched = await readFile(targetPath, 'utf8');
+				content = { path: args.path, bytes: Buffer.byteLength(patched) };
 				break;
 			}
 			case 'shell.exec':
@@ -365,6 +427,18 @@ export async function executeRegisteredTool(input: {
 				break;
 			case 'web.search':
 				content = buildToolStubResult(input.call.name, webSearchInput.parse(input.call.arguments));
+				break;
+			case 'workspace.searchFiles':
+				content = buildToolStubResult(
+					input.call.name,
+					searchFilesInput.parse(input.call.arguments)
+				);
+				break;
+			case 'memory.search':
+				content = buildToolStubResult(
+					input.call.name,
+					memorySearchInput.parse(input.call.arguments)
+				);
 				break;
 			case 'process.start':
 				content = buildToolStubResult(
