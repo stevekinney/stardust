@@ -234,7 +234,9 @@ describe('agentRunWorkflow approvals', () => {
 
 		async recordSubagentStarted() {},
 		async recordSubagentCompleted() {},
-		async writeMemoryCandidate() {},
+		async writeMemoryCandidate(input: { layer: 'session' | 'durable' | 'action_sensitive' }) {
+			return { id: `${input.layer}-candidate` };
+		},
 		async searchMemory(): Promise<[]> {
 			return [];
 		}
@@ -429,6 +431,42 @@ describe('agentRunWorkflow approvals', () => {
 		});
 	});
 
+	it('emits an action_sensitive candidate when a tool is approved with remember: true', async () => {
+		await runWithWorkers(async () => {
+			const runId = `approval-remember-${Date.now()}`;
+			const handle = await env.client.workflow.start('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [
+					{
+						sessionKey: 'session-001',
+						runId,
+						message: 'write the file',
+						approvalTtlMs: 60_000
+					}
+				]
+			});
+
+			const approvalId = `${runId}:tool-call-001:approval`;
+			for (let i = 0; i < 10; i++) {
+				const state = await handle.query(getAgentRunStateQuery);
+				if (state.pendingApproval?.approvalId === approvalId) break;
+				await env.sleep(100);
+			}
+
+			await handle.executeUpdate(resolveApprovalUpdate, {
+				args: [{ approvalId, action: 'approve', remember: true }]
+			});
+			const result = await handle.result();
+
+			expect(result.status).toBe('complete');
+			// action_sensitive candidate written via the remember=true approval path.
+			expect(result.memoryRefs).toContain('action_sensitive-candidate');
+			// session summary candidate always written at end of run.
+			expect(result.memoryRefs).toContain('session-candidate');
+		});
+	});
+
 	it('forwards resolved model, default budget, and accumulated usage to observability activities', async () => {
 		// Regression guard for task 7c867cdf: the workflow must pass model/budget
 		// to recordRunStarted and grand-total usage to recordRunCompleted. Reverting
@@ -475,6 +513,187 @@ describe('agentRunWorkflow approvals', () => {
 			expect(activityState.completedRuns).toHaveLength(1);
 			expect(activityState.completedRuns[0].usage).toEqual(MOCK_MODEL_USAGE);
 		});
+	});
+});
+
+// ── Memory writeback suite ────────────────────────────────────────────────────
+
+/**
+ * Tests that:
+ * 1. The workflow returns the actual candidate id from `writeMemoryCandidate` in
+ *    `result.memoryRefs`, not a fabricated string.
+ * 2. When `writeMemoryCandidate` fails, `result.memoryWriteErrors` is non-empty
+ *    and `result.memoryRefs` does not contain any fabricated refs.
+ */
+describe('agentRunWorkflow memory writeback', () => {
+	let env: TestWorkflowEnvironment;
+
+	beforeAll(async () => {
+		env = await TestWorkflowEnvironment.createTimeSkipping();
+	});
+
+	afterAll(async () => {
+		await env.teardown();
+	});
+
+	/**
+	 * Runs the workflow with the given activities and returns the result.
+	 * Uses a simple callModel that returns a final answer immediately (no tools).
+	 */
+	async function runMemoryTest(activities: {
+		callModel(input: ModelCallInput): Promise<ModelCallResult>;
+		evaluateToolCallPolicy(input: { call: ToolCallInput }): Promise<ToolPolicyDecision>;
+		recordApprovalRequest(input: RecordApprovalRequestInput): Promise<ApprovalCardState>;
+		recordApprovalResolution(input: RecordApprovalResolutionInput): Promise<ApprovalResolution>;
+		executeTool(input: ToolExecutionInput & { approved?: boolean }): Promise<ToolExecutionResult>;
+		persistToolResult(): Promise<void>;
+		recordRunStarted(): Promise<void>;
+		recordRunCompleted(): Promise<void>;
+		recordSubagentStarted(): Promise<void>;
+		recordSubagentCompleted(): Promise<void>;
+		writeMemoryCandidate(input: {
+			sessionId: string;
+			runId: string;
+			layer: 'session' | 'durable' | 'action_sensitive';
+			content: string;
+			tags?: string[];
+			reason?: string | null;
+		}): Promise<{ id: string }>;
+		searchMemory(): Promise<[]>;
+	}): Promise<AgentRunResult> {
+		const runId = `mem-test-${Date.now()}`;
+		const orchestrator = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_ORCHESTRATOR,
+			workflowsPath: fileURLToPath(new URL('./index.ts', import.meta.url))
+		});
+		const tools = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_TOOLS,
+			activities
+		});
+		const sandbox = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_SANDBOX,
+			activities
+		});
+		const model = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_MODEL,
+			activities
+		});
+		const memory = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_MEMORY,
+			activities
+		});
+
+		const task = orchestrator.runUntil(
+			env.client.workflow
+				.start('agentRunWorkflow', {
+					taskQueue: TASK_QUEUE_ORCHESTRATOR,
+					workflowId: `agent-run:${runId}`,
+					args: [{ sessionKey: 'mem-session', runId, message: 'hello' }]
+				})
+				.then((handle) => handle.result())
+		);
+		const [result] = await Promise.all([
+			task,
+			tools.runUntil(task.catch(() => undefined)),
+			sandbox.runUntil(task.catch(() => undefined)),
+			model.runUntil(task.catch(() => undefined)),
+			memory.runUntil(task.catch(() => undefined))
+		]);
+		return result;
+	}
+
+	/** Base activities — simple final answer, no tools. */
+	function buildBaseActivities(): Parameters<typeof runMemoryTest>[0] {
+		return {
+			async callModel(input: ModelCallInput): Promise<ModelCallResult> {
+				return {
+					runId: input.runId,
+					model: input.model ?? 'test-model',
+					message: { text: 'Hello from the model.', toolCalls: [] },
+					usage: { inputTokens: 10, outputTokens: 5, estimatedCostUsd: 0.0001 }
+				};
+			},
+			async evaluateToolCallPolicy(): Promise<ToolPolicyDecision> {
+				return {
+					status: 'allowed',
+					tool: {
+						name: 'noop',
+						description: '',
+						inputSchema: {},
+						metadata: {
+							risk: 'low',
+							requiresApproval: false,
+							taskQueue: TASK_QUEUE_SANDBOX,
+							timeoutMs: 5000,
+							retry: { maximumAttempts: 1 },
+							idempotencyBehavior: 'safe'
+						}
+					}
+				};
+			},
+			async recordApprovalRequest(): Promise<ApprovalCardState> {
+				throw ApplicationFailure.nonRetryable('Should not be called in memory writeback test');
+			},
+			async recordApprovalResolution(): Promise<ApprovalResolution> {
+				throw ApplicationFailure.nonRetryable('Should not be called in memory writeback test');
+			},
+			async executeTool(
+				input: ToolExecutionInput & { approved?: boolean }
+			): Promise<ToolExecutionResult> {
+				return {
+					callId: input.call.id,
+					toolName: input.call.name,
+					outcome: 'success',
+					content: {}
+				};
+			},
+			async persistToolResult(): Promise<void> {},
+			async recordRunStarted(): Promise<void> {},
+			async recordRunCompleted(): Promise<void> {},
+			async recordSubagentStarted(): Promise<void> {},
+			async recordSubagentCompleted(): Promise<void> {},
+			async writeMemoryCandidate() {
+				return { id: 'expected-candidate-id' };
+			},
+			async searchMemory(): Promise<[]> {
+				return [];
+			}
+		};
+	}
+
+	it('returns the actual candidate id from writeMemoryCandidate in memoryRefs', async () => {
+		const result = await runMemoryTest(buildBaseActivities());
+
+		expect(result.status).toBe('complete');
+		expect(result.memoryRefs).toContain('expected-candidate-id');
+	});
+
+	it('records write failures in memoryWriteErrors and omits fake refs when writeMemoryCandidate rejects', async () => {
+		const failingActivities = {
+			...buildBaseActivities(),
+			async writeMemoryCandidate(): Promise<{ id: string }> {
+				throw ApplicationFailure.nonRetryable('simulated write failure');
+			}
+		};
+
+		const result = await runMemoryTest(failingActivities);
+
+		expect(result.status).toBe('complete');
+		// No fake ref must appear — memoryRefs should be empty or absent.
+		expect((result.memoryRefs ?? []).length).toBe(0);
+		// The failure must be visible in memoryWriteErrors.
+		expect(result.memoryWriteErrors).toBeDefined();
+		expect(result.memoryWriteErrors!.length).toBeGreaterThan(0);
 	});
 });
 
@@ -618,7 +837,9 @@ describe('agentRunWorkflow steering', () => {
 		async recordRunCompleted(): Promise<void> {},
 		async recordSubagentStarted(): Promise<void> {},
 		async recordSubagentCompleted(): Promise<void> {},
-		async writeMemoryCandidate(): Promise<void> {}
+		async writeMemoryCandidate() {
+			return { id: 'mock-candidate-id' };
+		}
 	};
 
 	beforeAll(async () => {
@@ -960,7 +1181,9 @@ describe('agentRunWorkflow subagents', () => {
 			async recordRunCompleted() {},
 			async recordSubagentStarted() {},
 			async recordSubagentCompleted() {},
-			async writeMemoryCandidate() {},
+			async writeMemoryCandidate() {
+				return { id: 'mock-candidate-id' };
+			},
 			async searchMemory(): Promise<[]> {
 				return [];
 			}
@@ -1140,7 +1363,7 @@ describe('agentRunWorkflow budget caps', () => {
 		recordRunCompleted(): Promise<void>;
 		recordSubagentStarted(): Promise<void>;
 		recordSubagentCompleted(): Promise<void>;
-		writeMemoryCandidate(): Promise<void>;
+		writeMemoryCandidate(): Promise<{ id: string }>;
 		searchMemory(): Promise<[]>;
 	} {
 		return {
@@ -1169,7 +1392,9 @@ describe('agentRunWorkflow budget caps', () => {
 			async recordRunCompleted(): Promise<void> {},
 			async recordSubagentStarted(): Promise<void> {},
 			async recordSubagentCompleted(): Promise<void> {},
-			async writeMemoryCandidate(): Promise<void> {},
+			async writeMemoryCandidate() {
+				return { id: 'mock-candidate-id' };
+			},
 			async searchMemory(): Promise<[]> {
 				return [];
 			}

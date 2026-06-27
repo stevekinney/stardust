@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import type { DatabaseClient } from '../db';
-import { memoryNotes, streamEvents } from '../db';
+import { memoryNotes } from '../db';
+import { publishStreamEvent } from '../stream';
 
 export type MemoryLayer = 'session' | 'durable' | 'action_sensitive';
 
@@ -427,11 +428,12 @@ export class MemoryStore {
 			createdAt: input.createdAt ?? new Date().toISOString()
 		};
 
-		const sequence = await this.nextStreamSequence(input.runId);
-		await this.database.insert(streamEvents).values({
+		// Use the atomic stream-event publisher so that the sequence number
+		// is assigned inside a SQLite transaction, preventing collisions with
+		// concurrent stream events emitted for the same run.
+		await publishStreamEvent(this.database, {
 			runId: input.runId,
 			sessionId: input.sessionId,
-			sequence,
 			kind: 'memory.candidate',
 			payload: JSON.stringify(candidate),
 			createdAt: candidate.createdAt
@@ -452,14 +454,6 @@ export class MemoryStore {
 			createdAt: candidate.createdAt,
 			updatedAt: confirmedAt
 		});
-	}
-
-	private async nextStreamSequence(runId: string): Promise<number> {
-		const rows = await this.database
-			.select({ highestSequence: sql<number>`max(${streamEvents.sequence})` })
-			.from(streamEvents)
-			.where(eq(streamEvents.runId, runId));
-		return (rows[0]?.highestSequence ?? 0) + 1;
 	}
 
 	async compactSessionMemory(input: {

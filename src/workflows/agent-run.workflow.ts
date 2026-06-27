@@ -138,7 +138,7 @@ type MemoryActivities = {
 		content: string;
 		tags?: string[];
 		reason?: string | null;
-	}): Promise<unknown>;
+	}): Promise<{ id: string }>;
 	/**
 	 * Retrieves confirmed memory notes relevant to the given query using the
 	 * FTS5 + sqlite-vec reciprocal-rank-fusion path. Results include session
@@ -695,6 +695,15 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 	// compiler cannot always infer this across labelled-loop boundaries.
 	let finalAnswer!: string;
 
+	/** Candidate IDs written by this run; accumulated across tool approvals and the end-of-run summary. */
+	const memoryCandidateIds: string[] = [];
+	/**
+	 * Errors from failed writeMemoryCandidate calls. Non-empty entries mean one
+	 * or more candidates were not persisted; surfaces failures in the run result
+	 * instead of swallowing them.
+	 */
+	const memoryWriteErrors: string[] = [];
+
 	outer: while (true) {
 		if (modelCallCount >= budget.maxModelCalls) {
 			finalAnswer = `Run stopped: model call budget exhausted (${budget.maxModelCalls} calls).`;
@@ -770,6 +779,10 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 			toolCallCount++;
 			actionsCount++;
 
+			// Reset before the call so that a non-null value after the call
+			// unambiguously came from THIS tool call's approval path (not a
+			// previous one that went through the 'allowed' fast path).
+			recordedApprovalResolution = null;
 			const outcome = await handleToolCall(input, toolCall, approvalState);
 
 			if (outcome.kind === 'terminal') {
@@ -783,6 +796,31 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 					},
 					totalUsage
 				);
+			}
+
+			// Write an action-sensitive candidate when the user approved a tool
+			// call and opted to have the decision remembered. Re-read through the
+			// getter because TypeScript's control flow analysis doesn't track
+			// mutations made through async closures (the setter inside handleToolCall).
+			const postCallResolution = approvalState.recordedApprovalResolution;
+			if (postCallResolution?.remember) {
+				const actionCandidate = await memoryActivities
+					.writeMemoryCandidate({
+						sessionId: input.sessionKey,
+						runId: input.runId,
+						layer: 'action_sensitive',
+						content: `Approved tool call: ${toolCall.name}(${JSON.stringify(postCallResolution.canonicalArguments)})`,
+						tags: ['tool-approval', toolCall.name],
+						reason: `User approved ${toolCall.name} with remember=true`
+					})
+					.catch(() => null);
+				if (actionCandidate) {
+					memoryCandidateIds.push(actionCandidate.id);
+				} else {
+					memoryWriteErrors.push(
+						`Failed to write action_sensitive candidate for tool call: ${toolCall.name}`
+					);
+				}
 			}
 
 			await observabilityActivities.persistToolResult({
@@ -811,10 +849,10 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 	}
 
 	// ── Session memory candidate ──────────────────────────────────────────────
-	// Construct a deterministic ref for this run's memory candidate. The write is
-	// non-fatal: if it fails the ref is still returned so the session can track it.
-	const memoryRef = `${input.sessionKey}:run:${input.runId}`;
-	await memoryActivities
+	// Write a session-layer summary candidate for this run. The returned candidate
+	// id is the authoritative ref; we do NOT fabricate a ref string. If the write
+	// fails the error is recorded in memoryWriteErrors so callers can observe it.
+	const sessionCandidate = await memoryActivities
 		.writeMemoryCandidate({
 			sessionId: input.sessionKey,
 			runId: input.runId,
@@ -823,7 +861,12 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 			tags: ['run-summary'],
 			reason: 'Auto-generated run summary candidate'
 		})
-		.catch(() => undefined);
+		.catch(() => null);
+	if (sessionCandidate) {
+		memoryCandidateIds.push(sessionCandidate.id);
+	} else {
+		memoryWriteErrors.push('Failed to write session memory candidate');
+	}
 
 	// Compute grand total usage: parent model calls + reconciled subagent usage.
 	const grandTotalUsage = addUsage(
@@ -839,7 +882,8 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 			runId: input.runId,
 			status: 'complete',
 			finalAnswer,
-			memoryRefs: [memoryRef],
+			memoryRefs: memoryCandidateIds,
+			...(memoryWriteErrors.length > 0 ? { memoryWriteErrors } : {}),
 			...delegationResult
 		},
 		grandTotalUsage

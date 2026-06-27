@@ -65,6 +65,13 @@ export type AgentRunResult = {
 	 * accumulates these across runs and surfaces them via getMemorySnapshot.
 	 */
 	memoryRefs?: string[];
+	/**
+	 * Errors encountered while writing memory candidates for this run.
+	 * Non-empty when one or more `writeMemoryCandidate` activity calls failed.
+	 * Failures are surfaced here rather than swallowed so callers can observe
+	 * and act on them.
+	 */
+	memoryWriteErrors?: string[];
 };
 
 /** Input for the submitSteering session Update. */
