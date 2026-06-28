@@ -6,6 +6,10 @@
  * from `agentRunWorkflow` → `searchMemory` → `buildModelContext` was completed
  * in task 01cd080a; these tests prove the underlying data contract holds end-to-end.
  *
+ * The confirmed-note-surfaces-in-retrieval chain is complemented by
+ * context-builder.test.ts:216 ("includes confirmed memory notes in the system
+ * prompt with provenance"), which proves the downstream injection step.
+ *
  * We drive the real `MemoryStore` + `retrieveMemory` pipeline — the same code
  * path the `searchMemory` activity executes — against a fresh SQLite database
  * so results are deterministic without process isolation. The module-level
@@ -23,8 +27,6 @@ import { loadSqliteVecExtension } from '../lib/server/db/sqlite-vec';
 import * as schema from '../lib/server/db/schema';
 import { MemoryStore } from '../lib/server/memory/memory-store';
 import { retrieveMemory } from '../lib/server/memory/retrieval';
-import { projectMemoryNotesToMarkdown } from '../lib/server/memory/markdown-projection';
-import type { MemoryNote, MemorySearchResult } from '../lib/server/memory/memory-store';
 
 let testDbDir: string;
 let sqlite: Database.Database;
@@ -172,101 +174,5 @@ describe('searchMemory end-to-end pipeline', () => {
 		});
 
 		expect(searchResults.map((r) => r.id)).not.toContain(result.candidateIds[0]);
-	});
-});
-
-// ── projectMemoryNotesToMarkdown ──────────────────────────────────────────────
-
-describe('projectMemoryNotesToMarkdown', () => {
-	it('returns an empty string when the notes array is empty', () => {
-		expect(projectMemoryNotesToMarkdown([])).toBe('');
-	});
-
-	it('formats a single confirmed note as a layer-prefixed markdown list item', () => {
-		const note: MemoryNote = {
-			id: 'note-001',
-			sessionId: 'session-fmt',
-			layer: 'durable',
-			content: 'User prefers concise responses.',
-			tags: [],
-			runId: null,
-			confirmedAt: '2026-06-27T00:00:00.000Z',
-			createdAt: '2026-06-27T00:00:00.000Z',
-			updatedAt: '2026-06-27T00:00:00.000Z'
-		};
-
-		expect(projectMemoryNotesToMarkdown([note])).toBe(
-			'- [durable] User prefers concise responses.'
-		);
-	});
-
-	it('includes tags when present', () => {
-		const note: MemoryNote = {
-			id: 'note-002',
-			sessionId: 'session-fmt',
-			layer: 'action_sensitive',
-			content: 'Do not send emails without confirmation.',
-			tags: ['email', 'approval'],
-			runId: null,
-			confirmedAt: '2026-06-27T00:00:00.000Z',
-			createdAt: '2026-06-27T00:00:00.000Z',
-			updatedAt: '2026-06-27T00:00:00.000Z'
-		};
-
-		expect(projectMemoryNotesToMarkdown([note])).toBe(
-			'- [action_sensitive] Do not send emails without confirmation. tags: email, approval'
-		);
-	});
-
-	it('formats multiple notes as separate lines', () => {
-		const notes: MemoryNote[] = [
-			{
-				id: 'note-003',
-				sessionId: 'session-fmt',
-				layer: 'session',
-				content: 'Current goal: deploy the demo.',
-				tags: [],
-				runId: null,
-				confirmedAt: '2026-06-27T00:00:00.000Z',
-				createdAt: '2026-06-27T00:00:00.000Z',
-				updatedAt: '2026-06-27T00:00:00.000Z'
-			},
-			{
-				id: 'note-004',
-				sessionId: 'session-fmt',
-				layer: 'durable',
-				content: 'Use Bun for all scripts.',
-				tags: ['tooling'],
-				runId: null,
-				confirmedAt: '2026-06-27T00:00:00.000Z',
-				createdAt: '2026-06-27T00:00:00.000Z',
-				updatedAt: '2026-06-27T00:00:00.000Z'
-			}
-		];
-
-		const result = projectMemoryNotesToMarkdown(notes);
-		expect(result).toBe(
-			'- [session] Current goal: deploy the demo.\n- [durable] Use Bun for all scripts. tags: tooling'
-		);
-	});
-
-	it('accepts MemorySearchResult (superset of MemoryNote)', () => {
-		const result: MemorySearchResult = {
-			id: 'note-005',
-			sessionId: 'session-fmt',
-			layer: 'durable',
-			content: 'Prefer detailed error messages.',
-			tags: ['ux'],
-			runId: null,
-			confirmedAt: '2026-06-27T00:00:00.000Z',
-			createdAt: '2026-06-27T00:00:00.000Z',
-			updatedAt: '2026-06-27T00:00:00.000Z',
-			lexicalRank: 1,
-			score: 0.5
-		};
-
-		expect(projectMemoryNotesToMarkdown([result])).toBe(
-			'- [durable] Prefer detailed error messages. tags: ux'
-		);
 	});
 });
