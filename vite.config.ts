@@ -54,6 +54,14 @@ export default defineConfig({
 				test: {
 					name: 'server',
 					environment: 'node',
+					// Temporal Worker.create() webpack-bundles TypeScript on each call, which
+					// can exceed Vitest 4.x defaults (5 000 ms test / 10 000 ms hook) under load
+					// (the client project starts Chromium with no fork cap).  replay-histories.test.ts
+					// calls Worker.create() inside beforeAll — the per-test 30_000 override there
+					// does not cover the hook.  60_000 matches the ceiling already established by
+					// the two explicit per-test overrides elsewhere in the suite.
+					testTimeout: 60_000,
+					hookTimeout: 60_000,
 					include: ['src/**/*.{test,spec}.{js,ts}'],
 					exclude: [
 						'src/**/*.svelte.{test,spec}.{js,ts}',
