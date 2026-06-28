@@ -467,6 +467,47 @@ describe('agentRunWorkflow approvals', () => {
 		});
 	});
 
+	it('emits an action_sensitive candidate when action is remember (tool is not executed)', async () => {
+		// Regression guard for task 4a9ded81: the 'remember' action sets
+		// terminalState='remembered', causing handleToolCall to return
+		// { kind: 'terminal' } and skipping the post-executed memory write.
+		// The fix moves the remember check above the terminal early-return so the
+		// action_sensitive candidate is always written when remember===true.
+		await runWithWorkers(async () => {
+			const runId = `approval-remember-action-${Date.now()}`;
+			const handle = await env.client.workflow.start('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [
+					{
+						sessionKey: 'session-001',
+						runId,
+						message: 'write the file',
+						approvalTtlMs: 60_000
+					}
+				]
+			});
+
+			const approvalId = `${runId}:tool-call-001:approval`;
+			for (let i = 0; i < 10; i++) {
+				const state = await handle.query(getAgentRunStateQuery);
+				if (state.pendingApproval?.approvalId === approvalId) break;
+				await env.sleep(100);
+			}
+
+			await handle.executeUpdate(resolveApprovalUpdate, {
+				args: [{ approvalId, action: 'remember' }]
+			});
+			const result = await handle.result();
+
+			// The 'remember' action does NOT execute the tool.
+			expect(activityState.executions).toHaveLength(0);
+			expect(result.status).toBe('complete');
+			// An action_sensitive candidate MUST be written even on the terminal path.
+			expect(result.memoryRefs).toContain('action_sensitive-candidate');
+		});
+	});
+
 	it('forwards resolved model, default budget, and accumulated usage to observability activities', async () => {
 		// Regression guard for task 7c867cdf: the workflow must pass model/budget
 		// to recordRunStarted and grand-total usage to recordRunCompleted. Reverting
