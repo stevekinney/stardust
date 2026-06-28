@@ -15,6 +15,7 @@ import {
 import { TASK_QUEUE_ORCHESTRATOR } from '../../src/lib/types';
 import * as schema from '../../src/lib/server/db/schema';
 import { readRunInspectorProjection } from '../../src/lib/server/observability/projection';
+import { getToolManifest } from '../../src/lib/server/tools/registry';
 
 const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
 const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE ?? 'default';
@@ -122,6 +123,18 @@ async function main() {
 		});
 		managedProcesses.push(firstWorker, secondWorker);
 
+		// Expose workspace.writeFile to the model so the model can call it and
+		// trigger the approval gate. The phantom `toolCalls` array that was here
+		// before had no effect — AgentRunInput has no such field. The correct
+		// approach is to pass the tool schema via `tools` so the real Anthropic
+		// API returns a tool_use block that the workflow actually processes.
+		const writeFileManifest = getToolManifest({ allowedToolNames: ['workspace.writeFile'] });
+		const tools = writeFileManifest.map((entry) => ({
+			identity: { name: entry.name },
+			display: { description: entry.description },
+			input: entry.inputSchema
+		}));
+
 		const client = new Client({ connection, namespace: TEMPORAL_NAMESPACE });
 		const handle = await client.workflow.start(agentRunWorkflow, {
 			workflowId: `agent-run:${runId}`,
@@ -131,9 +144,11 @@ async function main() {
 				{
 					sessionKey: sessionId,
 					runId,
-					message: 'Chaos recovery run',
+					message:
+						'Write a short note about chaos recovery to the file notes/recovered.txt in the workspace.',
 					workspacePath,
-					approvalTtlMs: 60_000
+					approvalTtlMs: 60_000,
+					tools
 				}
 			]
 		});
