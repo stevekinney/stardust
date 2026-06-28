@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { asc, desc, eq } from 'drizzle-orm';
 import type {
 	ApprovalAction,
@@ -14,6 +13,7 @@ import type { DatabaseClient } from '../db/client';
 import { approvalRequests, auditEvents, runs } from '../db/schema';
 import { appendTranscriptEvent, publishStreamEvent } from '../stream';
 import { registeredTools } from '../tools/registry';
+import { hashApprovalArguments } from './arguments-hash';
 
 /** Module-level lookup map so the linear scan runs once at startup, not per row. */
 const toolsByName = new Map<string, ToolManifestEntry>(
@@ -24,25 +24,6 @@ const toolsByName = new Map<string, ToolManifestEntry>(
 );
 
 type ApprovalRequestRow = typeof approvalRequests.$inferSelect;
-
-function stableStringify(value: unknown): string {
-	if (Array.isArray(value)) {
-		return `[${value.map((item) => stableStringify(item)).join(',')}]`;
-	}
-	if (value && typeof value === 'object') {
-		const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
-			left.localeCompare(right)
-		);
-		return `{${entries
-			.map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`)
-			.join(',')}}`;
-	}
-	return JSON.stringify(value);
-}
-
-export function hashApprovalArguments(argumentsValue: unknown): string {
-	return createHash('sha256').update(stableStringify(argumentsValue)).digest('hex');
-}
 
 function parseJson(value: string | null): unknown {
 	return value === null ? undefined : (JSON.parse(value) as unknown);

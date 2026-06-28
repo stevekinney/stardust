@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TASK_QUEUE_SANDBOX, TASK_QUEUE_TOOLS, type ToolManifestEntry } from '@src/lib/types';
 import * as schema from '../db/schema';
-import { ApprovalsRepository, hashApprovalArguments } from './approvals';
+import { ApprovalsRepository } from './approvals';
+import { hashApprovalArguments } from './arguments-hash';
 
 const TEST_DB_DIR = join(tmpdir(), 'stardust-t8-approvals-test');
 const TEST_DB_PATH = join(TEST_DB_DIR, 'test.db');
