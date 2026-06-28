@@ -287,14 +287,9 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 
 			// Check for Continue-As-New between runs, when the queue is empty.
 			// Never attempt CAN while more turns are queued — that would lose them.
-			// replay-tested: 2026-06-26
 			if (!cancelled && queue.length === 0) {
 				const info = workflowInfo();
 				if (info.continueAsNewSuggested || info.historyLength >= canThreshold) {
-					// Wait for any in-flight update handlers (e.g. submitSteering)
-					// to finish before handing off to the new execution.
-					await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
-
 					// Compact memory before crossing the CAN boundary so the next
 					// execution starts with a condensed ref set and advanced cursor.
 					// Deliberate failure policy: if compaction fails after all activity
@@ -313,6 +308,12 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 					});
 					memoryRefs = compactionResult.memoryRefs;
 					memoryCursor = compactionResult.transcriptCursor;
+
+					// Wait for any in-flight update handlers (e.g. submitSteering) that
+					// arrived during compaction to finish before handing off to the new
+					// execution. Placed after executeChild so compaction does not race
+					// with handlers that fire while it is awaited.
+					await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
 
 					await continueAsNew<typeof agentSessionWorkflow>({
 						sessionKey,
