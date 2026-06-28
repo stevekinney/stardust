@@ -789,23 +789,13 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 			recordedApprovalResolution = null;
 			const outcome = await handleToolCall(input, toolCall, approvalState);
 
-			if (outcome.kind === 'terminal') {
-				await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
-				return completeRun(
-					input,
-					{
-						runId: input.runId,
-						status: outcome.status,
-						finalAnswer: outcome.finalAnswer
-					},
-					totalUsage
-				);
-			}
-
-			// Write an action-sensitive candidate when the user approved a tool
-			// call and opted to have the decision remembered. Re-read through the
-			// getter because TypeScript's control flow analysis doesn't track
-			// mutations made through async closures (the setter inside handleToolCall).
+			// Write an action-sensitive candidate when the user opted to have the
+			// approval decision remembered (remember===true). This covers both the
+			// 'remember' action (terminalState='remembered', no execution) and the
+			// 'approve'/'approve_with_edits' + remember:true case (executed path).
+			// Re-read through the getter because TypeScript's control flow analysis
+			// doesn't track mutations made through async closures (the setter inside
+			// handleToolCall).
 			const postCallResolution = approvalState.recordedApprovalResolution;
 			if (postCallResolution?.remember) {
 				const actionCandidate = await memoryActivities
@@ -825,6 +815,21 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 						`Failed to write action_sensitive candidate for tool call: ${toolCall.name}`
 					);
 				}
+			}
+
+			if (outcome.kind === 'terminal') {
+				await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
+				return completeRun(
+					input,
+					{
+						runId: input.runId,
+						status: outcome.status,
+						finalAnswer: outcome.finalAnswer,
+						...(memoryCandidateIds.length > 0 ? { memoryRefs: memoryCandidateIds } : {}),
+						...(memoryWriteErrors.length > 0 ? { memoryWriteErrors } : {})
+					},
+					totalUsage
+				);
 			}
 
 			await observabilityActivities.persistToolResult({
