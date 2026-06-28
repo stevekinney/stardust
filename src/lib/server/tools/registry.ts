@@ -499,7 +499,13 @@ export async function executeRegisteredTool(input: {
 			callId: input.call.id,
 			toolName: input.call.name,
 			outcome: 'success',
-			content: input.call.name === 'web.fetch' ? fenceUntrustedOutput(content) : content
+			// Both web.fetch and workspace.readFile may contain untrusted content that
+			// could inject instructions into model context.  Fence both as data blocks
+			// per ARCHITECTURE.md:354 ("Tool output that may be untrusted is fenced as data").
+			content:
+				input.call.name === 'web.fetch' || input.call.name === 'workspace.readFile'
+					? fenceUntrustedOutput(content)
+					: content
 		};
 
 		// Spill to artifact when store is available and IDs are known; otherwise fall
