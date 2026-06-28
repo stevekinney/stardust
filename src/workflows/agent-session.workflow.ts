@@ -4,6 +4,7 @@ import type {
 	ApprovalCardState,
 	ApprovalResolution,
 	ApprovalResolutionInput,
+	CompactMemoryInput,
 	InterruptRunInput,
 	InterruptRunResult,
 	SessionMemorySnapshot,
@@ -29,6 +30,7 @@ import {
 import { ApplicationFailure } from '@temporalio/common';
 import { steeringSignal } from './approval-contracts';
 import { agentRunWorkflow } from './agent-run.workflow';
+import { memoryCompactionWorkflow } from './memory-compaction.workflow';
 import {
 	cancelRunSignal,
 	getActiveRunQuery,
@@ -97,6 +99,12 @@ export type AgentSessionInput = {
 	/** Carried across Continue-As-New: accumulated memory candidate refs. */
 	memoryRefs?: string[];
 	/**
+	 * Carried across Continue-As-New: the transcript sequence cursor advanced by the
+	 * last memory compaction. Passed as `fromTranscriptCursor` to the next compaction
+	 * so it only re-reads events written since the previous compaction.
+	 */
+	memoryCursor?: number;
+	/**
 	 * Override the CAN history-length threshold. Defaults to 5000.
 	 * Set low in tests to exercise CAN without generating thousands of events.
 	 */
@@ -126,6 +134,8 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 	let completedRunCount = input.completedRunCount ?? 0;
 	let submittedTurnCount = input.submittedTurnCount ?? 0;
 	let memoryRefs: string[] = input.memoryRefs ?? [];
+	/** Transcript sequence cursor advanced after each compaction; carried across CAN. */
+	let memoryCursor = input.memoryCursor ?? 0;
 	let status: SessionState['status'] = 'idle';
 	/** Set to true by cancelRun signal; causes the main loop to exit cleanly. */
 	let cancelled = false;
@@ -284,11 +294,32 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 					// Wait for any in-flight update handlers (e.g. submitSteering)
 					// to finish before handing off to the new execution.
 					await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
+
+					// Compact memory before crossing the CAN boundary so the next
+					// execution starts with a condensed ref set and advanced cursor.
+					// Deliberate failure policy: if compaction fails after all activity
+					// retries, the error propagates and the session execution fails
+					// rather than silently losing the compaction. This is preferable
+					// to a stale memoryRefs set growing without bound across CAN cycles.
+					const compactionResult = await executeChild(memoryCompactionWorkflow, {
+						workflowId: `memory-compaction:${sessionKey}:can-${completedRunCount}`,
+						args: [
+							{
+								sessionId: sessionKey,
+								fromTranscriptCursor: memoryCursor,
+								reason: 'threshold'
+							} satisfies CompactMemoryInput
+						]
+					});
+					memoryRefs = compactionResult.memoryRefs;
+					memoryCursor = compactionResult.transcriptCursor;
+
 					await continueAsNew<typeof agentSessionWorkflow>({
 						sessionKey,
 						completedRunCount,
 						submittedTurnCount,
 						memoryRefs,
+						memoryCursor,
 						canHistoryThreshold: canThreshold
 					});
 					// continueAsNew never returns; the line below is unreachable.

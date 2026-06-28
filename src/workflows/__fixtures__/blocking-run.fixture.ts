@@ -2,6 +2,9 @@
 // The blocking stub waits for a signal rather than a timer, so time-skipping tests
 // can observe mid-flight session state before releasing the run.
 export { agentSessionWorkflow } from '../agent-session.workflow';
+// memoryCompactionWorkflow is included so the orchestrator worker bundle resolves
+// the executeChild call added to the CAN path of agentSessionWorkflow.
+export { memoryCompactionWorkflow } from '../memory-compaction.workflow';
 
 import type {
 	AgentRunInput,

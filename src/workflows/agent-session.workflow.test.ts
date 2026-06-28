@@ -6,11 +6,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type {
 	ApprovalResolution,
 	ApprovalResolutionInput,
+	MemoryCompactionActivities,
 	SessionMemorySnapshot,
 	SessionState,
 	SubmitTurnResult
 } from '@src/lib/types';
-import { TASK_QUEUE_ORCHESTRATOR, TASK_QUEUE_TOOLS } from '@src/lib/types';
+import { TASK_QUEUE_MEMORY, TASK_QUEUE_ORCHESTRATOR, TASK_QUEUE_TOOLS } from '@src/lib/types';
 import {
 	cancelRunSignal,
 	getActiveRunQuery,
@@ -568,7 +569,51 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 	// ── Continue-As-New ────────────────────────────────────────────────────────
 
 	it('Continue-As-New carries completedRunCount and memoryRefs across the boundary', async () => {
-		await runWithBlockingWorker(async () => {
+		// Mock compaction activities: return a fixed compacted ref set.
+		// Compaction replaces the accumulated raw run refs with a condensed set.
+		const compactionActivities: MemoryCompactionActivities = {
+			async loadMemoryCompactionInput(input) {
+				return {
+					sessionId: input.sessionId,
+					fromTranscriptCursor: input.fromTranscriptCursor,
+					toTranscriptCursor: 10,
+					transcript: ['User: trigger CAN'],
+					existingMemoryRefs: []
+				};
+			},
+			async summarizeMemoryCompaction() {
+				return { summary: 'compacted', candidates: [] };
+			},
+			async persistMemoryCompaction(input) {
+				return {
+					sessionId: input.sessionId,
+					summaryNoteId: 'compact-summary',
+					candidateIds: [],
+					memoryRefs: ['compact-ref'],
+					transcriptCursor: 10
+				};
+			}
+		};
+
+		// The CAN path now invokes memoryCompactionWorkflow (on TASK_QUEUE_ORCHESTRATOR)
+		// whose activities dispatch to TASK_QUEUE_MEMORY. Two workers are required.
+		const orchestratorWorker = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_ORCHESTRATOR,
+			workflowsPath: fileURLToPath(
+				new URL('./__fixtures__/blocking-run.fixture.ts', import.meta.url)
+			),
+			activities: testActivities
+		});
+		const memoryWorker = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_MEMORY,
+			activities: compactionActivities
+		});
+
+		const orchestratorTask = orchestratorWorker.runUntil(async () => {
 			const sessionKey = 'test-can';
 			// Set threshold to 1 so CAN triggers after the first run completes.
 			const handle = await env.client.workflow.start('agentSessionWorkflow', {
@@ -577,57 +622,159 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 				args: [{ sessionKey, canHistoryThreshold: 1 }]
 			});
 
-			// Submit and complete run 1 — this triggers CAN (threshold=1).
+			// Capture the initial execution runId (execution A).
+			const beforeCanRunId = (await handle.describe()).runId;
+
+			// Submit turn1.
 			const turn1: SubmitTurnResult = await handle.executeUpdate(submitTurnUpdate, {
 				args: [{ message: 'trigger CAN' }]
 			});
 
 			await pollUntil(async () => {
-				const state = await handle.query(getSessionStateQuery);
-				return state.activeRunId === turn1.runId;
+				const s = await handle.query(getSessionStateQuery);
+				return s.activeRunId === turn1.runId;
 			});
 
-			// Capture the runId of the first execution before CAN fires.
-			const beforeCanRunId = (await handle.describe()).runId;
+			// Pre-queue turn2 while run1 is still in progress. When run1 completes,
+			// queue.length > 0, so the CAN check is skipped after run1. CAN fires
+			// only after run2 completes (queue becomes empty then).
+			const turn2: SubmitTurnResult = await handle.executeUpdate(submitTurnUpdate, {
+				args: [{ message: 'pre-queued to defer CAN' }]
+			});
+			expect(turn2.accepted).toBe(true);
 
+			// Release run1 — CAN is deferred because turn2 is queued.
 			await env.client.workflow
 				.getHandle(`agent-run:${turn1.runId}`)
 				.signal(releaseRunSignal, turn1.runId);
 
-			// After CAN the session continues under the same workflowId.
-			// Submit run 2 to confirm the new execution is alive.
-			const turn2: SubmitTurnResult = await handle.executeUpdate(submitTurnUpdate, {
-				args: [{ message: 'post-CAN turn' }]
-			});
-			expect(turn2.accepted).toBe(true);
-
+			// Wait for run2 to start (proving run1 completed and run2 dequeued).
 			await pollUntil(async () => {
-				const state = await handle.query(getSessionStateQuery);
-				return state.activeRunId === turn2.runId;
+				const s = await handle.query(getSessionStateQuery);
+				return s.activeRunId === turn2.runId;
 			});
+
+			// Release run2. Queue is now empty so CAN fires: compaction runs,
+			// refs are replaced, and continueAsNew starts execution B.
 			await env.client.workflow
 				.getHandle(`agent-run:${turn2.runId}`)
 				.signal(releaseRunSignal, turn2.runId);
 
+			// Wait until the CAN boundary is crossed (runId must change).
 			await pollUntil(async () => {
-				const state = await handle.query(getSessionStateQuery);
-				return state.completedRunCount === 2;
+				const desc = await handle.describe();
+				return desc.runId !== beforeCanRunId;
 			});
 
-			// Verify that Continue-As-New actually fired: the runId must have changed,
-			// proving the boundary was crossed (not just that state survived two runs).
+			// Verify the boundary was actually crossed.
 			const afterCanRunId = (await handle.describe()).runId;
 			expect(afterCanRunId).not.toBe(beforeCanRunId);
 
+			// Execution B carries completedRunCount=2 (both runs completed in A).
 			const state: SessionState = await handle.query(getSessionStateQuery);
 			expect(state.completedRunCount).toBe(2);
 
+			// Compaction replaced both raw run refs with the condensed 'compact-ref'.
 			const snapshot: SessionMemorySnapshot = await handle.query(getMemorySnapshotQuery);
-			// Both refs should be present across the CAN boundary.
-			expect(snapshot.memoryRefs).toHaveLength(2);
-			expect(snapshot.memoryRefs).toContain(`mem:${turn1.runId}`);
-			expect(snapshot.memoryRefs).toContain(`mem:${turn2.runId}`);
+			expect(snapshot.memoryRefs).toEqual(['compact-ref']);
+			expect(snapshot.memoryRefs).not.toContain(`mem:${turn1.runId}`);
+			expect(snapshot.memoryRefs).not.toContain(`mem:${turn2.runId}`);
 		});
+
+		const memoryTask = memoryWorker.runUntil(orchestratorTask.catch(() => undefined));
+		await Promise.all([orchestratorTask, memoryTask]);
+	}, 60_000);
+
+	it('Continue-As-New triggers memory compaction and updates memoryRefs', async () => {
+		// Tracks how many times the first compaction activity was invoked.
+		let compactionCallCount = 0;
+		const compactionActivities: MemoryCompactionActivities = {
+			async loadMemoryCompactionInput(input) {
+				compactionCallCount++;
+				return {
+					sessionId: input.sessionId,
+					fromTranscriptCursor: input.fromTranscriptCursor,
+					toTranscriptCursor: 20,
+					transcript: ['User: trigger compaction'],
+					existingMemoryRefs: []
+				};
+			},
+			async summarizeMemoryCompaction() {
+				return { summary: 'compacted session', candidates: [] };
+			},
+			async persistMemoryCompaction(input) {
+				return {
+					sessionId: input.sessionId,
+					summaryNoteId: 'compaction-note',
+					candidateIds: [],
+					memoryRefs: ['compacted-ref-1', 'compacted-ref-2'],
+					transcriptCursor: 20
+				};
+			}
+		};
+
+		const orchestratorWorker = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_ORCHESTRATOR,
+			workflowsPath: fileURLToPath(
+				new URL('./__fixtures__/blocking-run.fixture.ts', import.meta.url)
+			),
+			activities: testActivities
+		});
+		const memoryWorker = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_MEMORY,
+			activities: compactionActivities
+		});
+
+		const orchestratorTask = orchestratorWorker.runUntil(async () => {
+			const sessionKey = 'test-can-compaction';
+			// Threshold of 1 ensures CAN fires after the first run.
+			const handle = await env.client.workflow.start('agentSessionWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-session:${sessionKey}`,
+				args: [{ sessionKey, canHistoryThreshold: 1 }]
+			});
+
+			const beforeCanRunId = (await handle.describe()).runId;
+
+			const turn1: SubmitTurnResult = await handle.executeUpdate(submitTurnUpdate, {
+				args: [{ message: 'trigger compaction via CAN' }]
+			});
+
+			await pollUntil(async () => {
+				const s = await handle.query(getSessionStateQuery);
+				return s.activeRunId === turn1.runId;
+			});
+
+			// Release run1. No turn is queued, so queue becomes empty and CAN fires:
+			// compaction runs once, memoryRefs are replaced, continueAsNew fires.
+			await env.client.workflow
+				.getHandle(`agent-run:${turn1.runId}`)
+				.signal(releaseRunSignal, turn1.runId);
+
+			// Poll until the CAN boundary is crossed (execution runId changes).
+			// At this point compaction has already completed (it ran before continueAsNew).
+			await pollUntil(async () => {
+				const desc = await handle.describe();
+				return desc.runId !== beforeCanRunId;
+			});
+
+			// We are now in execution B (new execution after CAN). No run2 has been
+			// started yet, so the state reflects only the compaction result.
+			const snapshot: SessionMemorySnapshot = await handle.query(getMemorySnapshotQuery);
+			expect(snapshot.memoryRefs).toContain('compacted-ref-1');
+			expect(snapshot.memoryRefs).toContain('compacted-ref-2');
+			// The raw run1 ref was replaced by the compacted set.
+			expect(snapshot.memoryRefs).not.toContain(`mem:${turn1.runId}`);
+			// loadMemoryCompactionInput is invoked once per compaction workflow.
+			expect(compactionCallCount).toBe(1);
+		});
+
+		const memoryTask = memoryWorker.runUntil(orchestratorTask.catch(() => undefined));
+		await Promise.all([orchestratorTask, memoryTask]);
 	}, 60_000);
 
 	// ── delegateSubagents propagation ──────────────────────────────────────────
