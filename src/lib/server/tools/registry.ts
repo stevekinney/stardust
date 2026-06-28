@@ -36,6 +36,7 @@ import {
 	type RegisteredTool,
 	validateToolCall
 } from '../policy/policy-engine';
+import { hashApprovalArguments } from '../policy/arguments-hash';
 import { fetchWithSsrfGuard } from '../policy/ssrf';
 import type { ArtifactStore } from '../artifacts/artifact-store';
 import { spillLargeOutput } from '../artifacts/spill';
@@ -536,7 +537,7 @@ export async function executeRegisteredTool(input: {
 					toolCallId: input.call.id,
 					toolName: input.call.name,
 					args: JSON.stringify(input.call.arguments),
-					argsHash: input.call.id,
+					argsHash: hashApprovalArguments(input.call.arguments),
 					idempotencyKey: input.call.idempotencyKey ?? null,
 					status: 'running',
 					risk: decision.tool.metadata.risk,

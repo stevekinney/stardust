@@ -19,6 +19,7 @@ import {
 	getToolManifest,
 	registeredTools
 } from './registry';
+import { hashApprovalArguments } from '../policy/arguments-hash';
 import { LocalArtifactStore } from '../artifacts/local-artifact-store';
 import { LocalSubprocessSandboxProvider } from '../sandbox';
 import * as schema from '../db/schema';
@@ -708,6 +709,117 @@ describe('tool registry', () => {
 			expect(snapshotSpy).toHaveBeenCalledTimes(1);
 			// Outcome is 'success' (replayed carries the cached success state).
 			expect(second.outcome).toBe('success');
+		} finally {
+			sqlite.close();
+			rmSync(dbDir, { recursive: true, force: true });
+		}
+	});
+
+	// ── argsHash correctness ─────────────────────────────────────────────────────
+
+	it('persists a SHA-256 args_hash derived from arguments, not the call ID', async () => {
+		// Two calls with identical arguments but different call IDs must produce the
+		// same args_hash; a call with different arguments must produce a different hash.
+		expect.assertions(5);
+
+		const dbDir = mkdtempSync(join(tmpdir(), 'stardust-argshash-'));
+		const sqlite = new Database(join(dbDir, 'test.db'));
+		sqlite.pragma('journal_mode = WAL');
+		const database = drizzle(sqlite, { schema });
+		migrate(database, { migrationsFolder: './drizzle' });
+
+		const sharedArgs = { url: 'https://hash-test-a.test' };
+		const differentArgs = { url: 'https://hash-test-b.test' };
+
+		const mockFetcher = async () =>
+			new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } });
+
+		try {
+			// First invocation — sharedArgs, call ID "call-hash-001".
+			await executeRegisteredTool({
+				sessionId: 'sess-hash-test',
+				runId: 'run-hash-001',
+				database,
+				fetcher: mockFetcher,
+				call: { id: 'call-hash-001', name: 'web.fetch', arguments: sharedArgs }
+			});
+
+			// Second invocation — same sharedArgs, different call ID "call-hash-002".
+			await executeRegisteredTool({
+				sessionId: 'sess-hash-test',
+				runId: 'run-hash-002',
+				database,
+				fetcher: mockFetcher,
+				call: { id: 'call-hash-002', name: 'web.fetch', arguments: sharedArgs }
+			});
+
+			// Third invocation — differentArgs.
+			await executeRegisteredTool({
+				sessionId: 'sess-hash-test',
+				runId: 'run-hash-003',
+				database,
+				fetcher: mockFetcher,
+				call: { id: 'call-hash-003', name: 'web.fetch', arguments: differentArgs }
+			});
+
+			type Row = { tool_call_id: string; args_hash: string };
+			const rows = sqlite
+				.prepare(
+					"SELECT tool_call_id, args_hash FROM tool_invocations WHERE session_id = 'sess-hash-test'"
+				)
+				.all() as Row[];
+
+			const byCallId = new Map(rows.map((r) => [r.tool_call_id, r.args_hash]));
+			const hash1 = byCallId.get('call-hash-001');
+			const hash2 = byCallId.get('call-hash-002');
+			const hash3 = byCallId.get('call-hash-003');
+
+			// All three rows must have been written.
+			expect(hash1).toBeDefined();
+			expect(hash2).toBeDefined();
+			expect(hash3).toBeDefined();
+
+			// Identical arguments → identical hash regardless of call ID.
+			expect(hash1).toBe(hash2);
+
+			// Different arguments → different hash.
+			expect(hash1).not.toBe(hash3);
+		} finally {
+			sqlite.close();
+			rmSync(dbDir, { recursive: true, force: true });
+		}
+	});
+
+	it('args_hash matches hashApprovalArguments applied to the tool arguments', async () => {
+		// Verify the stored hash is the correct SHA-256 over the stable-serialized
+		// arguments, matching what hashApprovalArguments produces.
+		expect.assertions(1);
+
+		const dbDir = mkdtempSync(join(tmpdir(), 'stardust-argshash-exact-'));
+		const sqlite = new Database(join(dbDir, 'test.db'));
+		sqlite.pragma('journal_mode = WAL');
+		const database = drizzle(sqlite, { schema });
+		migrate(database, { migrationsFolder: './drizzle' });
+
+		const args = { url: 'https://exact-hash-test.test' };
+		const expectedHash = hashApprovalArguments(args);
+
+		try {
+			await executeRegisteredTool({
+				sessionId: 'sess-exact-hash',
+				runId: 'run-exact-001',
+				database,
+				fetcher: async () =>
+					new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } }),
+				call: { id: 'call-exact-001', name: 'web.fetch', arguments: args }
+			});
+
+			type Row = { args_hash: string };
+			const row = sqlite
+				.prepare("SELECT args_hash FROM tool_invocations WHERE tool_call_id = 'call-exact-001'")
+				.get() as Row | undefined;
+
+			expect(row?.args_hash).toBe(expectedHash);
 		} finally {
 			sqlite.close();
 			rmSync(dbDir, { recursive: true, force: true });
