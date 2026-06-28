@@ -22,6 +22,7 @@ import type {
 	ToolPolicyDecision
 } from '@src/lib/types';
 import {
+	CancellationScope,
 	allHandlersFinished,
 	condition,
 	executeChild,
@@ -160,6 +161,22 @@ const policyActivities = proxyActivities<PolicyActivities>({
 const sandboxActivities = proxyActivities<ToolActivities>({
 	taskQueue: TASK_QUEUE_SANDBOX,
 	startToCloseTimeout: '35 seconds',
+	retry: { maximumAttempts: 1 }
+});
+
+type CancelSandboxActivities = {
+	cancelSandboxSession(sessionKey: string): Promise<void>;
+};
+
+/**
+ * Separate proxy for the session-cleanup activity so it can use a shorter
+ * timeout and one retry while keeping the main sandboxActivities proxy
+ * unchanged. Called inside a CancellationScope.nonCancellable block in the
+ * workflow's finally path so it always runs, even on workflow cancellation.
+ */
+const cancelSandboxActivities = proxyActivities<CancelSandboxActivities>({
+	taskQueue: TASK_QUEUE_SANDBOX,
+	startToCloseTimeout: '10 seconds',
 	retry: { maximumAttempts: 1 }
 });
 
@@ -704,197 +721,207 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 	 */
 	const memoryWriteErrors: string[] = [];
 
-	outer: while (true) {
-		if (modelCallCount >= budget.maxModelCalls) {
-			finalAnswer = `Run stopped: model call budget exhausted (${budget.maxModelCalls} calls).`;
-			break;
-		}
-		if (totalUsage.estimatedCostUsd >= budget.maxEstimatedCostUsd) {
-			finalAnswer = `Run stopped: cost budget exhausted ($${totalUsage.estimatedCostUsd.toFixed(6)}).`;
-			break;
-		}
-		if (totalUsage.inputTokens + totalUsage.outputTokens >= budget.maxTokens) {
-			finalAnswer = `Run stopped: token budget exhausted (${totalUsage.inputTokens + totalUsage.outputTokens} tokens).`;
-			break;
-		}
-		// Date.now() is intercepted by Temporal's sandbox and returns deterministic
-		// workflow time, so this comparison is replay-safe.
-		// eslint-disable-next-line temporal/workflow-no-nondeterministic-control-flow
-		if (Date.now() - runStartMs >= budget.maxActiveWallClockMs) {
-			finalAnswer = `Run stopped: wall-clock budget exhausted (${budget.maxActiveWallClockMs}ms).`;
-			break;
-		}
-
-		// Drain any steering messages queued since the last model call.
-		const pendingSteering = steeringBuffer.splice(0);
-
-		// Retrieve confirmed memory relevant to this turn before calling the model.
-		// searchMemory runs on the memory task queue where the embedding model lives,
-		// keeping heavy ML work off the model worker.  Failures are non-fatal: an
-		// empty results array means the model call proceeds without memory context.
-		const retrievedMemory = await memoryActivities
-			.searchMemory({
-				sessionId: input.sessionKey,
-				query: input.message,
-				limit: 5
-			})
-			.catch((): ContextMemoryNote[] => []);
-
-		const modelResult = await modelActivities.callModel({
-			sessionId: input.sessionKey,
-			runId: input.runId,
-			model: input.model ?? DEFAULT_MODEL,
-			tools: input.tools,
-			systemPrompt: input.systemPrompt,
-			maxTokens: 4096,
-			...(pendingSteering.length > 0 ? { steeringMessages: pendingSteering } : {}),
-			...(retrievedMemory.length > 0 ? { memoryNotes: retrievedMemory } : {}),
-			...(input.workspacePath ? { workspacePath: input.workspacePath } : {})
-		});
-		modelCallCount++;
-		totalUsage = addUsage(totalUsage, modelResult.usage);
-
-		if (modelResult.message.toolCalls.length === 0) {
-			finalAnswer = modelResult.message.text;
-			break;
-		}
-
-		for (const normalizedToolCall of modelResult.message.toolCalls) {
-			// NormalizedToolCall uses `.input`; ToolCallInput uses `.arguments`.
-			// Convert before passing into the policy/approval/execution path.
-			const toolCall: ToolCallInput = {
-				id: normalizedToolCall.id,
-				name: normalizedToolCall.name,
-				arguments: normalizedToolCall.input,
-				// Stable across Temporal retries: the model response (and therefore
-				// normalizedToolCall.id) is recorded in workflow history, so this key
-				// is identical on every replay of the same execution.
-				idempotencyKey: `${input.runId}:${normalizedToolCall.id}`
-			};
-
-			if (toolCallCount >= budget.maxToolCalls) {
-				finalAnswer = `Run stopped: tool call budget exhausted (${budget.maxToolCalls} calls).`;
-				break outer;
+	try {
+		outer: while (true) {
+			if (modelCallCount >= budget.maxModelCalls) {
+				finalAnswer = `Run stopped: model call budget exhausted (${budget.maxModelCalls} calls).`;
+				break;
 			}
-			if (actionsCount >= budget.maxActions) {
-				finalAnswer = `Run stopped: action budget exhausted (${budget.maxActions} actions).`;
-				break outer;
+			if (totalUsage.estimatedCostUsd >= budget.maxEstimatedCostUsd) {
+				finalAnswer = `Run stopped: cost budget exhausted ($${totalUsage.estimatedCostUsd.toFixed(6)}).`;
+				break;
 			}
-			toolCallCount++;
-			actionsCount++;
-
-			// Reset before the call so that a non-null value after the call
-			// unambiguously came from THIS tool call's approval path (not a
-			// previous one that went through the 'allowed' fast path).
-			recordedApprovalResolution = null;
-			const outcome = await handleToolCall(input, toolCall, approvalState);
-
-			// Write an action-sensitive candidate when the user opted to have the
-			// approval decision remembered (remember===true). This covers both the
-			// 'remember' action (terminalState='remembered', no execution) and the
-			// 'approve'/'approve_with_edits' + remember:true case (executed path).
-			// Re-read through the getter because TypeScript's control flow analysis
-			// doesn't track mutations made through async closures (the setter inside
-			// handleToolCall).
-			const postCallResolution = approvalState.recordedApprovalResolution;
-			if (postCallResolution?.remember) {
-				const actionCandidate = await memoryActivities
-					.writeMemoryCandidate({
-						sessionId: input.sessionKey,
-						runId: input.runId,
-						layer: 'action_sensitive',
-						content: `Approved tool call: ${toolCall.name}(${JSON.stringify(postCallResolution.canonicalArguments)})`,
-						tags: ['tool-approval', toolCall.name],
-						reason: `User approved ${toolCall.name} with remember=true`
-					})
-					.catch(() => null);
-				if (actionCandidate) {
-					memoryCandidateIds.push(actionCandidate.id);
-				} else {
-					memoryWriteErrors.push(
-						`Failed to write action_sensitive candidate for tool call: ${toolCall.name}`
-					);
-				}
+			if (totalUsage.inputTokens + totalUsage.outputTokens >= budget.maxTokens) {
+				finalAnswer = `Run stopped: token budget exhausted (${totalUsage.inputTokens + totalUsage.outputTokens} tokens).`;
+				break;
+			}
+			// Date.now() is intercepted by Temporal's sandbox and returns deterministic
+			// workflow time, so this comparison is replay-safe.
+			// eslint-disable-next-line temporal/workflow-no-nondeterministic-control-flow
+			if (Date.now() - runStartMs >= budget.maxActiveWallClockMs) {
+				finalAnswer = `Run stopped: wall-clock budget exhausted (${budget.maxActiveWallClockMs}ms).`;
+				break;
 			}
 
-			if (outcome.kind === 'terminal') {
-				await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
-				return completeRun(
-					input,
-					{
-						runId: input.runId,
-						status: outcome.status,
-						finalAnswer: outcome.finalAnswer,
-						...(memoryCandidateIds.length > 0 ? { memoryRefs: memoryCandidateIds } : {}),
-						...(memoryWriteErrors.length > 0 ? { memoryWriteErrors } : {})
-					},
-					totalUsage
-				);
-			}
+			// Drain any steering messages queued since the last model call.
+			const pendingSteering = steeringBuffer.splice(0);
 
-			await observabilityActivities.persistToolResult({
+			// Retrieve confirmed memory relevant to this turn before calling the model.
+			// searchMemory runs on the memory task queue where the embedding model lives,
+			// keeping heavy ML work off the model worker.  Failures are non-fatal: an
+			// empty results array means the model call proceeds without memory context.
+			const retrievedMemory = await memoryActivities
+				.searchMemory({
+					sessionId: input.sessionKey,
+					query: input.message,
+					limit: 5
+				})
+				.catch((): ContextMemoryNote[] => []);
+
+			const modelResult = await modelActivities.callModel({
 				sessionId: input.sessionKey,
 				runId: input.runId,
-				callId: toolCall.id,
-				content: outcome.result.content,
-				isError: outcome.result.outcome === 'error'
+				model: input.model ?? DEFAULT_MODEL,
+				tools: input.tools,
+				systemPrompt: input.systemPrompt,
+				maxTokens: 4096,
+				...(pendingSteering.length > 0 ? { steeringMessages: pendingSteering } : {}),
+				...(retrievedMemory.length > 0 ? { memoryNotes: retrievedMemory } : {}),
+				...(input.workspacePath ? { workspacePath: input.workspacePath } : {})
 			});
-		}
-	}
+			modelCallCount++;
+			totalUsage = addUsage(totalUsage, modelResult.usage);
 
-	// ── Subagent delegation (optional) ────────────────────────────────────────
-	if (input.delegateSubagents === true) {
-		// Enforce maxChildWorkflows and the remaining maxActions budget jointly.
-		// Three child workflows are always spawned as a unit, so both caps must
-		// allow at least three.
-		const remainingActions = budget.maxActions - actionsCount;
-		const childWorkflowsAllowed = Math.min(budget.maxChildWorkflows, remainingActions);
-		delegationResult = await runDelegatedSubagents(
+			if (modelResult.message.toolCalls.length === 0) {
+				finalAnswer = modelResult.message.text;
+				break;
+			}
+
+			for (const normalizedToolCall of modelResult.message.toolCalls) {
+				// NormalizedToolCall uses `.input`; ToolCallInput uses `.arguments`.
+				// Convert before passing into the policy/approval/execution path.
+				const toolCall: ToolCallInput = {
+					id: normalizedToolCall.id,
+					name: normalizedToolCall.name,
+					arguments: normalizedToolCall.input,
+					// Stable across Temporal retries: the model response (and therefore
+					// normalizedToolCall.id) is recorded in workflow history, so this key
+					// is identical on every replay of the same execution.
+					idempotencyKey: `${input.runId}:${normalizedToolCall.id}`
+				};
+
+				if (toolCallCount >= budget.maxToolCalls) {
+					finalAnswer = `Run stopped: tool call budget exhausted (${budget.maxToolCalls} calls).`;
+					break outer;
+				}
+				if (actionsCount >= budget.maxActions) {
+					finalAnswer = `Run stopped: action budget exhausted (${budget.maxActions} actions).`;
+					break outer;
+				}
+				toolCallCount++;
+				actionsCount++;
+
+				// Reset before the call so that a non-null value after the call
+				// unambiguously came from THIS tool call's approval path (not a
+				// previous one that went through the 'allowed' fast path).
+				recordedApprovalResolution = null;
+				const outcome = await handleToolCall(input, toolCall, approvalState);
+
+				// Write an action-sensitive candidate when the user opted to have the
+				// approval decision remembered (remember===true). This covers both the
+				// 'remember' action (terminalState='remembered', no execution) and the
+				// 'approve'/'approve_with_edits' + remember:true case (executed path).
+				// Re-read through the getter because TypeScript's control flow analysis
+				// doesn't track mutations made through async closures (the setter inside
+				// handleToolCall).
+				const postCallResolution = approvalState.recordedApprovalResolution;
+				if (postCallResolution?.remember) {
+					const actionCandidate = await memoryActivities
+						.writeMemoryCandidate({
+							sessionId: input.sessionKey,
+							runId: input.runId,
+							layer: 'action_sensitive',
+							content: `Approved tool call: ${toolCall.name}(${JSON.stringify(postCallResolution.canonicalArguments)})`,
+							tags: ['tool-approval', toolCall.name],
+							reason: `User approved ${toolCall.name} with remember=true`
+						})
+						.catch(() => null);
+					if (actionCandidate) {
+						memoryCandidateIds.push(actionCandidate.id);
+					} else {
+						memoryWriteErrors.push(
+							`Failed to write action_sensitive candidate for tool call: ${toolCall.name}`
+						);
+					}
+				}
+
+				if (outcome.kind === 'terminal') {
+					await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
+					return completeRun(
+						input,
+						{
+							runId: input.runId,
+							status: outcome.status,
+							finalAnswer: outcome.finalAnswer,
+							...(memoryCandidateIds.length > 0 ? { memoryRefs: memoryCandidateIds } : {}),
+							...(memoryWriteErrors.length > 0 ? { memoryWriteErrors } : {})
+						},
+						totalUsage
+					);
+				}
+
+				await observabilityActivities.persistToolResult({
+					sessionId: input.sessionKey,
+					runId: input.runId,
+					callId: toolCall.id,
+					content: outcome.result.content,
+					isError: outcome.result.outcome === 'error'
+				});
+			}
+		}
+
+		// ── Subagent delegation (optional) ────────────────────────────────────────
+		if (input.delegateSubagents === true) {
+			// Enforce maxChildWorkflows and the remaining maxActions budget jointly.
+			// Three child workflows are always spawned as a unit, so both caps must
+			// allow at least three.
+			const remainingActions = budget.maxActions - actionsCount;
+			const childWorkflowsAllowed = Math.min(budget.maxChildWorkflows, remainingActions);
+			delegationResult = await runDelegatedSubagents(
+				input,
+				finalAnswer,
+				observabilityActivities,
+				childWorkflowsAllowed
+			);
+		}
+
+		// ── Session memory candidate ──────────────────────────────────────────────
+		// Write a session-layer summary candidate for this run. The returned candidate
+		// id is the authoritative ref; we do NOT fabricate a ref string. If the write
+		// fails the error is recorded in memoryWriteErrors so callers can observe it.
+		const sessionCandidate = await memoryActivities
+			.writeMemoryCandidate({
+				sessionId: input.sessionKey,
+				runId: input.runId,
+				layer: 'session',
+				content: `Run ${input.runId}: ${finalAnswer.slice(0, 500)}`,
+				tags: ['run-summary'],
+				reason: 'Auto-generated run summary candidate'
+			})
+			.catch(() => null);
+		if (sessionCandidate) {
+			memoryCandidateIds.push(sessionCandidate.id);
+		} else {
+			memoryWriteErrors.push('Failed to write session memory candidate');
+		}
+
+		// Compute grand total usage: parent model calls + reconciled subagent usage.
+		const grandTotalUsage = addUsage(
+			totalUsage,
+			delegationResult?.budgetLedger.used ?? createEmptyUsage()
+		);
+
+		status = 'complete';
+		await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
+		return completeRun(
 			input,
-			finalAnswer,
-			observabilityActivities,
-			childWorkflowsAllowed
+			{
+				runId: input.runId,
+				status: 'complete',
+				finalAnswer,
+				memoryRefs: memoryCandidateIds,
+				...(memoryWriteErrors.length > 0 ? { memoryWriteErrors } : {}),
+				...delegationResult
+			},
+			grandTotalUsage
+		);
+	} finally {
+		// Kill all tracked processes for this session on every exit path — normal
+		// completion, budget exhaustion, approval denial/expiry, and Temporal
+		// workflow cancellation. CancellationScope.nonCancellable ensures this
+		// activity runs even when the enclosing workflow scope has been cancelled.
+		await CancellationScope.nonCancellable(() =>
+			cancelSandboxActivities.cancelSandboxSession(input.sessionKey)
 		);
 	}
-
-	// ── Session memory candidate ──────────────────────────────────────────────
-	// Write a session-layer summary candidate for this run. The returned candidate
-	// id is the authoritative ref; we do NOT fabricate a ref string. If the write
-	// fails the error is recorded in memoryWriteErrors so callers can observe it.
-	const sessionCandidate = await memoryActivities
-		.writeMemoryCandidate({
-			sessionId: input.sessionKey,
-			runId: input.runId,
-			layer: 'session',
-			content: `Run ${input.runId}: ${finalAnswer.slice(0, 500)}`,
-			tags: ['run-summary'],
-			reason: 'Auto-generated run summary candidate'
-		})
-		.catch(() => null);
-	if (sessionCandidate) {
-		memoryCandidateIds.push(sessionCandidate.id);
-	} else {
-		memoryWriteErrors.push('Failed to write session memory candidate');
-	}
-
-	// Compute grand total usage: parent model calls + reconciled subagent usage.
-	const grandTotalUsage = addUsage(
-		totalUsage,
-		delegationResult?.budgetLedger.used ?? createEmptyUsage()
-	);
-
-	status = 'complete';
-	await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
-	return completeRun(
-		input,
-		{
-			runId: input.runId,
-			status: 'complete',
-			finalAnswer,
-			memoryRefs: memoryCandidateIds,
-			...(memoryWriteErrors.length > 0 ? { memoryWriteErrors } : {}),
-			...delegationResult
-		},
-		grandTotalUsage
-	);
 }
