@@ -29,7 +29,7 @@ import {
 } from '@temporalio/workflow';
 import { ApplicationFailure } from '@temporalio/common';
 import { steeringSignal } from './approval-contracts';
-import { agentRunWorkflow } from './agent-run.workflow';
+import { DEFAULT_RUN_BUDGET, agentRunWorkflow } from './agent-run.workflow';
 import { memoryCompactionWorkflow } from './memory-compaction.workflow';
 import {
 	cancelRunSignal,
@@ -80,7 +80,19 @@ const HANDLER_FINISH_TIMEOUT_MS = 60_000;
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type QueuedTurn = { runId: string; message: string; delegateSubagents?: boolean };
+type QueuedTurn = {
+	runId: string;
+	message: string;
+	delegateSubagents?: boolean;
+	/** Model ID from the user's settings at the time of submission. */
+	model?: string;
+	/**
+	 * Per-run cost cap from the user's settings. When > 0, overrides
+	 * `maxEstimatedCostUsd` in DEFAULT_RUN_BUDGET. When 0 or absent, the default
+	 * $1 cap applies (0 does NOT disable budgeting).
+	 */
+	maxBudgetUsd?: number;
+};
 
 /**
  * Input for AgentSessionWorkflow.
@@ -177,7 +189,13 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 	void setHandler(submitTurnUpdate, (turn: SubmitTurnInput): SubmitTurnResult => {
 		submittedTurnCount++;
 		const runId = `${sessionKey}-run-${submittedTurnCount}`;
-		queue.push({ runId, message: turn.message, delegateSubagents: turn.delegateSubagents });
+		queue.push({
+			runId,
+			message: turn.message,
+			delegateSubagents: turn.delegateSubagents,
+			model: turn.model,
+			maxBudgetUsd: turn.maxBudgetUsd
+		});
 		return { accepted: true, runId };
 	});
 
@@ -262,7 +280,16 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 								sessionKey,
 								runId: turn.runId,
 								message: turn.message,
-								delegateSubagents: turn.delegateSubagents
+								delegateSubagents: turn.delegateSubagents,
+								...(turn.model !== undefined ? { model: turn.model } : {}),
+								...(turn.maxBudgetUsd !== undefined && turn.maxBudgetUsd > 0
+									? {
+											budget: {
+												...DEFAULT_RUN_BUDGET,
+												maxEstimatedCostUsd: turn.maxBudgetUsd
+											}
+										}
+									: {})
 							} satisfies AgentRunInput
 						]
 					});

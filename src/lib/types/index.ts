@@ -5,6 +5,14 @@ export type SubmitTurnInput = {
 	message: string;
 	/** When true, the run will fan out research, code, and critic child workflows. */
 	delegateSubagents?: boolean;
+	/** Model ID to use for this turn. Defaults to the workflow's DEFAULT_MODEL when omitted. */
+	model?: string;
+	/**
+	 * Max total estimated cost in USD for this run. When > 0, overrides `maxEstimatedCostUsd`
+	 * in the default budget. When 0 or omitted, the workflow's DEFAULT_RUN_BUDGET applies.
+	 * Note: 0 does NOT disable the budget — it falls back to the default $1 cap.
+	 */
+	maxBudgetUsd?: number;
 };
 
 export type SubmitTurnResult = {

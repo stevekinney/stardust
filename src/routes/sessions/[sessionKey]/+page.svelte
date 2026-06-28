@@ -113,11 +113,30 @@
 		currentUserMessage = message;
 		events = [];
 
+		// Read model and budget from persisted settings so each turn respects the
+		// user's current selection without requiring a page reload.
+		let model: string | undefined;
+		let maxBudgetUsd: number | undefined;
+		try {
+			const raw = localStorage.getItem('stardust-settings');
+			if (raw) {
+				const settings = JSON.parse(raw) as { model?: string; maxBudgetUsd?: number };
+				if (typeof settings.model === 'string' && settings.model) {
+					model = settings.model;
+				}
+				if (typeof settings.maxBudgetUsd === 'number') {
+					maxBudgetUsd = settings.maxBudgetUsd;
+				}
+			}
+		} catch {
+			// Ignore parse errors — proceed with defaults.
+		}
+
 		try {
 			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/turn`, {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ message })
+				body: JSON.stringify({ message, model, maxBudgetUsd })
 			});
 
 			if (!response.ok) {

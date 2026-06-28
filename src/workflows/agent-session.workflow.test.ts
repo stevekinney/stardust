@@ -25,7 +25,9 @@ import {
 	submitTurnUpdate
 } from './session-contracts';
 import {
+	getBudgetMaxCostQuery,
 	getDelegateSubagentsQuery,
+	getModelQuery,
 	getSteeringBufferQuery,
 	receivedApprovalQuery,
 	releaseRunSignal
@@ -831,6 +833,121 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 			const delegated = await runHandle.query(getDelegateSubagentsQuery);
 			// Absent flag must not accidentally enable delegation.
 			expect(delegated).toBeUndefined();
+
+			await runHandle.signal(releaseRunSignal, turn.runId);
+		});
+	});
+
+	// ── model and budget propagation ───────────────────────────────────────────
+
+	it('propagates model from SubmitTurnInput to AgentRunInput', async () => {
+		await runWithBlockingWorker(async () => {
+			const sessionKey = 'test-model-prop';
+			const handle = await env.client.workflow.start('agentSessionWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-session:${sessionKey}-${Date.now()}`,
+				args: [{ sessionKey }]
+			});
+
+			const turn: SubmitTurnResult = await handle.executeUpdate(submitTurnUpdate, {
+				args: [{ message: 'use a specific model', model: 'claude-opus-4-8' }]
+			});
+			expect(turn.accepted).toBe(true);
+
+			await pollUntil(async () => {
+				const state = await handle.query(getSessionStateQuery);
+				return state.activeRunId === turn.runId;
+			});
+
+			const runHandle = env.client.workflow.getHandle(`agent-run:${turn.runId}`);
+			const model = await runHandle.query(getModelQuery);
+			expect(model).toBe('claude-opus-4-8');
+
+			await runHandle.signal(releaseRunSignal, turn.runId);
+		});
+	});
+
+	it('leaves model undefined in AgentRunInput when not set in SubmitTurnInput', async () => {
+		await runWithBlockingWorker(async () => {
+			const sessionKey = 'test-model-absent';
+			const handle = await env.client.workflow.start('agentSessionWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-session:${sessionKey}-${Date.now()}`,
+				args: [{ sessionKey }]
+			});
+
+			const turn: SubmitTurnResult = await handle.executeUpdate(submitTurnUpdate, {
+				args: [{ message: 'no model override' }]
+			});
+			expect(turn.accepted).toBe(true);
+
+			await pollUntil(async () => {
+				const state = await handle.query(getSessionStateQuery);
+				return state.activeRunId === turn.runId;
+			});
+
+			const runHandle = env.client.workflow.getHandle(`agent-run:${turn.runId}`);
+			const model = await runHandle.query(getModelQuery);
+			// Absent model must not accidentally set a value; let agentRunWorkflow use DEFAULT_MODEL.
+			expect(model).toBeUndefined();
+
+			await runHandle.signal(releaseRunSignal, turn.runId);
+		});
+	});
+
+	it('propagates maxBudgetUsd > 0 as budget.maxEstimatedCostUsd to AgentRunInput', async () => {
+		await runWithBlockingWorker(async () => {
+			const sessionKey = 'test-budget-prop';
+			const handle = await env.client.workflow.start('agentSessionWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-session:${sessionKey}-${Date.now()}`,
+				args: [{ sessionKey }]
+			});
+
+			const turn: SubmitTurnResult = await handle.executeUpdate(submitTurnUpdate, {
+				args: [{ message: 'run with budget', maxBudgetUsd: 10 }]
+			});
+			expect(turn.accepted).toBe(true);
+
+			await pollUntil(async () => {
+				const state = await handle.query(getSessionStateQuery);
+				return state.activeRunId === turn.runId;
+			});
+
+			const runHandle = env.client.workflow.getHandle(`agent-run:${turn.runId}`);
+			const budgetMaxCost = await runHandle.query(getBudgetMaxCostQuery);
+			expect(budgetMaxCost).toBe(10);
+
+			await runHandle.signal(releaseRunSignal, turn.runId);
+		});
+	});
+
+	it('omits budget override when maxBudgetUsd is 0 (falls back to DEFAULT_RUN_BUDGET)', async () => {
+		// maxBudgetUsd: 0 means "disable the limit" in the UI, which in practice falls back to
+		// the default $1 cap. Passing 0 as maxEstimatedCostUsd would halt every run instantly,
+		// so we treat 0 as "omit the override" and let agentRunWorkflow use DEFAULT_RUN_BUDGET.
+		await runWithBlockingWorker(async () => {
+			const sessionKey = 'test-budget-zero';
+			const handle = await env.client.workflow.start('agentSessionWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-session:${sessionKey}-${Date.now()}`,
+				args: [{ sessionKey }]
+			});
+
+			const turn: SubmitTurnResult = await handle.executeUpdate(submitTurnUpdate, {
+				args: [{ message: 'zero budget means default', maxBudgetUsd: 0 }]
+			});
+			expect(turn.accepted).toBe(true);
+
+			await pollUntil(async () => {
+				const state = await handle.query(getSessionStateQuery);
+				return state.activeRunId === turn.runId;
+			});
+
+			const runHandle = env.client.workflow.getHandle(`agent-run:${turn.runId}`);
+			// budget was omitted → getBudgetMaxCostQuery returns undefined
+			const budgetMaxCost = await runHandle.query(getBudgetMaxCostQuery);
+			expect(budgetMaxCost).toBeUndefined();
 
 			await runHandle.signal(releaseRunSignal, turn.runId);
 		});

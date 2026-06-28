@@ -40,8 +40,12 @@ import { researchSubagentWorkflow } from './subagents/research-subagent.workflow
 /** Default model ID used when the run input does not specify one. */
 const DEFAULT_MODEL = 'claude-sonnet-4-5-20250929';
 
-/** Default runtime budget applied when the run input omits `budget`. */
-const DEFAULT_RUN_BUDGET: RunBudget = {
+/**
+ * Default runtime budget applied when the run input omits `budget`.
+ * Exported so `agentSessionWorkflow` can merge per-turn overrides (e.g. a
+ * user-supplied `maxBudgetUsd`) without duplicating the defaults.
+ */
+export const DEFAULT_RUN_BUDGET: RunBudget = {
 	maxModelCalls: 10,
 	maxToolCalls: 20,
 	maxChildWorkflows: 3,

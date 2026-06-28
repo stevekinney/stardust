@@ -10,7 +10,8 @@ import type {
 	AgentRunInput,
 	AgentRunResult,
 	ApprovalResolution,
-	ApprovalResolutionInput
+	ApprovalResolutionInput,
+	RunBudget
 } from '@src/lib/types';
 import {
 	allHandlersFinished,
@@ -47,6 +48,19 @@ export const getDelegateSubagentsQuery = defineQuery<boolean | undefined, []>(
 	'getDelegateSubagents'
 );
 
+/**
+ * Query: returns the `model` value from the AgentRunInput this stub received.
+ * Used in tests to assert that the session correctly propagates model to child runs.
+ */
+export const getModelQuery = defineQuery<string | undefined, []>('getModel');
+
+/**
+ * Query: returns `budget.maxEstimatedCostUsd` from the AgentRunInput this stub received,
+ * or undefined when no budget override was provided.
+ * Used in tests to assert that maxBudgetUsd reaches the run as a budget override.
+ */
+export const getBudgetMaxCostQuery = defineQuery<number | undefined, []>('getBudgetMaxCost');
+
 export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunResult> {
 	let released = false;
 	const steeringBuffer: string[] = [];
@@ -63,6 +77,11 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 	void setHandler(getSteeringBufferQuery, () => steeringBuffer);
 	void setHandler(receivedApprovalQuery, () => receivedApproval);
 	void setHandler(getDelegateSubagentsQuery, () => input.delegateSubagents);
+	void setHandler(getModelQuery, () => input.model);
+	void setHandler(
+		getBudgetMaxCostQuery,
+		() => (input.budget as RunBudget | undefined)?.maxEstimatedCostUsd
+	);
 
 	// Handle resolveApprovalUpdate so the approval-routing test can verify the
 	// session forwards the resolution to the run. Returns a mock ApprovalResolution.
