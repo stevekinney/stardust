@@ -287,6 +287,7 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 
 			// Check for Continue-As-New between runs, when the queue is empty.
 			// Never attempt CAN while more turns are queued — that would lose them.
+			// replay-tested: 2026-06-27
 			if (!cancelled && queue.length === 0) {
 				const info = workflowInfo();
 				if (info.continueAsNewSuggested || info.historyLength >= canThreshold) {
