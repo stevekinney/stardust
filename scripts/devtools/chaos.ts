@@ -15,6 +15,7 @@ import {
 import { TASK_QUEUE_ORCHESTRATOR } from '../../src/lib/types';
 import * as schema from '../../src/lib/server/db/schema';
 import { readRunInspectorProjection } from '../../src/lib/server/observability/projection';
+import { getToolManifest } from '../../src/lib/server/tools/registry';
 
 const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
 const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE ?? 'default';
@@ -86,7 +87,6 @@ async function main() {
 	const workspacePath = join(scratchDirectory, 'workspace');
 	const runId = `chaos-${Date.now()}`;
 	const sessionId = `chaos-session-${Date.now()}`;
-	const approvalId = `${runId}:tool-call-001:approval`;
 	const managedProcesses: ManagedProcess[] = [];
 	let connection: Connection | null = null;
 
@@ -123,6 +123,18 @@ async function main() {
 		});
 		managedProcesses.push(firstWorker, secondWorker);
 
+		// Expose workspace.writeFile to the model so the model can call it and
+		// trigger the approval gate. The phantom `toolCalls` array that was here
+		// before had no effect — AgentRunInput has no such field. The correct
+		// approach is to pass the tool schema via `tools` so the real Anthropic
+		// API returns a tool_use block that the workflow actually processes.
+		const writeFileManifest = getToolManifest({ allowedToolNames: ['workspace.writeFile'] });
+		const tools = writeFileManifest.map((entry) => ({
+			identity: { name: entry.name },
+			display: { description: entry.description },
+			input: entry.inputSchema
+		}));
+
 		const client = new Client({ connection, namespace: TEMPORAL_NAMESPACE });
 		const handle = await client.workflow.start(agentRunWorkflow, {
 			workflowId: `agent-run:${runId}`,
@@ -132,26 +144,33 @@ async function main() {
 				{
 					sessionKey: sessionId,
 					runId,
-					message: 'Chaos recovery run',
+					message:
+						'Write a short note about chaos recovery to the file notes/recovered.txt in the workspace.',
 					workspacePath,
 					approvalTtlMs: 60_000,
-					toolCalls: [
-						{
-							id: 'tool-call-001',
-							name: 'workspace.writeFile',
-							idempotencyKey: `${runId}:write-once`,
-							arguments: { path: 'notes/recovered.txt', content: 'recovered exactly once' }
-						}
-					]
+					tools
 				}
 			]
 		});
 
+		// Poll until the workflow parks at a tool-approval gate, capturing the
+		// live approvalId from the state snapshot *before* killing the worker so
+		// we don't depend on the killed process to serve a re-query.
+		let liveApprovalId: string | undefined;
 		for (let attempt = 1; attempt <= 20; attempt++) {
 			const state = await handle.query(getAgentRunStateQuery);
-			if (state.status === 'waiting_approval') break;
+			if (state.status === 'waiting_approval') {
+				if (!state.pendingApproval) {
+					throw new Error('waiting_approval state has no pendingApproval');
+				}
+				liveApprovalId = state.pendingApproval.approvalId;
+				break;
+			}
 			await sleep(500);
 			if (attempt === 20) throw new Error('Run did not enter waiting_approval before chaos kill');
+		}
+		if (!liveApprovalId) {
+			throw new Error('Internal error: approval loop exited without capturing approvalId');
 		}
 
 		if (firstWorker.child.pid) {
@@ -162,7 +181,7 @@ async function main() {
 		await sleep(1_000);
 
 		await handle.executeUpdate(resolveApprovalUpdate, {
-			args: [{ approvalId, action: 'approve', reason: 'Chaos demo approval' }]
+			args: [{ approvalId: liveApprovalId, action: 'approve', reason: 'Chaos demo approval' }]
 		});
 		const result = await handle.result();
 		if (result.status !== 'complete') {
