@@ -101,3 +101,13 @@ interface RestoreSandboxInput {
 export async function restoreSandbox(input: RestoreSandboxInput): Promise<void> {
 	await sandboxProvider.restore(input.sessionKey, input.gitCommitSha);
 }
+
+/**
+ * Kills all tracked processes for the given session key. Call this from a
+ * Temporal workflow `finally` block (inside a `CancellationScope.nonCancellable`
+ * wrapper) to guarantee that session processes are cleaned up whether the run
+ * completed normally, failed, or was cancelled.
+ */
+export async function cancelSandboxSession(sessionKey: string): Promise<void> {
+	await sandboxProvider.cancelSession(sessionKey);
+}

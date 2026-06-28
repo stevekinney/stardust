@@ -49,7 +49,7 @@ vi.mock('@src/lib/server/sandbox', () => ({
 }));
 
 import { cancellationSignal, heartbeat } from '@temporalio/activity';
-import { runSandboxCommand } from './sandbox.activities.ts';
+import { cancelSandboxSession, runSandboxCommand } from './sandbox.activities.ts';
 
 const commandInput = {
 	sessionKey: 'session-a',
@@ -250,5 +250,31 @@ describe('runSandboxCommand', () => {
 			await vi.advanceTimersByTimeAsync(10_000);
 			expect(vi.mocked(heartbeat)).toHaveBeenCalledTimes(heartbeatCountBeforeReject);
 		});
+	});
+});
+
+describe('cancelSandboxSession', () => {
+	it('delegates to sandboxProvider.cancelSession with the given session key', async () => {
+		expect.assertions(2);
+
+		mockProvider.cancelSession.mockResolvedValue(undefined);
+
+		await cancelSandboxSession('session-to-cancel');
+
+		expect(mockProvider.cancelSession).toHaveBeenCalledWith('session-to-cancel');
+		expect(mockProvider.cancelSession).toHaveBeenCalledTimes(1);
+	});
+
+	it('calls cancelSession for each distinct session key it receives', async () => {
+		expect.assertions(3);
+
+		mockProvider.cancelSession.mockResolvedValue(undefined);
+
+		await cancelSandboxSession('session-alpha');
+		await cancelSandboxSession('session-beta');
+
+		expect(mockProvider.cancelSession).toHaveBeenCalledTimes(2);
+		expect(mockProvider.cancelSession).toHaveBeenNthCalledWith(1, 'session-alpha');
+		expect(mockProvider.cancelSession).toHaveBeenNthCalledWith(2, 'session-beta');
 	});
 });

@@ -239,7 +239,8 @@ describe('agentRunWorkflow approvals', () => {
 		},
 		async searchMemory(): Promise<[]> {
 			return [];
-		}
+		},
+		async cancelSandboxSession(): Promise<void> {}
 	};
 
 	beforeAll(async () => {
@@ -640,6 +641,7 @@ describe('agentRunWorkflow memory writeback', () => {
 			reason?: string | null;
 		}): Promise<{ id: string }>;
 		searchMemory(): Promise<[]>;
+		cancelSandboxSession(): Promise<void>;
 	}): Promise<AgentRunResult> {
 		const runId = `mem-test-${Date.now()}`;
 		const orchestrator = await Worker.create({
@@ -747,7 +749,8 @@ describe('agentRunWorkflow memory writeback', () => {
 			},
 			async searchMemory(): Promise<[]> {
 				return [];
-			}
+			},
+			async cancelSandboxSession(): Promise<void> {}
 		};
 	}
 
@@ -919,7 +922,8 @@ describe('agentRunWorkflow steering', () => {
 		async recordSubagentCompleted(): Promise<void> {},
 		async writeMemoryCandidate() {
 			return { id: 'mock-candidate-id' };
-		}
+		},
+		async cancelSandboxSession(): Promise<void> {}
 	};
 
 	beforeAll(async () => {
@@ -1266,7 +1270,8 @@ describe('agentRunWorkflow subagents', () => {
 			},
 			async searchMemory(): Promise<[]> {
 				return [];
-			}
+			},
+			async cancelSandboxSession(): Promise<void> {}
 		};
 
 		const orchestrator = await Worker.create({
@@ -1279,6 +1284,15 @@ describe('agentRunWorkflow subagents', () => {
 			connection: env.nativeConnection,
 			namespace: 'default',
 			taskQueue: TASK_QUEUE_TOOLS,
+			activities: subagentTestActivities
+		});
+		// cancelSandboxSession is dispatched to TASK_QUEUE_SANDBOX via the
+		// workflow's finally block — this worker must be present so the activity
+		// doesn't time out and fail the workflow.
+		const sandbox = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_SANDBOX,
 			activities: subagentTestActivities
 		});
 		const model = await Worker.create({
@@ -1385,9 +1399,10 @@ describe('agentRunWorkflow subagents', () => {
 		});
 
 		const toolsTask = tools.runUntil(task.catch(() => undefined));
+		const sandboxTask = sandbox.runUntil(task.catch(() => undefined));
 		const modelTask = model.runUntil(task.catch(() => undefined));
 		const memoryTask = memory.runUntil(task.catch(() => undefined));
-		await Promise.all([task, toolsTask, modelTask, memoryTask]);
+		await Promise.all([task, toolsTask, sandboxTask, modelTask, memoryTask]);
 	});
 });
 
@@ -1445,6 +1460,7 @@ describe('agentRunWorkflow budget caps', () => {
 		recordSubagentCompleted(): Promise<void>;
 		writeMemoryCandidate(): Promise<{ id: string }>;
 		searchMemory(): Promise<[]>;
+		cancelSandboxSession(): Promise<void>;
 	} {
 		return {
 			callModel: callModelFn,
@@ -1477,7 +1493,8 @@ describe('agentRunWorkflow budget caps', () => {
 			},
 			async searchMemory(): Promise<[]> {
 				return [];
-			}
+			},
+			async cancelSandboxSession(): Promise<void> {}
 		};
 	}
 
@@ -1705,5 +1722,219 @@ describe('agentRunWorkflow budget caps', () => {
 			// Critic annotations are empty because the critic subagent was not run.
 			expect(result.criticAnnotations).toEqual([]);
 		});
+	});
+});
+
+// ── Cancel cleanup suite ───────────────────────────────────────────────────────
+
+/**
+ * Tests that `cancelSandboxSession` is invoked in the workflow's `finally`
+ * block on every exit path:
+ *   1. Normal completion (model returns a text answer immediately).
+ *   2. Workflow-level cancellation (Temporal CancelledFailure propagates through
+ *      the try block, but the nonCancellable finally still runs).
+ *
+ * Both cases assert that the cancelled session key recorded in `cancelledSessions`
+ * matches the session key given to the workflow — proving the finally path ran.
+ */
+describe('agentRunWorkflow cancel cleanup', () => {
+	let env: TestWorkflowEnvironment;
+	const cancelledSessions: string[] = [];
+
+	beforeAll(async () => {
+		env = await TestWorkflowEnvironment.createTimeSkipping();
+	});
+
+	afterAll(async () => {
+		await env.teardown();
+	});
+
+	beforeEach(() => {
+		cancelledSessions.length = 0;
+	});
+
+	/** Activities used by both cleanup tests. callModel returns a final answer on the first call. */
+	const cleanupActivities = {
+		async callModel(input: ModelCallInput): Promise<ModelCallResult> {
+			// Default: return a text answer immediately so the workflow completes normally.
+			return {
+				runId: input.runId,
+				model: input.model ?? 'claude-sonnet-4-5-20250929',
+				message: { text: 'Cleanup test done.', toolCalls: [] },
+				usage: { inputTokens: 5, outputTokens: 3, estimatedCostUsd: 0.0001 } as ModelUsage
+			};
+		},
+		async evaluateToolCallPolicy(input: { call: ToolCallInput }): Promise<ToolPolicyDecision> {
+			return {
+				status: 'approval_required',
+				tool: {
+					name: input.call.name,
+					description: 'Risky tool',
+					inputSchema: {},
+					metadata: {
+						risk: 'medium' as const,
+						requiresApproval: true,
+						taskQueue: TASK_QUEUE_SANDBOX,
+						timeoutMs: 15_000,
+						retry: { maximumAttempts: 1 },
+						idempotencyBehavior: 'key-required' as const
+					}
+				},
+				policyVersion: '2026-06-27'
+			};
+		},
+		async recordApprovalRequest(input: RecordApprovalRequestInput): Promise<ApprovalCardState> {
+			return {
+				...input,
+				argsHash: 'cleanup-hash',
+				createdAt: '2026-06-27T00:00:00.000Z',
+				status: 'pending'
+			};
+		},
+		async recordApprovalResolution(
+			input: RecordApprovalResolutionInput
+		): Promise<ApprovalResolution> {
+			return {
+				approvalId: input.approvalId,
+				action: input.action,
+				terminalState: 'cancelled',
+				canonicalArguments: {},
+				proposedArguments: {},
+				remember: false,
+				actor: 'user',
+				resolvedAt: '2026-06-27T01:00:00.000Z'
+			};
+		},
+		async executeTool(
+			input: ToolExecutionInput & { approved?: boolean }
+		): Promise<ToolExecutionResult> {
+			return { callId: input.call.id, toolName: input.call.name, outcome: 'success', content: {} };
+		},
+		async persistToolResult(): Promise<void> {},
+		async recordRunStarted(): Promise<void> {},
+		async recordRunCompleted(): Promise<void> {},
+		async recordSubagentStarted(): Promise<void> {},
+		async recordSubagentCompleted(): Promise<void> {},
+		async writeMemoryCandidate() {
+			return { id: 'cleanup-candidate-id' };
+		},
+		async searchMemory(): Promise<[]> {
+			return [];
+		},
+		async cancelSandboxSession(sessionKey: string): Promise<void> {
+			cancelledSessions.push(sessionKey);
+		}
+	};
+
+	async function runCleanupWorkers<T>(
+		activities: typeof cleanupActivities,
+		callback: () => Promise<T>
+	): Promise<T> {
+		const orchestrator = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_ORCHESTRATOR,
+			workflowsPath: fileURLToPath(new URL('./index.ts', import.meta.url))
+		});
+		const tools = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_TOOLS,
+			activities
+		});
+		const sandbox = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_SANDBOX,
+			activities
+		});
+		const model = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_MODEL,
+			activities
+		});
+		const memory = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_MEMORY,
+			activities
+		});
+
+		const task = orchestrator.runUntil(callback);
+		await Promise.all([
+			tools.runUntil(task.catch(() => undefined)),
+			sandbox.runUntil(task.catch(() => undefined)),
+			model.runUntil(task.catch(() => undefined)),
+			memory.runUntil(task.catch(() => undefined))
+		]);
+		return task;
+	}
+
+	it('calls cancelSandboxSession in the finally path on normal workflow completion', async () => {
+		const sessionKey = 'cleanup-normal-session';
+
+		await runCleanupWorkers(cleanupActivities, async () => {
+			const runId = `cleanup-normal-${Date.now()}`;
+			await env.client.workflow.execute('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [{ sessionKey, runId, message: 'hello' }]
+			});
+		});
+
+		// The finally block must have recorded the session key exactly once.
+		expect(cancelledSessions).toContain(sessionKey);
+	});
+
+	it('calls cancelSandboxSession in the finally path when the workflow is cancelled', async () => {
+		// The callModel in the parking variant returns a tool call so the workflow
+		// parks in waiting_approval — that gives us a window to cancel it while it
+		// is blocked in a condition(), which is the real cancellation scenario.
+		const parkingActivities = {
+			...cleanupActivities,
+			async callModel(input: ModelCallInput): Promise<ModelCallResult> {
+				return {
+					runId: input.runId,
+					model: input.model ?? 'claude-sonnet-4-5-20250929',
+					message: {
+						text: '',
+						toolCalls: [{ id: 'cancel-tool-001', name: 'workspace.writeFile', input: {} }]
+					},
+					usage: { inputTokens: 5, outputTokens: 3, estimatedCostUsd: 0.0001 } as ModelUsage
+				};
+			}
+		};
+
+		const sessionKey = 'cleanup-cancel-session';
+
+		await runCleanupWorkers(parkingActivities, async () => {
+			const runId = `cleanup-cancel-${Date.now()}`;
+			const handle = await env.client.workflow.start('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [{ sessionKey, runId, message: 'write the file', approvalTtlMs: 60_000 }]
+			});
+
+			// Wait until the workflow parks in waiting_approval.
+			let state = await handle.query(getAgentRunStateQuery);
+			for (let i = 0; i < 10 && state.status !== 'waiting_approval'; i++) {
+				await env.sleep(100);
+				state = await handle.query(getAgentRunStateQuery);
+			}
+			expect(state.status).toBe('waiting_approval');
+
+			// Cancel the workflow — this propagates CancelledFailure through the try
+			// block. The CancellationScope.nonCancellable wrapper in the finally block
+			// ensures cancelSandboxSession still runs despite the cancellation.
+			await handle.cancel();
+
+			// result() rejects because the workflow was cancelled.
+			await expect(handle.result()).rejects.toThrow();
+		});
+
+		// The finally block must have recorded the session key even though the
+		// workflow was cancelled (not a normal completion).
+		expect(cancelledSessions).toContain(sessionKey);
 	});
 });
