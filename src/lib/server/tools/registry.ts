@@ -261,6 +261,11 @@ for (const tool of registeredTools) {
  * real implementation. They are hidden from `getToolManifest()` (and therefore
  * from the model) until the backing infrastructure exists. Hiding is preferable to
  * returning a stub result that the model may misinterpret as real output.
+ *
+ * `memory.search` is intentionally kept hidden: the workflow pre-injects
+ * confirmed memory notes into the system prompt via `searchMemory` before each
+ * `callModel` invocation (agentRunWorkflow, retrievedMemory path), satisfying
+ * ARCHITECTURE.md:293 without exposing an on-demand tool to the model.
  */
 const UNIMPLEMENTED_TOOLS = new Set([
 	'web.search',
