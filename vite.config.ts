@@ -4,6 +4,12 @@ import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
 
 export default defineConfig({
+	// Dev server port. Defaults to 7777; `bun run dev` overrides APP_PORT with a
+	// pre-selected free port. strictPort is left false so a standalone `bun run
+	// dev:web` falls back to the next free port instead of failing on a collision.
+	server: {
+		port: Number(process.env.APP_PORT ?? 7777)
+	},
 	// Cinder ships raw .svelte.ts TypeScript source files. Vite's pre-bundler can't
 	// process them as plain JS, so we exclude the package from optimization and let
 	// vite-plugin-svelte handle it on-demand through the full transform pipeline.

@@ -27,8 +27,10 @@ bun run dev
 
 When it is up you'll see:
 
-- **App** — http://localhost:5173
-- **Temporal Web** — http://localhost:8233
+- **App** — http://localhost:7777
+- **Temporal Web** — http://localhost:7778
+
+Those are the preferred ports (Temporal's frontend is 7776). If any is already taken, `bun run dev` automatically selects the next free port and prints the actual URLs in the startup banner — so a port collision never blocks startup.
 
 Press `Ctrl-C` to stop everything. The orchestrator owns only what it started: if it launched the Temporal server it tears it down too, but a Temporal server you were already running is left untouched.
 
@@ -42,9 +44,9 @@ Configuration is environment variables, read from `process.env`. Copy `.env.exam
 | Variable                   | Default                        | Purpose                                                                           |
 | -------------------------- | ------------------------------ | --------------------------------------------------------------------------------- |
 | `MODEL_API_KEY`            | _(none — required)_            | Anthropic API key. Required for any turn that calls the model.                    |
-| `TEMPORAL_ADDRESS`         | `localhost:7233`               | Temporal dev server frontend address.                                             |
+| `TEMPORAL_ADDRESS`         | `localhost:7776`               | Temporal dev server frontend address.                                             |
 | `TEMPORAL_NAMESPACE`       | `default`                      | Temporal namespace (see the note below).                                          |
-| `TEMPORAL_WEB_PORT`        | `8233`                         | Port for the Temporal Web UI.                                                     |
+| `TEMPORAL_WEB_PORT`        | `7778`                         | Port for the Temporal Web UI.                                                     |
 | `DATABASE_URL`             | `file:~/.stardust/stardust.db` | SQLite database path. A leading `~` is expanded to your home directory.           |
 | `ARTIFACT_DIR`             | `~/.stardust/artifacts`        | Root directory for spilled tool-output artifacts.                                 |
 | `ARTIFACT_TOKEN_SECRET`    | `stardust-local-dev-secret`    | HMAC secret for local artifact download tokens. Override before exposing the app. |
@@ -58,7 +60,7 @@ Stardust keeps its local state under `~/.stardust/` (database, artifacts, per-se
 
 ## Using the app
 
-Open http://localhost:5173 and you can walk the full demo path:
+Open http://localhost:7777 and you can walk the full demo path:
 
 - Create or resume a session — no sign-in.
 - Submit a task and watch the output stream in.
@@ -137,5 +139,5 @@ The load-bearing rule is Temporal determinism: workflow code decides and waits b
 
 - **Model turns fail / "MODEL_API_KEY is required"** — set `MODEL_API_KEY` in `.env` (or export it in your shell) and restart so the Worker picks it up. `.env` is read from the directory you run from.
 - **`temporal: command not found`** — install the Temporal CLI (`brew install temporal`).
-- **Port already in use (5173 / 7233 / 8233)** — another dev server or Temporal instance is running. Stop it, or point `TEMPORAL_ADDRESS` / `TEMPORAL_WEB_PORT` elsewhere. `bun run dev` will reuse a Temporal server it finds on `TEMPORAL_ADDRESS`.
+- **Port already in use (7776 / 7777 / 7778)** — `bun run dev` handles this for you: it reuses a Temporal server already running on `TEMPORAL_ADDRESS`, and otherwise selects the next free port for Temporal, the UI, and the app, printing the actual URLs in its banner. To pin specific ports, set `TEMPORAL_ADDRESS` / `TEMPORAL_WEB_PORT` (and `APP_PORT` for the app). The standalone `bun run dev:web` falls back through Vite if 7777 is busy.
 - **Reset all local state** — stop the app and delete `~/.stardust/` (database, artifacts, workspaces, model cache). The next run recreates it and re-applies migrations.

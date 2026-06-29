@@ -8,7 +8,7 @@
 		"dev:app": "concurrently --names web,worker --prefix-colors cyan,yellow \"bun run dev:web\" \"bun run dev:worker\"",
 		"dev:web": "vite dev",
 		"dev:worker": "tsx watch src/worker/main.ts",
-		"temporal:dev": "temporal server start-dev --db-filename ~/.stardust/temporal.db --ui-port 8233",
+		"temporal:dev": "temporal server start-dev --db-filename ~/.stardust/temporal.db --port 7776 --ui-port 7778",
 		"build": "tsx scripts/build.ts",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",

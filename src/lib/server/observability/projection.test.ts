@@ -44,7 +44,7 @@ describe('run inspector projection', () => {
 				workflowId: 'agent-run:run-001',
 				namespace: 'default'
 			})
-		).toBe('http://localhost:8233/namespaces/default/workflows/agent-run%3Arun-001/history');
+		).toBe('http://localhost:7778/namespaces/default/workflows/agent-run%3Arun-001/history');
 	});
 
 	it('returns undefined timelineLanes when no subagent events exist', async () => {
@@ -131,7 +131,7 @@ describe('run inspector projection', () => {
 		const projection = await readRunInspectorProjection(database, 'run-001');
 
 		expect(projection?.run.workflowId).toBe('agent-run:run-001');
-		expect(projection?.temporalWebUrl).toContain('localhost:8233');
+		expect(projection?.temporalWebUrl).toContain('localhost:7778');
 		expect(projection?.transcript.map((event) => event.kind)).toEqual([
 			'user_message',
 			'lifecycle'

@@ -17,9 +17,10 @@ import * as schema from '../../src/lib/server/db/schema';
 import { readRunInspectorProjection } from '../../src/lib/server/observability/projection';
 import { getToolManifest } from '../../src/lib/server/tools/registry';
 
-const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
+const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS ?? 'localhost:7776';
+const TEMPORAL_PORT = TEMPORAL_ADDRESS.split(':').pop() ?? '7776';
 const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE ?? 'default';
-const TEMPORAL_WEB_PORT = process.env.TEMPORAL_WEB_PORT ?? '8233';
+const TEMPORAL_WEB_PORT = process.env.TEMPORAL_WEB_PORT ?? '7778';
 
 type ManagedProcess = {
 	name: string;
@@ -106,6 +107,8 @@ async function main() {
 				'start-dev',
 				'--db-filename',
 				join(scratchDirectory, 'temporal.db'),
+				'--port',
+				TEMPORAL_PORT,
 				'--ui-port',
 				TEMPORAL_WEB_PORT
 			]);
@@ -114,7 +117,14 @@ async function main() {
 		}
 		if (!connection) throw new Error(`Temporal is not reachable at ${TEMPORAL_ADDRESS}`);
 
-		const workerEnvironment = { DATABASE_URL: databaseUrl };
+		// Pin the workers to the same Temporal endpoint and UI port this script uses,
+		// so they connect to the right server and build correct inspector links
+		// regardless of any .env defaults.
+		const workerEnvironment = {
+			DATABASE_URL: databaseUrl,
+			TEMPORAL_ADDRESS,
+			TEMPORAL_WEB_PORT
+		};
 		const firstWorker = startProcess('worker-1', 'bun', ['run', 'dev:worker'], {
 			environment: workerEnvironment
 		});
@@ -195,9 +205,9 @@ async function main() {
 		verificationDatabase.close();
 
 		if (!projection) throw new Error(`No inspector projection was persisted for ${runId}`);
-		if (!projection.temporalWebUrl.includes('localhost:8233')) {
+		if (!projection.temporalWebUrl.includes(`localhost:${TEMPORAL_WEB_PORT}`)) {
 			throw new Error(
-				`Temporal Web link did not target localhost:8233: ${projection.temporalWebUrl}`
+				`Temporal Web link did not target localhost:${TEMPORAL_WEB_PORT}: ${projection.temporalWebUrl}`
 			);
 		}
 		if (projection.idempotencyEntries.length !== 1) {

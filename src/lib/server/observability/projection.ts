@@ -10,7 +10,7 @@ import {
 	toolInvocations,
 	transcriptEvents
 } from '../db/schema';
-import { TEMPORAL_NAMESPACE } from '../config';
+import { TEMPORAL_NAMESPACE, TEMPORAL_WEB_URL } from '../config';
 import { TASK_QUEUE_ORCHESTRATOR } from '../temporal/task-queues';
 
 export type ActionMeterBreakdown = {
@@ -261,7 +261,7 @@ export function buildTemporalWebWorkflowUrl(input: {
 }): string {
 	const namespace = encodeURIComponent(input.namespace ?? TEMPORAL_NAMESPACE);
 	const workflowId = encodeURIComponent(input.workflowId);
-	const baseUrl = input.baseUrl ?? 'http://localhost:8233';
+	const baseUrl = input.baseUrl ?? TEMPORAL_WEB_URL;
 	return `${baseUrl}/namespaces/${namespace}/workflows/${workflowId}/history`;
 }
 
