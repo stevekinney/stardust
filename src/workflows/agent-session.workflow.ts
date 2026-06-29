@@ -7,13 +7,15 @@ import type {
 	CompactMemoryInput,
 	InterruptRunInput,
 	InterruptRunResult,
+	ModelToolSchema,
 	SessionMemorySnapshot,
 	SessionSandboxSnapshot,
 	SessionState,
 	SubmitSteeringInput,
 	SubmitSteeringResult,
 	SubmitTurnInput,
-	SubmitTurnResult
+	SubmitTurnResult,
+	ToolManifestEntry
 } from '@src/lib/types';
 import {
 	CancellationScope,
@@ -63,6 +65,25 @@ const forwardApprovalActivities = proxyActivities<ForwardApprovalActivities>({
 	startToCloseTimeout: '30 seconds',
 	retry: { maximumAttempts: 1 }
 });
+
+type PolicyActivities = {
+	listToolManifest(input?: { allowedToolNames?: string[] }): Promise<ToolManifestEntry[]>;
+};
+
+const policyActivities = proxyActivities<PolicyActivities>({
+	taskQueue: TASK_QUEUE_TOOLS,
+	startToCloseTimeout: '30 seconds',
+	retry: { maximumAttempts: 3 }
+});
+
+/** Maps a ToolManifestEntry to the ModelToolSchema shape expected by AgentRunInput. */
+function toModelToolSchema(entry: ToolManifestEntry): ModelToolSchema {
+	return {
+		identity: { name: entry.name },
+		display: { description: entry.description },
+		input: entry.inputSchema
+	};
+}
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -273,12 +294,18 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 		status = 'active';
 		while (queue.length > 0 && !cancelled) {
 			const turn = queue.shift()!;
-			activeRunId = turn.runId;
 			let runResult: AgentRunResult | undefined;
 
 			try {
 				await CancellationScope.cancellable(async () => {
 					activeRunScope = CancellationScope.current();
+					// Fetch the tool manifest once per turn so the model always has the
+					// current set of available tools. Fetched inside the CancellationScope
+					// so a cancelRunSignal during the fetch cancels the activity rather
+					// than letting it complete and launching the run anyway.
+					const toolManifest = await policyActivities.listToolManifest();
+					const tools = toolManifest.map(toModelToolSchema);
+					activeRunId = turn.runId;
 					runResult = await executeChild(agentRunWorkflow, {
 						workflowId: `agent-run:${turn.runId}`,
 						args: [
@@ -287,6 +314,7 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 								runId: turn.runId,
 								message: turn.message,
 								delegateSubagents: turn.delegateSubagents,
+								tools,
 								...(turn.model !== undefined ? { model: turn.model } : {}),
 								...(turn.maxBudgetUsd !== undefined && turn.maxBudgetUsd > 0
 									? {

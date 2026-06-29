@@ -11,6 +11,7 @@ import type {
 	AgentRunResult,
 	ApprovalResolution,
 	ApprovalResolutionInput,
+	ModelToolSchema,
 	RunBudget
 } from '@src/lib/types';
 import {
@@ -61,6 +62,12 @@ export const getModelQuery = defineQuery<string | undefined, []>('getModel');
  */
 export const getBudgetMaxCostQuery = defineQuery<number | undefined, []>('getBudgetMaxCost');
 
+/**
+ * Query: returns the `tools` array from the AgentRunInput this stub received, or undefined.
+ * Used in tests to assert that the session correctly forwards the tool manifest to child runs.
+ */
+export const getToolsQuery = defineQuery<ModelToolSchema[] | undefined, []>('getTools');
+
 export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunResult> {
 	let released = false;
 	const steeringBuffer: string[] = [];
@@ -82,6 +89,7 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 		getBudgetMaxCostQuery,
 		() => (input.budget as RunBudget | undefined)?.maxEstimatedCostUsd
 	);
+	void setHandler(getToolsQuery, () => input.tools);
 
 	// Handle resolveApprovalUpdate so the approval-routing test can verify the
 	// session forwards the resolution to the run. Returns a mock ApprovalResolution.
