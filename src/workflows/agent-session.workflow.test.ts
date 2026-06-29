@@ -779,6 +779,119 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 		await Promise.all([orchestratorTask, memoryTask]);
 	}, 60_000);
 
+	it('Continue-As-New carries a turn submitted during compaction across the boundary', async () => {
+		// Reproduces the CAN race: a submitTurn arriving while the session is parked
+		// on the compaction executeChild await must survive continueAsNew, not be
+		// dropped. We block the first compaction to hold the window open, inject a
+		// turn, then release and assert the turn runs in the next execution.
+		let releaseCompaction: (() => void) | undefined;
+		const compactionGate = new Promise<void>((resolve) => {
+			releaseCompaction = resolve;
+		});
+		let loadStarted = false;
+
+		const compactionActivities: MemoryCompactionActivities = {
+			async loadMemoryCompactionInput(input) {
+				// `loadStarted` flips on entry (before the gate), so the test observes
+				// the window even if a time-skipped retry later skips the gate.
+				if (!loadStarted) {
+					loadStarted = true;
+					await compactionGate;
+				}
+				return {
+					sessionId: input.sessionId,
+					fromTranscriptCursor: input.fromTranscriptCursor,
+					toTranscriptCursor: 10,
+					transcript: ['User: trigger CAN'],
+					existingMemoryRefs: []
+				};
+			},
+			async summarizeMemoryCompaction() {
+				return { summary: 'compacted', candidates: [] };
+			},
+			async persistMemoryCompaction(input) {
+				return {
+					sessionId: input.sessionId,
+					summaryNoteId: 'compact-summary',
+					candidateIds: [],
+					memoryRefs: ['compact-ref'],
+					transcriptCursor: 10
+				};
+			}
+		};
+
+		const orchestratorWorker = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_ORCHESTRATOR,
+			workflowsPath: fileURLToPath(
+				new URL('./__fixtures__/blocking-run.fixture.ts', import.meta.url)
+			),
+			activities: testActivities
+		});
+		const memoryWorker = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_MEMORY,
+			activities: compactionActivities
+		});
+
+		const orchestratorTask = orchestratorWorker.runUntil(async () => {
+			const sessionKey = 'test-can-queue-carry';
+			const handle = await env.client.workflow.start('agentSessionWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-session:${sessionKey}`,
+				args: [{ sessionKey, canHistoryThreshold: 1 }]
+			});
+			const beforeCanRunId = (await handle.describe()).runId;
+
+			// turn1 runs; once it completes the queue is empty so CAN fires and the
+			// session parks on the (blocked) compaction executeChild await.
+			const turn1: SubmitTurnResult = await handle.executeUpdate(submitTurnUpdate, {
+				args: [{ message: 'turn1' }]
+			});
+			await pollUntil(async () => {
+				const s = await handle.query(getSessionStateQuery);
+				return s.activeRunId === turn1.runId;
+			});
+			await env.client.workflow
+				.getHandle(`agent-run:${turn1.runId}`)
+				.signal(releaseRunSignal, turn1.runId);
+
+			// Wait until compaction has started — the exact race window.
+			await pollUntil(async () => loadStarted, 60);
+
+			// Inject turn2 while the session is parked on the compaction await.
+			const turn2: SubmitTurnResult = await handle.executeUpdate(submitTurnUpdate, {
+				args: [{ message: 'submitted during compaction' }]
+			});
+			expect(turn2.accepted).toBe(true);
+
+			// Let compaction finish so continueAsNew fires.
+			releaseCompaction?.();
+
+			// Wait for the CAN boundary to be crossed.
+			await pollUntil(async () => (await handle.describe()).runId !== beforeCanRunId);
+
+			// The fix: turn2 was carried into execution B and becomes the active run.
+			// Without it, the queue is dropped at continueAsNew and turn2 never runs.
+			await pollUntil(async () => {
+				const s = await handle.query(getSessionStateQuery);
+				return s.activeRunId === turn2.runId;
+			});
+			const stateB: SessionState = await handle.query(getSessionStateQuery);
+			expect(stateB.activeRunId).toBe(turn2.runId);
+
+			// Release turn2 so the session can settle.
+			await env.client.workflow
+				.getHandle(`agent-run:${turn2.runId}`)
+				.signal(releaseRunSignal, turn2.runId);
+		});
+
+		const memoryTask = memoryWorker.runUntil(orchestratorTask.catch(() => undefined));
+		await Promise.all([orchestratorTask, memoryTask]);
+	}, 60_000);
+
 	// ── delegateSubagents propagation ──────────────────────────────────────────
 
 	it('propagates delegateSubagents: true from SubmitTurnInput to AgentRunInput', async () => {

@@ -111,6 +111,12 @@ export type AgentSessionInput = {
 	/** Carried across Continue-As-New: accumulated memory candidate refs. */
 	memoryRefs?: string[];
 	/**
+	 * Carried across Continue-As-New: turns still queued at the moment of handoff.
+	 * A turn submitted during the pre-CAN compaction/handler-drain await would
+	 * otherwise be lost, since the new execution starts with an empty queue.
+	 */
+	queue?: QueuedTurn[];
+	/**
 	 * Carried across Continue-As-New: the transcript sequence cursor advanced by the
 	 * last memory compaction. Passed as `fromTranscriptCursor` to the next compaction
 	 * so it only re-reads events written since the previous compaction.
@@ -139,7 +145,7 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 
 	// ── Mutable state ────────────────────────────────────────────────────────
 
-	const queue: QueuedTurn[] = [];
+	const queue: QueuedTurn[] = input.queue ?? [];
 	let activeRunId: string | null = null;
 	/** CancellationScope for the currently executing child run; undefined when idle. */
 	let activeRunScope: CancellationScope | undefined;
@@ -343,12 +349,17 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 					// with handlers that fire while it is awaited.
 					await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
 
+					// Carry the queue: a submitTurn that arrived during the compaction or
+					// handler-drain awaits above pushed onto `queue`, and `continueAsNew`
+					// is the next statement with no await in between, so the snapshot is
+					// current. Without this, those turns would be silently dropped.
 					await continueAsNew<typeof agentSessionWorkflow>({
 						sessionKey,
 						completedRunCount,
 						submittedTurnCount,
 						memoryRefs,
 						memoryCursor,
+						queue,
 						canHistoryThreshold: canThreshold
 					});
 					// continueAsNew never returns; the line below is unreachable.
