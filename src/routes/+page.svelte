@@ -21,12 +21,6 @@
 			if (!response.ok) throw new Error(await response.text());
 			const body = (await response.json()) as { sessions: SessionRow[] };
 			sessions = body.sessions;
-
-			// Landing screen: navigate to the most recent session if one exists.
-			if (sessions.length > 0) {
-				const recent = sessions[0];
-				void goto(resolve(`/sessions/${encodeURIComponent(recent.sessionKey)}`));
-			}
 		} catch (caught) {
 			error = caught instanceof Error ? caught.message : 'Failed to load sessions';
 		} finally {
