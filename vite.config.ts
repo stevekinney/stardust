@@ -83,6 +83,13 @@ export default defineConfig({
 					name: 'workflows',
 					environment: 'node',
 					fileParallelism: false,
+					// Same rationale as the `server` project: Temporal Worker.create()
+					// webpack-bundles TypeScript on each call, which exceeds Vitest's
+					// 5 000 ms default under load. These tests are the heaviest users of
+					// Worker.create() (agent-run.workflow.test.ts does 5 sequential calls
+					// per test), so the project-level floor matters most here.
+					testTimeout: 60_000,
+					hookTimeout: 60_000,
 					include: ['src/workflows/*.workflow.test.ts']
 				}
 			}
