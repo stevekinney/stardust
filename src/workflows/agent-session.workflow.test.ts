@@ -62,9 +62,6 @@ const stubManifestEntry: ToolManifestEntry = {
 const mockToolsActivities = {
 	async listToolManifest(): Promise<ToolManifestEntry[]> {
 		return [stubManifestEntry];
-	},
-	async forwardApprovalToRun(): Promise<never> {
-		throw new Error('forwardApprovalToRun: not expected in this test');
 	}
 };
 

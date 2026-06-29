@@ -296,17 +296,16 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 			const turn = queue.shift()!;
 			let runResult: AgentRunResult | undefined;
 
-			// Fetch the tool manifest once per turn so the model always has the
-			// current set of available tools. Fetched before setting activeRunId so
-			// that tests polling for activeRunId can immediately query the child run.
-			const toolManifest = await policyActivities.listToolManifest();
-			const tools = toolManifest.map(toModelToolSchema);
-
-			activeRunId = turn.runId;
-
 			try {
 				await CancellationScope.cancellable(async () => {
 					activeRunScope = CancellationScope.current();
+					// Fetch the tool manifest once per turn so the model always has the
+					// current set of available tools. Fetched inside the CancellationScope
+					// so a cancelRunSignal during the fetch cancels the activity rather
+					// than letting it complete and launching the run anyway.
+					const toolManifest = await policyActivities.listToolManifest();
+					const tools = toolManifest.map(toModelToolSchema);
+					activeRunId = turn.runId;
 					runResult = await executeChild(agentRunWorkflow, {
 						workflowId: `agent-run:${turn.runId}`,
 						args: [
