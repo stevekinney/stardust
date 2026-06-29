@@ -26,6 +26,7 @@ import {
 	allHandlersFinished,
 	condition,
 	executeChild,
+	isCancellation,
 	proxyActivities,
 	setHandler
 } from '@temporalio/workflow';
@@ -919,6 +920,31 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 			},
 			grandTotalUsage
 		);
+	} catch (e: unknown) {
+		// Workflow-level cancellation is not a failure — the cancellation path
+		// (via cancelRunSignal) already records 'cancelled'. Re-throw so Temporal
+		// propagates the CancelledFailure to the parent session workflow.
+		if (isCancellation(e)) {
+			throw e;
+		}
+		// For any other thrown error, persist status='failed' so the run record in
+		// the database is updated and the inspector does not show the run as Running
+		// forever. Wrap in nonCancellable so a concurrent cancellation does not
+		// suppress this write.
+		status = 'failed';
+		await CancellationScope.nonCancellable(() =>
+			completeRun(
+				input,
+				{
+					runId: input.runId,
+					status: 'failed',
+					finalAnswer: e instanceof Error ? e.message : String(e),
+					memoryRefs: []
+				},
+				totalUsage
+			)
+		);
+		throw e;
 	} finally {
 		// Kill all tracked processes for this session on every exit path — normal
 		// completion, budget exhaustion, approval denial/expiry, and Temporal
