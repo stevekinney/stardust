@@ -371,10 +371,11 @@ Use these commands from the repository root:
 
 ```sh
 bun install
-bun run temporal:dev
-bun run db:migrate
-bun run dev
+cp .env.example .env   # set MODEL_API_KEY
+bun run dev            # orchestrator: starts/reuses Temporal, migrates, runs web + worker
 ```
+
+`bun run dev` (`scripts/dev.ts`) brings the whole stack up in dependency order. The individual steps remain available for when you want to run a process on its own: `bun run temporal:dev`, `bun run db:migrate`, `bun run dev:app` (web + worker), `bun run dev:web`, and `bun run dev:worker`. Configuration is environment variables loaded by Bun from `.env`; see `.env.example` for the authoritative list.
 
 Standard verification gates:
 

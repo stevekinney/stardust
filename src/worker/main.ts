@@ -1,3 +1,4 @@
+import '@src/lib/server/load-env';
 import { NativeConnection, Worker } from '@temporalio/worker';
 import { createRequire } from 'node:module';
 import * as activities from '../activities/index.ts';

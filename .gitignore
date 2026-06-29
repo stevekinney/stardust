@@ -25,4 +25,7 @@ vite.config.ts.timestamp-*
 test-results
 # SQLite
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 tmp/
