@@ -311,7 +311,12 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 					// The session either picks up the next queued turn or exits
 					// depending on the `cancelled` flag.
 				} else {
-					throw e;
+					// The run workflow threw a non-cancellation error (the run workflow
+					// already persisted status='failed' before re-throwing). Count it as
+					// a completed run so the session loop continues and is not bricked —
+					// the session must remain able to accept subsequent turns.
+					completedRunCount++;
+					// runResult is undefined here; no memory refs to accumulate.
 				}
 			} finally {
 				activeRunId = null;

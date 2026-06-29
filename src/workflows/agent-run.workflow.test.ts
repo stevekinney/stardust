@@ -1938,3 +1938,148 @@ describe('agentRunWorkflow cancel cleanup', () => {
 		expect(cancelledSessions).toContain(sessionKey);
 	});
 });
+
+// ── Failure-status suite ───────────────────────────────────────────────────────
+
+/**
+ * Regression guard for task 250c5b44: when callModel throws an unrecoverable
+ * error the run workflow must record status='failed' via recordRunCompleted
+ * before propagating the error. Without the fix the status stays 'running'
+ * forever and the inspector shows dead runs as Running.
+ */
+describe('agentRunWorkflow failure status', () => {
+	let env: TestWorkflowEnvironment;
+
+	const completedRuns: Array<{
+		sessionId: string;
+		runId: string;
+		status: 'complete' | 'failed' | 'cancelled';
+		finalAnswer: string;
+		usage?: ModelUsage;
+	}> = [];
+
+	const failingActivities = {
+		async callModel(): Promise<ModelCallResult> {
+			throw ApplicationFailure.nonRetryable('simulated model failure');
+		},
+		async evaluateToolCallPolicy(): Promise<ToolPolicyDecision> {
+			return {
+				status: 'allowed',
+				tool: {
+					name: 'noop',
+					description: '',
+					inputSchema: {},
+					metadata: {
+						risk: 'low' as const,
+						requiresApproval: false,
+						taskQueue: TASK_QUEUE_SANDBOX,
+						timeoutMs: 5000,
+						retry: { maximumAttempts: 1 },
+						idempotencyBehavior: 'safe' as const
+					}
+				}
+			};
+		},
+		async recordApprovalRequest(): Promise<ApprovalCardState> {
+			throw ApplicationFailure.nonRetryable('should not be called');
+		},
+		async recordApprovalResolution(): Promise<ApprovalResolution> {
+			throw ApplicationFailure.nonRetryable('should not be called');
+		},
+		async executeTool(
+			input: ToolExecutionInput & { approved?: boolean }
+		): Promise<ToolExecutionResult> {
+			return { callId: input.call.id, toolName: input.call.name, outcome: 'success', content: {} };
+		},
+		async persistToolResult(): Promise<void> {},
+		async recordRunStarted(): Promise<void> {},
+		async recordRunCompleted(input: {
+			sessionId: string;
+			runId: string;
+			status: 'complete' | 'failed' | 'cancelled';
+			finalAnswer: string;
+			usage?: ModelUsage;
+		}): Promise<void> {
+			completedRuns.push(input);
+		},
+		async recordSubagentStarted(): Promise<void> {},
+		async recordSubagentCompleted(): Promise<void> {},
+		async writeMemoryCandidate(): Promise<{ id: string }> {
+			return { id: 'fail-candidate' };
+		},
+		async searchMemory(): Promise<[]> {
+			return [];
+		},
+		async cancelSandboxSession(): Promise<void> {}
+	};
+
+	beforeAll(async () => {
+		env = await TestWorkflowEnvironment.createTimeSkipping();
+	});
+
+	afterAll(async () => {
+		await env.teardown();
+	});
+
+	it('records status=failed via recordRunCompleted when callModel throws', async () => {
+		completedRuns.length = 0;
+
+		const runId = `fail-status-${Date.now()}`;
+
+		const orchestrator = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_ORCHESTRATOR,
+			workflowsPath: fileURLToPath(new URL('./index.ts', import.meta.url))
+		});
+		const tools = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_TOOLS,
+			activities: failingActivities
+		});
+		const sandbox = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_SANDBOX,
+			activities: failingActivities
+		});
+		const model = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_MODEL,
+			activities: failingActivities
+		});
+		const memory = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_MEMORY,
+			activities: failingActivities
+		});
+
+		// Start the workflow then wait for it to finish (it will throw, so catch the error).
+		// The orchestrator worker runs the workflow; the other workers provide activities.
+		const task = orchestrator.runUntil(async () => {
+			const handle = await env.client.workflow.start('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [{ sessionKey: 'fail-session', runId, message: 'trigger failure' }]
+			});
+			// The workflow re-throws after recording failure, so result() rejects.
+			await expect(handle.result()).rejects.toThrow();
+		});
+
+		await Promise.all([
+			task,
+			tools.runUntil(task.catch(() => undefined)),
+			sandbox.runUntil(task.catch(() => undefined)),
+			model.runUntil(task.catch(() => undefined)),
+			memory.runUntil(task.catch(() => undefined))
+		]);
+
+		// recordRunCompleted must have been called with status='failed'.
+		expect(completedRuns).toHaveLength(1);
+		expect(completedRuns[0].status).toBe('failed');
+		expect(completedRuns[0].runId).toBe(runId);
+	});
+});

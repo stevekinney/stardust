@@ -1190,3 +1190,83 @@ describe('agentSessionWorkflow — approval routing', () => {
 		});
 	});
 });
+
+// ── Failing-run fixture suite ─────────────────────────────────────────────────
+
+/**
+ * Regression guard for task ee14c457: when a child run workflow throws a
+ * non-cancellation error the session must NOT re-throw it. The session must
+ * stay alive, accept a subsequent turn, and eventually complete that turn.
+ */
+describe('agentSessionWorkflow — failing-run fixture', () => {
+	let env: TestWorkflowEnvironment;
+
+	beforeAll(async () => {
+		env = await TestWorkflowEnvironment.createTimeSkipping();
+	});
+
+	afterAll(async () => {
+		await env.teardown();
+	});
+
+	async function runWithFailingWorker<T>(callback: () => Promise<T>): Promise<T> {
+		const worker = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_ORCHESTRATOR,
+			workflowsPath: fileURLToPath(
+				new URL('./__fixtures__/failing-run.fixture.ts', import.meta.url)
+			),
+			activities: testActivities
+		});
+
+		return worker.runUntil(callback);
+	}
+
+	it('stays alive and accepts a second turn after the first run fails', async () => {
+		await runWithFailingWorker(async () => {
+			const sessionKey = `test-failure-resilience-${Date.now()}`;
+			const handle = await env.client.workflow.start('agentSessionWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-session:${sessionKey}`,
+				args: [{ sessionKey }]
+			});
+
+			// Submit first turn — the stub run throws immediately.
+			const turn1: SubmitTurnResult = await handle.executeUpdate(submitTurnUpdate, {
+				args: [{ message: 'first turn (will fail)' }]
+			});
+			expect(turn1.accepted).toBe(true);
+
+			// Poll until the session is idle again (first run failed and was handled).
+			for (let i = 0; i < 20; i++) {
+				const state: SessionState = await handle.query(getSessionStateQuery);
+				if (state.status === 'idle' && state.activeRunId === null) break;
+				await env.sleep(50);
+			}
+
+			const stateAfterFailure: SessionState = await handle.query(getSessionStateQuery);
+			// The session must be idle (not failed/terminated) and have no active run.
+			expect(stateAfterFailure.status).toBe('idle');
+			expect(stateAfterFailure.activeRunId).toBeNull();
+
+			// Submit a second turn — must be accepted and processed.
+			const turn2: SubmitTurnResult = await handle.executeUpdate(submitTurnUpdate, {
+				args: [{ message: 'second turn (after failure)' }]
+			});
+			expect(turn2.accepted).toBe(true);
+			expect(turn2.runId).not.toBe(turn1.runId);
+
+			// Poll until completedRunCount reaches 2 (both runs counted — failed + second).
+			for (let i = 0; i < 20; i++) {
+				const state: SessionState = await handle.query(getSessionStateQuery);
+				if (state.completedRunCount >= 2) break;
+				await env.sleep(50);
+			}
+
+			const finalState: SessionState = await handle.query(getSessionStateQuery);
+			expect(finalState.completedRunCount).toBe(2);
+			expect(finalState.activeRunId).toBeNull();
+		});
+	});
+});
