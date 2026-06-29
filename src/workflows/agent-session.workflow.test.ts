@@ -9,7 +9,8 @@ import type {
 	MemoryCompactionActivities,
 	SessionMemorySnapshot,
 	SessionState,
-	SubmitTurnResult
+	SubmitTurnResult,
+	ToolManifestEntry
 } from '@src/lib/types';
 import { TASK_QUEUE_MEMORY, TASK_QUEUE_ORCHESTRATOR, TASK_QUEUE_TOOLS } from '@src/lib/types';
 import {
@@ -29,12 +30,42 @@ import {
 	getDelegateSubagentsQuery,
 	getModelQuery,
 	getSteeringBufferQuery,
+	getToolsQuery,
 	receivedApprovalQuery,
 	releaseRunSignal
 } from './__fixtures__/blocking-run.fixture';
 
 const testActivities = {
 	async noop(): Promise<void> {}
+};
+
+/** Minimal stub ToolManifestEntry returned by the mock listToolManifest activity. */
+const stubManifestEntry: ToolManifestEntry = {
+	name: 'test.tool',
+	description: 'A test tool',
+	inputSchema: { type: 'object', properties: {} },
+	metadata: {
+		risk: 'low',
+		requiresApproval: false,
+		taskQueue: TASK_QUEUE_TOOLS,
+		timeoutMs: 5_000,
+		retry: { maximumAttempts: 1 },
+		idempotencyBehavior: 'safe'
+	}
+};
+
+/**
+ * Activities served on TASK_QUEUE_TOOLS for tests.
+ * Every test that submits a turn needs this worker because the session fetches
+ * the tool manifest once per turn (before executeChild) on TASK_QUEUE_TOOLS.
+ */
+const mockToolsActivities = {
+	async listToolManifest(): Promise<ToolManifestEntry[]> {
+		return [stubManifestEntry];
+	},
+	async forwardApprovalToRun(): Promise<never> {
+		throw new Error('forwardApprovalToRun: not expected in this test');
+	}
 };
 
 // ── Basic suite — uses the real workflows index (no blocking) ──────────────────
@@ -51,15 +82,24 @@ describe('agentSessionWorkflow', () => {
 	});
 
 	async function runWithWorker<T>(callback: () => Promise<T>): Promise<T> {
-		const worker = await Worker.create({
+		const orchestratorWorker = await Worker.create({
 			connection: env.nativeConnection,
 			namespace: 'default',
 			taskQueue: TASK_QUEUE_ORCHESTRATOR,
 			workflowsPath: fileURLToPath(new URL('./index.ts', import.meta.url)),
 			activities: testActivities
 		});
+		const toolsWorker = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_TOOLS,
+			activities: mockToolsActivities
+		});
 
-		return worker.runUntil(callback);
+		const orchestratorTask = orchestratorWorker.runUntil(callback);
+		const toolsTask = toolsWorker.runUntil(orchestratorTask.catch(() => undefined));
+		const [result] = await Promise.all([orchestratorTask, toolsTask]);
+		return result;
 	}
 
 	it('submitTurn returns { accepted: true, runId }', async () => {
@@ -195,7 +235,7 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 	});
 
 	async function runWithBlockingWorker<T>(callback: () => Promise<T>): Promise<T> {
-		const worker = await Worker.create({
+		const orchestratorWorker = await Worker.create({
 			connection: env.nativeConnection,
 			namespace: 'default',
 			taskQueue: TASK_QUEUE_ORCHESTRATOR,
@@ -204,8 +244,17 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 			),
 			activities: testActivities
 		});
+		const toolsWorker = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_TOOLS,
+			activities: mockToolsActivities
+		});
 
-		return worker.runUntil(callback);
+		const orchestratorTask = orchestratorWorker.runUntil(callback);
+		const toolsTask = toolsWorker.runUntil(orchestratorTask.catch(() => undefined));
+		const [result] = await Promise.all([orchestratorTask, toolsTask]);
+		return result;
 	}
 
 	// ── Helpers ────────────────────────────────────────────────────────────────
@@ -598,7 +647,8 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 		};
 
 		// The CAN path now invokes memoryCompactionWorkflow (on TASK_QUEUE_ORCHESTRATOR)
-		// whose activities dispatch to TASK_QUEUE_MEMORY. Two workers are required.
+		// whose activities dispatch to TASK_QUEUE_MEMORY. Three workers are required:
+		// orchestrator, memory, and tools (for listToolManifest called once per turn).
 		const orchestratorWorker = await Worker.create({
 			connection: env.nativeConnection,
 			namespace: 'default',
@@ -613,6 +663,12 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 			namespace: 'default',
 			taskQueue: TASK_QUEUE_MEMORY,
 			activities: compactionActivities
+		});
+		const toolsWorker = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_TOOLS,
+			activities: mockToolsActivities
 		});
 
 		const orchestratorTask = orchestratorWorker.runUntil(async () => {
@@ -684,7 +740,8 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 		});
 
 		const memoryTask = memoryWorker.runUntil(orchestratorTask.catch(() => undefined));
-		await Promise.all([orchestratorTask, memoryTask]);
+		const toolsTask = toolsWorker.runUntil(orchestratorTask.catch(() => undefined));
+		await Promise.all([orchestratorTask, memoryTask, toolsTask]);
 	}, 60_000);
 
 	it('Continue-As-New triggers memory compaction and updates memoryRefs', async () => {
@@ -729,6 +786,12 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 			namespace: 'default',
 			taskQueue: TASK_QUEUE_MEMORY,
 			activities: compactionActivities
+		});
+		const toolsWorker = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_TOOLS,
+			activities: mockToolsActivities
 		});
 
 		const orchestratorTask = orchestratorWorker.runUntil(async () => {
@@ -776,7 +839,8 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 		});
 
 		const memoryTask = memoryWorker.runUntil(orchestratorTask.catch(() => undefined));
-		await Promise.all([orchestratorTask, memoryTask]);
+		const toolsTask = toolsWorker.runUntil(orchestratorTask.catch(() => undefined));
+		await Promise.all([orchestratorTask, memoryTask, toolsTask]);
 	}, 60_000);
 
 	it('Continue-As-New carries a turn submitted during compaction across the boundary', async () => {
@@ -835,6 +899,12 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 			taskQueue: TASK_QUEUE_MEMORY,
 			activities: compactionActivities
 		});
+		const toolsWorker = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_TOOLS,
+			activities: mockToolsActivities
+		});
 
 		const orchestratorTask = orchestratorWorker.runUntil(async () => {
 			const sessionKey = 'test-can-queue-carry';
@@ -889,7 +959,8 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 		});
 
 		const memoryTask = memoryWorker.runUntil(orchestratorTask.catch(() => undefined));
-		await Promise.all([orchestratorTask, memoryTask]);
+		const toolsTask = toolsWorker.runUntil(orchestratorTask.catch(() => undefined));
+		await Promise.all([orchestratorTask, memoryTask, toolsTask]);
 	}, 60_000);
 
 	// ── delegateSubagents propagation ──────────────────────────────────────────
@@ -1065,6 +1136,42 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 			await runHandle.signal(releaseRunSignal, turn.runId);
 		});
 	});
+
+	// ── tool manifest propagation ──────────────────────────────────────────────
+
+	it('forwards the tool manifest from listToolManifest to AgentRunInput.tools for each turn', async () => {
+		await runWithBlockingWorker(async () => {
+			const sessionKey = 'test-tools-prop';
+			const handle = await env.client.workflow.start('agentSessionWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-session:${sessionKey}-${Date.now()}`,
+				args: [{ sessionKey }]
+			});
+
+			const turn: SubmitTurnResult = await handle.executeUpdate(submitTurnUpdate, {
+				args: [{ message: 'use tools' }]
+			});
+			expect(turn.accepted).toBe(true);
+
+			await pollUntil(async () => {
+				const state = await handle.query(getSessionStateQuery);
+				return state.activeRunId === turn.runId;
+			});
+
+			// The blocking stub exposes the tools array via getToolsQuery.
+			const runHandle = env.client.workflow.getHandle(`agent-run:${turn.runId}`);
+			const tools = await runHandle.query(getToolsQuery);
+
+			// The session must forward a non-empty tools array derived from the manifest.
+			expect(tools).toBeDefined();
+			expect(Array.isArray(tools)).toBe(true);
+			expect(tools!.length).toBeGreaterThan(0);
+			// The stub manifest has one entry with name 'test.tool'.
+			expect(tools![0].identity.name).toBe('test.tool');
+
+			await runHandle.signal(releaseRunSignal, turn.runId);
+		});
+	});
 });
 
 // ── Approval routing suite — verifies session sits on the approval resolution path ──
@@ -1097,6 +1204,9 @@ describe('agentSessionWorkflow — approval routing', () => {
 		// call resolveApprovalUpdate on the run. The blocking fixture handles the update
 		// and records the input for assertion via receivedApprovalQuery.
 		const approvalForwardingActivities = {
+			async listToolManifest(): Promise<ToolManifestEntry[]> {
+				return [stubManifestEntry];
+			},
 			async forwardApprovalToRun(input: {
 				runId: string;
 				resolution: ApprovalResolutionInput;
@@ -1210,7 +1320,7 @@ describe('agentSessionWorkflow — failing-run fixture', () => {
 	});
 
 	async function runWithFailingWorker<T>(callback: () => Promise<T>): Promise<T> {
-		const worker = await Worker.create({
+		const orchestratorWorker = await Worker.create({
 			connection: env.nativeConnection,
 			namespace: 'default',
 			taskQueue: TASK_QUEUE_ORCHESTRATOR,
@@ -1219,8 +1329,17 @@ describe('agentSessionWorkflow — failing-run fixture', () => {
 			),
 			activities: testActivities
 		});
+		const toolsWorker = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_TOOLS,
+			activities: mockToolsActivities
+		});
 
-		return worker.runUntil(callback);
+		const orchestratorTask = orchestratorWorker.runUntil(callback);
+		const toolsTask = toolsWorker.runUntil(orchestratorTask.catch(() => undefined));
+		const [result] = await Promise.all([orchestratorTask, toolsTask]);
+		return result;
 	}
 
 	it('stays alive and accepts a second turn after the first run fails', async () => {

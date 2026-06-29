@@ -7,13 +7,15 @@ import type {
 	CompactMemoryInput,
 	InterruptRunInput,
 	InterruptRunResult,
+	ModelToolSchema,
 	SessionMemorySnapshot,
 	SessionSandboxSnapshot,
 	SessionState,
 	SubmitSteeringInput,
 	SubmitSteeringResult,
 	SubmitTurnInput,
-	SubmitTurnResult
+	SubmitTurnResult,
+	ToolManifestEntry
 } from '@src/lib/types';
 import {
 	CancellationScope,
@@ -63,6 +65,25 @@ const forwardApprovalActivities = proxyActivities<ForwardApprovalActivities>({
 	startToCloseTimeout: '30 seconds',
 	retry: { maximumAttempts: 1 }
 });
+
+type PolicyActivities = {
+	listToolManifest(input?: { allowedToolNames?: string[] }): Promise<ToolManifestEntry[]>;
+};
+
+const policyActivities = proxyActivities<PolicyActivities>({
+	taskQueue: TASK_QUEUE_TOOLS,
+	startToCloseTimeout: '30 seconds',
+	retry: { maximumAttempts: 3 }
+});
+
+/** Maps a ToolManifestEntry to the ModelToolSchema shape expected by AgentRunInput. */
+function toModelToolSchema(entry: ToolManifestEntry): ModelToolSchema {
+	return {
+		identity: { name: entry.name },
+		display: { description: entry.description },
+		input: entry.inputSchema
+	};
+}
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -273,8 +294,15 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 		status = 'active';
 		while (queue.length > 0 && !cancelled) {
 			const turn = queue.shift()!;
-			activeRunId = turn.runId;
 			let runResult: AgentRunResult | undefined;
+
+			// Fetch the tool manifest once per turn so the model always has the
+			// current set of available tools. Fetched before setting activeRunId so
+			// that tests polling for activeRunId can immediately query the child run.
+			const toolManifest = await policyActivities.listToolManifest();
+			const tools = toolManifest.map(toModelToolSchema);
+
+			activeRunId = turn.runId;
 
 			try {
 				await CancellationScope.cancellable(async () => {
@@ -287,6 +315,7 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 								runId: turn.runId,
 								message: turn.message,
 								delegateSubagents: turn.delegateSubagents,
+								tools,
 								...(turn.model !== undefined ? { model: turn.model } : {}),
 								...(turn.maxBudgetUsd !== undefined && turn.maxBudgetUsd > 0
 									? {
