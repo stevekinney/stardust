@@ -32,7 +32,8 @@ export async function researchSubagentWorkflow(
 		modelCallId: `${input.subagentRunId}:model-call-1`,
 		model: input.model ?? DEFAULT_MODEL,
 		systemPrompt: 'You are a research assistant. Answer the user question concisely.',
-		maxTokens: 1024
+		steeringMessages: [input.message],
+		maxTokens: input.maxTokens ?? 1024
 	});
 
 	return {

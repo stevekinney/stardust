@@ -6,6 +6,10 @@ import type {
 	SandboxCommandResult,
 	SandboxEphemeralCommandInput,
 	SandboxFileInput,
+	SandboxProcessKillInput,
+	SandboxProcessKillResult,
+	SandboxProcessStartInput,
+	SandboxProcessStartResult,
 	SandboxSnapshotInput,
 	SandboxSnapshotResult,
 	SandboxWriteFileInput
@@ -68,6 +72,18 @@ export async function runSandboxCommand(input: SandboxCommandInput): Promise<San
 	} finally {
 		clearInterval(heartbeatTimer);
 	}
+}
+
+export async function startSandboxProcess(
+	input: SandboxProcessStartInput
+): Promise<SandboxProcessStartResult> {
+	return sandboxProvider.startProcess(input);
+}
+
+export async function killSandboxProcess(
+	input: SandboxProcessKillInput
+): Promise<SandboxProcessKillResult> {
+	return sandboxProvider.killProcess(input);
 }
 
 interface RunEphemeralSandboxCommandInput {

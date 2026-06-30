@@ -32,7 +32,8 @@ export async function codeSubagentWorkflow(
 		modelCallId: `${input.subagentRunId}:model-call-1`,
 		model: input.model ?? DEFAULT_MODEL,
 		systemPrompt: 'You are a code assistant. Write clean, concise code that solves the user task.',
-		maxTokens: 1024
+		steeringMessages: [input.message],
+		maxTokens: input.maxTokens ?? 1024
 	});
 
 	return {

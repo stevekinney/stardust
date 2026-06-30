@@ -54,11 +54,16 @@ afterEach(async () => {
 // ── Manifest shape ────────────────────────────────────────────────────────────
 
 describe('tool registry', () => {
-	it('exposes implemented tools and hides unimplemented stubs from the manifest', () => {
+	it('exposes implemented local tools and hides only credential-gated web.search', () => {
 		const manifest = getToolManifest();
-		// Only implemented tools appear in the manifest. Stubs (web.search, memory.*,
-		// process.*, delegate.*) are hidden until their backing infrastructure exists.
 		expect(manifest.map((tool) => tool.name).sort()).toEqual([
+			'delegate.code',
+			'delegate.critic',
+			'delegate.research',
+			'memory.search',
+			'memory.writeCandidate',
+			'process.kill',
+			'process.start',
 			'sandbox.snapshot',
 			'shell.exec',
 			'web.fetch',
@@ -126,12 +131,10 @@ describe('tool registry', () => {
 		});
 	});
 
-	it('retains full metadata for hidden tools in registeredTools for policy routing', () => {
+	it('retains full metadata for extended tools in registeredTools and the manifest', () => {
 		const byName = new Map(registeredTools.map((t) => [t.name, t]));
 		const manifestNames = new Set(getToolManifest().map((t) => t.name));
 
-		// Hidden tools still carry correct metadata so policy routing works even when
-		// the tool is not exposed to the model.
 		expect(byName.get('process.start')).toMatchObject({
 			metadata: {
 				risk: 'high',
@@ -166,9 +169,7 @@ describe('tool registry', () => {
 			});
 		}
 
-		// None of the hidden tools appear in the manifest.
-		for (const hidden of [
-			'web.search',
+		for (const visible of [
 			'memory.search',
 			'memory.writeCandidate',
 			'process.start',
@@ -177,8 +178,9 @@ describe('tool registry', () => {
 			'delegate.code',
 			'delegate.critic'
 		]) {
-			expect(manifestNames.has(hidden), `${hidden} should be hidden from manifest`).toBe(false);
+			expect(manifestNames.has(visible), `${visible} should appear in manifest`).toBe(true);
 		}
+		expect(manifestNames.has('web.search')).toBe(false);
 	});
 
 	it('carries idempotencyBehavior on every registered tool', () => {
@@ -190,13 +192,12 @@ describe('tool registry', () => {
 		}
 	});
 
-	it('hides web.search from the manifest regardless of TAVILY_API_KEY', async () => {
+	it('exposes web.search from the manifest only when TAVILY_API_KEY is configured', async () => {
 		vi.stubEnv('TAVILY_API_KEY', '');
 		expect(getToolManifest().map((tool) => tool.name)).not.toContain('web.search');
 
 		vi.stubEnv('TAVILY_API_KEY', 'test-tavily-key');
-		// web.search is still hidden — its Tavily implementation is pending.
-		expect(getToolManifest().map((tool) => tool.name)).not.toContain('web.search');
+		expect(getToolManifest().map((tool) => tool.name)).toContain('web.search');
 	});
 
 	it('filters denied tools from the model manifest and formats via armorer', () => {
@@ -242,6 +243,47 @@ describe('tool registry', () => {
 		expect(result.content).toContain('hello from the internet');
 	});
 
+	it('executes web.search through Tavily and normalizes results', async () => {
+		vi.stubEnv('TAVILY_API_KEY', 'test-tavily-key');
+		const fetcher = vi.fn(
+			async () =>
+				new Response(
+					JSON.stringify({
+						results: [
+							{ title: 'First', url: 'https://example.test/1', content: 'first result' },
+							{ title: 'Second', url: 'https://example.test/2', snippet: 'second result' }
+						]
+					}),
+					{ status: 200, headers: { 'content-type': 'application/json' } }
+				)
+		);
+
+		const result = await executeRegisteredTool({
+			fetcher,
+			call: {
+				id: 'call-web-search-01',
+				name: 'web.search',
+				arguments: { query: 'stardust', maxResults: 2 }
+			}
+		});
+
+		expect(result.outcome).toBe('success');
+		expect(fetcher).toHaveBeenCalledWith(
+			'https://api.tavily.com/search',
+			expect.objectContaining({
+				method: 'POST',
+				headers: expect.objectContaining({ authorization: 'Bearer test-tavily-key' })
+			})
+		);
+		expect(result.content).toEqual({
+			query: 'stardust',
+			results: [
+				{ title: 'First', url: 'https://example.test/1', snippet: 'first result' },
+				{ title: 'Second', url: 'https://example.test/2', snippet: 'second result' }
+			]
+		});
+	});
+
 	it('fences workspace.readFile output as untrusted data to prevent prompt injection', async () => {
 		// Set up the adversarial file directly via the provider (bypasses the
 		// approval gate that workspace.writeFile requires).
@@ -285,24 +327,34 @@ describe('tool registry', () => {
 		).resolves.toMatchObject({ outcome: 'denied' });
 	});
 
-	it('denies hidden tools (process.start, delegate.*) instead of returning approval_required', async () => {
-		// Hidden tools are not in the configured tools list, so they're denied as
-		// unknown rather than routed through the approval flow.
+	it('routes newly backed process and delegate tools through approval', async () => {
 		await expect(
 			executeRegisteredTool({
 				sessionKey: TEST_SESSION,
 				sandboxProvider: provider,
 				call: { id: 'call-hidden-01', name: 'process.start', arguments: { command: 'bun' } }
 			})
-		).resolves.toMatchObject({ outcome: 'denied' });
+		).resolves.toMatchObject({ outcome: 'approval_required' });
 
 		await expect(
 			executeRegisteredTool({
 				sessionKey: TEST_SESSION,
 				sandboxProvider: provider,
-				call: { id: 'call-hidden-02', name: 'delegate.code', arguments: { prompt: 'test' } }
+				call: {
+					id: 'call-hidden-02',
+					name: 'process.kill',
+					arguments: { processId: 'process-001' }
+				}
 			})
-		).resolves.toMatchObject({ outcome: 'denied' });
+		).resolves.toMatchObject({ outcome: 'approval_required' });
+
+		await expect(
+			executeRegisteredTool({
+				sessionKey: TEST_SESSION,
+				sandboxProvider: provider,
+				call: { id: 'call-hidden-03', name: 'delegate.code', arguments: { prompt: 'test' } }
+			})
+		).resolves.toMatchObject({ outcome: 'approval_required' });
 	});
 
 	it('sandbox.snapshot requires approval before executing', async () => {
@@ -317,6 +369,97 @@ describe('tool registry', () => {
 				}
 			})
 		).resolves.toMatchObject({ outcome: 'approval_required' });
+	});
+
+	it('memory.search injects the current session and maps requested layers', async () => {
+		const searchMemory = vi.fn(async () => [
+			{
+				id: 'memory-001',
+				sessionId: TEST_SESSION,
+				layer: 'durable' as const,
+				content: 'Use Bun for TypeScript tooling.',
+				tags: ['tooling'],
+				runId: 'run-memory',
+				confirmedAt: '2026-01-01T00:00:00.000Z',
+				createdAt: '2026-01-01T00:00:00.000Z',
+				updatedAt: '2026-01-01T00:00:00.000Z',
+				lexicalRank: 0,
+				score: 1
+			}
+		]);
+
+		const result = await executeRegisteredTool({
+			sessionKey: TEST_SESSION,
+			runId: 'run-memory',
+			searchMemory,
+			call: {
+				id: 'call-memory-search-01',
+				name: 'memory.search',
+				arguments: { query: 'tooling', layers: ['action-sensitive'], limit: 3 }
+			}
+		});
+
+		expect(result.outcome).toBe('success');
+		expect(searchMemory).toHaveBeenCalledWith({
+			sessionId: TEST_SESSION,
+			query: 'tooling',
+			layers: ['action_sensitive'],
+			limit: 3
+		});
+	});
+
+	it('memory.writeCandidate writes a pending candidate without confirming memory', async () => {
+		const writeMemoryCandidate = vi.fn(async () => ({
+			id: 'candidate-001',
+			sessionId: TEST_SESSION,
+			runId: 'run-memory',
+			layer: 'action_sensitive' as const,
+			content: 'Ask before running shell commands.',
+			tags: [],
+			reason: 'User preference',
+			createdAt: '2026-01-01T00:00:00.000Z'
+		}));
+
+		const waiting = await executeRegisteredTool({
+			sessionKey: TEST_SESSION,
+			runId: 'run-memory',
+			writeMemoryCandidate,
+			call: {
+				id: 'call-memory-write-01',
+				name: 'memory.writeCandidate',
+				arguments: {
+					layer: 'action-sensitive',
+					content: 'Ask before running shell commands.',
+					rationale: 'User preference'
+				}
+			}
+		});
+		expect(waiting.outcome).toBe('approval_required');
+
+		const approved = await executeRegisteredTool({
+			sessionKey: TEST_SESSION,
+			runId: 'run-memory',
+			writeMemoryCandidate,
+			approved: true,
+			call: {
+				id: 'call-memory-write-01',
+				name: 'memory.writeCandidate',
+				arguments: {
+					layer: 'action-sensitive',
+					content: 'Ask before running shell commands.',
+					rationale: 'User preference'
+				}
+			}
+		});
+
+		expect(approved.outcome).toBe('success');
+		expect(writeMemoryCandidate).toHaveBeenCalledWith({
+			sessionId: TEST_SESSION,
+			runId: 'run-memory',
+			layer: 'action_sensitive',
+			content: 'Ask before running shell commands.',
+			reason: 'User preference'
+		});
 	});
 
 	// ── Workspace write via provider ─────────────────────────────────────────────
@@ -614,6 +757,7 @@ describe('tool registry', () => {
 			readFile: vi.fn(),
 			writeFile: vi.fn(),
 			runCommand: providerRunCommand,
+			startProcess: vi.fn(),
 			snapshot: vi.fn(async () => ({
 				id: 'snapshot-001',
 				sessionKey: TEST_SESSION,
@@ -679,6 +823,57 @@ describe('tool registry', () => {
 			}
 		});
 		expect(result.outcome).toBe('approval_required');
+	});
+
+	it('process.start returns a processId and process.kill terminates it', async () => {
+		const startWaiting = await executeRegisteredTool({
+			sessionKey: TEST_SESSION,
+			sandboxProvider: provider,
+			runId: 'run-process-01',
+			call: {
+				id: 'call-process-start-01',
+				name: 'process.start',
+				arguments: { command: 'bun', args: ['-e', 'await new Promise(() => {})'] }
+			}
+		});
+		expect(startWaiting.outcome).toBe('approval_required');
+
+		const started = await executeRegisteredTool({
+			sessionKey: TEST_SESSION,
+			sandboxProvider: provider,
+			approved: true,
+			runId: 'run-process-01',
+			call: {
+				id: 'call-process-start-01',
+				name: 'process.start',
+				arguments: { command: 'bun', args: ['-e', 'await new Promise(() => {})'] }
+			}
+		});
+		expect(started.outcome).toBe('success');
+		const startedContent = started.content as { processId: string; status: string; pid: number };
+		expect(startedContent.processId).toMatch(
+			/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+		);
+		expect(startedContent.status).toBe('running');
+
+		const killed = await executeRegisteredTool({
+			sessionKey: TEST_SESSION,
+			sandboxProvider: provider,
+			approved: true,
+			runId: 'run-process-01',
+			call: {
+				id: 'call-process-kill-01',
+				name: 'process.kill',
+				arguments: { processId: startedContent.processId }
+			}
+		});
+
+		expect(killed.outcome).toBe('success');
+		expect(killed.content).toMatchObject({
+			processId: startedContent.processId,
+			killed: true,
+			status: 'killed'
+		});
 	});
 
 	// ── Sandbox row persistence ──────────────────────────────────────────────────

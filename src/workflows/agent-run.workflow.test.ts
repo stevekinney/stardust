@@ -1057,27 +1057,28 @@ describe('agentRunWorkflow steering', () => {
 				]
 			});
 
-			// Wait for the workflow to park in waiting_approval (first model call done).
+			const approvalId = `${runId}:steer-tool-001:approval`;
+			// Wait for the workflow to park on the exact approval produced by the first model call.
 			let state = await handle.query(getAgentRunStateQuery);
-			for (let i = 0; i < 20 && state.status !== 'waiting_approval'; i++) {
+			for (let i = 0; i < 20 && state.pendingApproval?.approvalId !== approvalId; i++) {
 				await env.sleep(50);
 				state = await handle.query(getAgentRunStateQuery);
 			}
 			expect(state.status).toBe('waiting_approval');
+			expect(state.pendingApproval?.approvalId).toBe(approvalId);
 
-			// Send steering signal while the workflow is waiting.
-			await handle.signal(steeringSignal, 'focus on the budget');
-
-			// Approve the pending tool call so the workflow proceeds to its second model call.
+			// Send steering signal while the workflow is waiting, then approve immediately.
+			const signalAccepted = handle.signal(steeringSignal, 'focus on the budget');
 			await handle.executeUpdate(resolveApprovalUpdate, {
 				args: [
 					{
-						approvalId: `${runId}:steer-tool-001:approval`,
+						approvalId,
 						action: 'approve',
 						remember: false
 					}
 				]
 			});
+			await signalAccepted;
 
 			return handle.result();
 		});
@@ -1417,6 +1418,375 @@ describe('agentRunWorkflow subagents', () => {
 		const modelTask = model.runUntil(task.catch(() => undefined));
 		const memoryTask = memory.runUntil(task.catch(() => undefined));
 		await Promise.all([task, toolsTask, sandboxTask, modelTask, memoryTask]);
+	});
+});
+
+// ── Delegate tool suite ───────────────────────────────────────────────────────
+
+describe('agentRunWorkflow delegate tools', () => {
+	let env: TestWorkflowEnvironment;
+
+	beforeAll(async () => {
+		env = await TestWorkflowEnvironment.createTimeSkipping();
+	});
+
+	afterAll(async () => {
+		await env.teardown();
+	});
+
+	const delegateTool: ToolManifestEntry = {
+		name: 'delegate.code',
+		description: 'Launch a code subagent.',
+		inputSchema: {},
+		metadata: {
+			risk: 'high',
+			requiresApproval: true,
+			taskQueue: TASK_QUEUE_ORCHESTRATOR,
+			timeoutMs: 120_000,
+			retry: { maximumAttempts: 1 },
+			idempotencyBehavior: 'key-required'
+		}
+	};
+
+	type DelegateActivityState = {
+		modelCalls: ModelCallInput[];
+		approvalRequests: RecordApprovalRequestInput[];
+		toolExecutions: ToolExecutionInput[];
+		persistedToolResults: Array<{
+			sessionId: string;
+			runId: string;
+			callId: string;
+			content: unknown;
+			isError: boolean;
+		}>;
+		startedSubagents: Array<{ subagentRunId: string; kind: string }>;
+		completedSubagents: Array<{ subagentRunId: string; status: string }>;
+	};
+
+	function createDelegateActivityState(): DelegateActivityState {
+		return {
+			modelCalls: [],
+			approvalRequests: [],
+			toolExecutions: [],
+			persistedToolResults: [],
+			startedSubagents: [],
+			completedSubagents: []
+		};
+	}
+
+	function createDelegateActivities(state: DelegateActivityState) {
+		const parentModelCounts = new Map<string, number>();
+		return {
+			async callModel(input: ModelCallInput): Promise<ModelCallResult> {
+				state.modelCalls.push(input);
+				const base = {
+					runId: input.runId,
+					model: input.model ?? 'claude-sonnet-4-5-20250929',
+					usage: MOCK_MODEL_USAGE
+				};
+
+				if (input.runId.includes(':delegate-tool-001:code')) {
+					return { ...base, message: { text: 'Code subagent answer.', toolCalls: [] } };
+				}
+
+				const count = (parentModelCounts.get(input.runId) ?? 0) + 1;
+				parentModelCounts.set(input.runId, count);
+				if (count === 1) {
+					return {
+						...base,
+						message: {
+							text: '',
+							toolCalls: [
+								{
+									id: 'delegate-tool-001',
+									name: 'delegate.code',
+									input: { prompt: 'Implement the focused helper.', maxTokens: 321 }
+								}
+							]
+						}
+					};
+				}
+				return { ...base, message: { text: 'Parent final answer.', toolCalls: [] } };
+			},
+			async evaluateToolCallPolicy(input: { call: ToolCallInput }): Promise<ToolPolicyDecision> {
+				return {
+					status: 'approval_required',
+					tool: { ...delegateTool, name: input.call.name },
+					policyVersion: '2026-06-30'
+				};
+			},
+			async recordApprovalRequest(input: RecordApprovalRequestInput): Promise<ApprovalCardState> {
+				state.approvalRequests.push(input);
+				return {
+					...input,
+					argsHash: 'delegate-hash',
+					createdAt: '2026-06-30T00:00:00.000Z',
+					status: 'pending'
+				};
+			},
+			async recordApprovalResolution(
+				input: RecordApprovalResolutionInput
+			): Promise<ApprovalResolution> {
+				const request = state.approvalRequests.find(
+					(candidate) => candidate.approvalId === input.approvalId
+				);
+				if (!request) throw ApplicationFailure.nonRetryable(`Missing request ${input.approvalId}`);
+				return {
+					approvalId: input.approvalId,
+					action: input.action,
+					terminalState: input.action === 'approve' ? 'approved' : 'denied',
+					canonicalArguments: request.proposedArguments,
+					proposedArguments: request.proposedArguments,
+					remember: false,
+					actor: input.actor,
+					resolvedAt: '2026-06-30T00:01:00.000Z'
+				};
+			},
+			async executeTool(input: ToolExecutionInput): Promise<ToolExecutionResult> {
+				state.toolExecutions.push(input);
+				return {
+					callId: input.call.id,
+					toolName: input.call.name,
+					outcome: 'success',
+					content: { shouldNotRunForDelegate: true }
+				};
+			},
+			async persistToolResult(input: {
+				sessionId: string;
+				runId: string;
+				callId: string;
+				content: unknown;
+				isError: boolean;
+			}): Promise<void> {
+				state.persistedToolResults.push(input);
+			},
+			async recordRunStarted(): Promise<void> {},
+			async recordRunCompleted(): Promise<void> {},
+			async recordSubagentStarted(input: { subagentRunId: string; kind: string }): Promise<void> {
+				state.startedSubagents.push(input);
+			},
+			async recordSubagentCompleted(input: {
+				subagentRunId: string;
+				status: string;
+			}): Promise<void> {
+				state.completedSubagents.push(input);
+			},
+			async writeMemoryCandidate() {
+				return { id: 'delegate-memory-candidate' };
+			},
+			async searchMemory(): Promise<[]> {
+				return [];
+			},
+			async cancelSandboxSession(): Promise<void> {}
+		};
+	}
+
+	async function runDelegateWorkers<T>(
+		activities: ReturnType<typeof createDelegateActivities>,
+		callback: () => Promise<T>
+	): Promise<T> {
+		const orchestrator = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_ORCHESTRATOR,
+			workflowsPath: fileURLToPath(new URL('./index.ts', import.meta.url))
+		});
+		const tools = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_TOOLS,
+			activities
+		});
+		const sandbox = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_SANDBOX,
+			activities
+		});
+		const model = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_MODEL,
+			activities
+		});
+		const memory = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_MEMORY,
+			activities
+		});
+
+		const task = orchestrator.runUntil(callback);
+		const [result] = await Promise.all([
+			task,
+			tools.runUntil(task.catch(() => undefined)),
+			sandbox.runUntil(task.catch(() => undefined)),
+			model.runUntil(task.catch(() => undefined)),
+			memory.runUntil(task.catch(() => undefined))
+		]);
+		return result;
+	}
+
+	it('requires approval, launches exactly one code child workflow, and persists the tool result', async () => {
+		const state = createDelegateActivityState();
+		const activities = createDelegateActivities(state);
+		const runId = `delegate-code-${Date.now()}`;
+		const result = await runDelegateWorkers(activities, async () => {
+			const handle = await env.client.workflow.start('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [
+					{
+						sessionKey: 'delegate-session',
+						runId,
+						message: 'delegate code work',
+						approvalTtlMs: 60_000
+					}
+				]
+			});
+
+			const approvalId = `${runId}:delegate-tool-001:approval`;
+			let runState = await handle.query(getAgentRunStateQuery);
+			for (let i = 0; i < 20 && runState.pendingApproval?.approvalId !== approvalId; i++) {
+				await env.sleep(50);
+				runState = await handle.query(getAgentRunStateQuery);
+			}
+			expect(runState.status).toBe('waiting_approval');
+
+			await handle.executeUpdate(resolveApprovalUpdate, {
+				args: [{ approvalId, action: 'approve', remember: false }]
+			});
+			return handle.result();
+		});
+
+		const subagentRunId = `${runId}:delegate-tool-001:code`;
+		expect(result.status).toBe('complete');
+		expect(result.finalAnswer).toBe('Parent final answer.');
+		expect(state.approvalRequests).toHaveLength(1);
+		expect(state.toolExecutions).toHaveLength(0);
+		expect(state.startedSubagents).toEqual([
+			expect.objectContaining({ subagentRunId, kind: 'code' })
+		]);
+		expect(state.completedSubagents).toEqual([
+			expect.objectContaining({ subagentRunId, status: 'complete' })
+		]);
+		expect(state.persistedToolResults).toEqual([
+			expect.objectContaining({
+				callId: 'delegate-tool-001',
+				content: {
+					subagentRunId,
+					kind: 'code',
+					finalAnswer: 'Code subagent answer.'
+				},
+				isError: false
+			})
+		]);
+		expect(result.budgetLedger?.entries).toEqual([
+			expect.objectContaining({
+				workflowId: `agent-run:${subagentRunId}`,
+				laneId: subagentRunId,
+				label: 'Code',
+				usage: MOCK_MODEL_USAGE
+			})
+		]);
+	});
+
+	it('uses a retry-stable child workflow id and passes the delegate prompt into model context', async () => {
+		const state = createDelegateActivityState();
+		const activities = createDelegateActivities(state);
+		const runId = `delegate-prompt-${Date.now()}`;
+		await runDelegateWorkers(activities, async () => {
+			const handle = await env.client.workflow.start('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [
+					{
+						sessionKey: 'delegate-session',
+						runId,
+						message: 'delegate code work',
+						approvalTtlMs: 60_000
+					}
+				]
+			});
+
+			const approvalId = `${runId}:delegate-tool-001:approval`;
+			let runState = await handle.query(getAgentRunStateQuery);
+			for (let i = 0; i < 20 && runState.pendingApproval?.approvalId !== approvalId; i++) {
+				await env.sleep(50);
+				runState = await handle.query(getAgentRunStateQuery);
+			}
+			await handle.executeUpdate(resolveApprovalUpdate, {
+				args: [{ approvalId, action: 'approve', remember: false }]
+			});
+			return handle.result();
+		});
+
+		const subagentRunId = `${runId}:delegate-tool-001:code`;
+		const subagentModelCall = state.modelCalls.find((call) => call.runId === subagentRunId);
+		expect(subagentModelCall).toEqual(
+			expect.objectContaining({
+				runId: subagentRunId,
+				modelCallId: `${subagentRunId}:model-call-1`,
+				steeringMessages: ['Implement the focused helper.'],
+				maxTokens: 321
+			})
+		);
+		expect(state.startedSubagents.map((entry) => entry.subagentRunId)).toEqual([subagentRunId]);
+	});
+
+	it('respects child workflow and action budgets before launching a delegate', async () => {
+		for (const [runLabel, budget] of [
+			[
+				'child-budget',
+				{
+					maxModelCalls: 10,
+					maxToolCalls: 10,
+					maxChildWorkflows: 0,
+					maxTokens: 1_000,
+					maxActions: 10,
+					maxActiveWallClockMs: 60_000,
+					maxEstimatedCostUsd: 1
+				}
+			],
+			[
+				'action-budget',
+				{
+					maxModelCalls: 10,
+					maxToolCalls: 10,
+					maxChildWorkflows: 3,
+					maxTokens: 1_000,
+					maxActions: 1,
+					maxActiveWallClockMs: 60_000,
+					maxEstimatedCostUsd: 1
+				}
+			]
+		] as const) {
+			const state = createDelegateActivityState();
+			const activities = createDelegateActivities(state);
+			const runId = `delegate-${runLabel}-${Date.now()}`;
+			const result = await runDelegateWorkers(activities, () =>
+				env.client.workflow.execute('agentRunWorkflow', {
+					taskQueue: TASK_QUEUE_ORCHESTRATOR,
+					workflowId: `agent-run:${runId}`,
+					args: [
+						{
+							sessionKey: 'delegate-session',
+							runId,
+							message: 'delegate code work',
+							budget
+						}
+					]
+				})
+			);
+
+			expect(result.status).toBe('complete');
+			expect(state.approvalRequests).toHaveLength(0);
+			expect(state.startedSubagents).toHaveLength(0);
+			expect(state.persistedToolResults).toHaveLength(0);
+			expect(result.finalAnswer).toMatch(
+				runLabel === 'child-budget' ? /child workflow budget exhausted/ : /action budget exhausted/
+			);
+		}
 	});
 });
 

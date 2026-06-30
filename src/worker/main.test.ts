@@ -14,6 +14,7 @@ describe('worker task queue activity registration', () => {
 	it('registers only policy and observability activities on the tools task queue', () => {
 		expect(Object.keys(toolsTaskQueueActivities).sort()).toEqual([
 			'evaluateToolCallPolicy',
+			'executeTool',
 			'forwardApprovalToRun',
 			'listToolManifest',
 			'persistToolResult',
@@ -31,11 +32,13 @@ describe('worker task queue activity registration', () => {
 			'cancelSandboxSession',
 			'ensureSandboxWorkspace',
 			'executeTool',
+			'killSandboxProcess',
 			'readSandboxFile',
 			'restoreSandbox',
 			'runEphemeralSandboxCommand',
 			'runSandboxCommand',
 			'snapshotSandbox',
+			'startSandboxProcess',
 			'writeSandboxFile'
 		]);
 	});
@@ -43,6 +46,7 @@ describe('worker task queue activity registration', () => {
 	it('registers only memory and schedule submission activities on the memory task queue', () => {
 		expect(Object.keys(memoryTaskQueueActivities).sort()).toEqual([
 			'confirmMemoryCandidate',
+			'executeTool',
 			'generateEmbedding',
 			'listMemoryNotes',
 			'loadMemoryCompactionInput',

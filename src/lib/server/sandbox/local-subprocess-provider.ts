@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { and, eq } from 'drizzle-orm';
 import type { DatabaseClient } from '../db';
 import { sandboxCommands, sandboxes, sandboxSnapshots } from '../db';
 import {
@@ -22,6 +23,10 @@ import type {
 	SandboxEphemeralCommandInput,
 	SandboxEphemeralSandbox,
 	SandboxFileInput,
+	SandboxProcessKillInput,
+	SandboxProcessKillResult,
+	SandboxProcessStartInput,
+	SandboxProcessStartResult,
 	SandboxProvider,
 	SandboxRunCommandOptions,
 	SandboxSnapshotInput,
@@ -127,6 +132,89 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 			options?.signal,
 			options?.onStart
 		);
+	}
+
+	async startProcess(input: SandboxProcessStartInput): Promise<SandboxProcessStartResult> {
+		const workspacePath = await this.ensureWorkspace(input.sessionKey);
+		const id = randomUUID();
+		const args = input.args ?? [];
+		const startedAt = new Date().toISOString();
+		const commandCwd = resolveWorkspacePath(workspacePath, input.cwd);
+		let stdout = '';
+		let stderr = '';
+
+		const child = spawn(input.command, args, {
+			cwd: commandCwd,
+			detached: true,
+			env: this.buildEnvironment(input.env, this.workspaceRoot),
+			stdio: ['ignore', 'pipe', 'pipe']
+		});
+		const pid = child.pid ?? null;
+		const tracked: TrackedProcess = {
+			id,
+			sessionKey: input.sessionKey,
+			workspacePath,
+			child,
+			killed: false,
+			timedOut: false
+		};
+		this.trackedProcesses.set(id, tracked);
+
+		await this.recordCommand({
+			id,
+			input,
+			status: 'running',
+			startedAt,
+			completedAt: null,
+			exitCode: null,
+			pid,
+			processGroupId: pid,
+			background: true
+		});
+
+		child.stdout.on('data', (chunk: Buffer) => {
+			stdout = appendCapturedOutput(stdout, chunk, this.outputCaptureBytes);
+		});
+
+		child.stderr.on('data', (chunk: Buffer) => {
+			stderr = appendCapturedOutput(stderr, chunk, this.outputCaptureBytes);
+		});
+
+		child.on('error', (error) => {
+			stderr = appendCapturedOutput(stderr, Buffer.from(error.message), this.outputCaptureBytes);
+		});
+
+		child.on('close', (exitCode) => {
+			if (tracked.forceKillTimer) clearTimeout(tracked.forceKillTimer);
+			this.trackedProcesses.delete(id);
+			const completedAt = new Date().toISOString();
+			const status = tracked.killed ? 'killed' : exitCode === 0 ? 'complete' : 'failed';
+			void this.recordCommand({
+				id,
+				input,
+				status,
+				startedAt,
+				completedAt,
+				exitCode: tracked.killed ? null : exitCode,
+				stdout,
+				stderr,
+				pid,
+				processGroupId: pid,
+				background: true
+			});
+		});
+
+		return {
+			processId: id,
+			sessionKey: input.sessionKey,
+			workspacePath,
+			command: input.command,
+			args,
+			status: 'running',
+			pid,
+			processGroupId: pid,
+			startedAt
+		};
 	}
 
 	private async runCommandInWorkspace(
@@ -308,12 +396,26 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 		};
 	}
 
-	async killProcess(processId: string): Promise<boolean> {
-		const tracked = this.trackedProcesses.get(processId);
-		if (!tracked) return false;
+	async killProcess(input: SandboxProcessKillInput): Promise<SandboxProcessKillResult> {
+		const tracked = this.trackedProcesses.get(input.processId);
+		if (tracked) {
+			this.killTrackedProcess(tracked, input.signal);
+			await this.markProcessKilled(input.processId);
+			return { processId: input.processId, killed: true, status: 'killed' };
+		}
 
-		this.killTrackedProcess(tracked);
-		return true;
+		const persisted = await this.findPersistedProcess(input.sessionKey, input.processId);
+		if (!persisted?.processGroupId) {
+			return { processId: input.processId, killed: false, status: 'not_found' };
+		}
+
+		try {
+			process.kill(-persisted.processGroupId, input.signal ?? 'SIGTERM');
+			await this.markProcessKilled(input.processId);
+			return { processId: input.processId, killed: true, status: 'killed' };
+		} catch {
+			return { processId: input.processId, killed: false, status: 'not_found' };
+		}
 	}
 
 	async cancelSession(sessionKey: string): Promise<void> {
@@ -349,18 +451,39 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 		return environment;
 	}
 
-	private killTrackedProcess(tracked: TrackedProcess): void {
+	private killTrackedProcess(tracked: TrackedProcess, signal: NodeJS.Signals = 'SIGTERM'): void {
 		tracked.killed = true;
 		const pid = tracked.child.pid;
 		if (pid === undefined) return;
 
-		killProcessGroupOrChild(tracked.child, 'SIGTERM');
+		killProcessGroupOrChild(tracked.child, signal);
 		tracked.forceKillTimer ??= setTimeout(() => {
 			if (this.trackedProcesses.has(tracked.id)) {
 				killProcessGroupOrChild(tracked.child, 'SIGKILL');
 			}
 		}, 100);
 		tracked.forceKillTimer.unref();
+	}
+
+	private async findPersistedProcess(
+		sessionKey: string,
+		processId: string
+	): Promise<{ processGroupId: number | null } | null> {
+		if (!this.database) return null;
+		const rows = await this.database
+			.select({ processGroupId: sandboxCommands.processGroupId })
+			.from(sandboxCommands)
+			.where(and(eq(sandboxCommands.id, processId), eq(sandboxCommands.sessionId, sessionKey)))
+			.limit(1);
+		return rows[0] ?? null;
+	}
+
+	private async markProcessKilled(processId: string): Promise<void> {
+		if (!this.database) return;
+		await this.database
+			.update(sandboxCommands)
+			.set({ status: 'killed', completedAt: new Date().toISOString() })
+			.where(eq(sandboxCommands.id, processId));
 	}
 
 	private async runUtilityCommand(
@@ -462,6 +585,9 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 		exitCode: number | null;
 		stdout?: string;
 		stderr?: string;
+		pid?: number | null;
+		processGroupId?: number | null;
+		background?: boolean;
 	}): Promise<void> {
 		if (!this.database) return;
 
@@ -475,6 +601,9 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 				toolCallId: input.input.toolCallId,
 				command: input.input.command,
 				args: JSON.stringify(input.input.args ?? []),
+				pid: input.pid,
+				processGroupId: input.processGroupId,
+				background: input.background ?? false,
 				status: input.status,
 				exitCode: input.exitCode,
 				stdoutRef: input.stdout,
@@ -489,6 +618,9 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 					exitCode: input.exitCode,
 					stdoutRef: input.stdout,
 					stderrRef: input.stderr,
+					pid: input.pid,
+					processGroupId: input.processGroupId,
+					background: input.background ?? false,
 					completedAt: input.completedAt ?? undefined
 				}
 			});

@@ -8,7 +8,7 @@ import type {
 	ToolManifestEntry,
 	ToolPolicyDecision
 } from '@src/lib/types';
-import { registeredTools, getToolManifest } from '../lib/server/tools/registry';
+import { getConfiguredTools, getToolManifest } from '../lib/server/tools/registry';
 import { validateToolCall } from '../lib/server/policy/policy-engine';
 import { db } from '../lib/server/db/client';
 import { ApprovalsRepository } from '../lib/server/policy/approvals';
@@ -24,7 +24,7 @@ export async function listToolManifest(input?: {
 export async function evaluateToolCallPolicy(input: {
 	call: ToolCallInput;
 }): Promise<ToolPolicyDecision> {
-	return validateToolCall(registeredTools, input.call);
+	return validateToolCall(getConfiguredTools(), input.call);
 }
 
 export async function recordApprovalRequest(

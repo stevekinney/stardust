@@ -3,8 +3,12 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import type { DatabaseClient } from '../db';
 import { sandboxSnapshots } from '../db';
+import * as schema from '../db/schema';
 import { getSandboxProvider, LocalSubprocessSandboxProvider } from './index';
 import { SandboxPathError } from './sandbox-errors';
 
@@ -253,6 +257,81 @@ describe('LocalSubprocessSandboxProvider', () => {
 		expect(result.status).toBe('killed');
 	});
 
+	it('startProcess returns while the process is still running and killProcess terminates it', async () => {
+		expect.assertions(5);
+
+		const provider = new LocalSubprocessSandboxProvider({ workspaceRoot: temporaryRoot });
+		const started = await provider.startProcess({
+			sessionKey: 'session-a',
+			runId: 'run-a',
+			command: 'bun',
+			args: ['-e', 'await new Promise(() => {})']
+		});
+
+		expect(started.status).toBe('running');
+		expect(started.processId).toMatch(
+			/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+		);
+		expect(provider.trackedProcessCount).toBe(1);
+
+		const killed = await provider.killProcess({
+			sessionKey: 'session-a',
+			processId: started.processId
+		});
+
+		expect(killed).toEqual({ processId: started.processId, killed: true, status: 'killed' });
+		await waitForTrackedProcesses(provider, 0);
+		expect(provider.trackedProcessCount).toBe(0);
+	});
+
+	it('persists background process ids and marks killed rows', async () => {
+		expect.assertions(4);
+
+		const dbPath = join(temporaryRoot, 'sandbox-processes.db');
+		const sqlite = new Database(dbPath);
+		sqlite.pragma('journal_mode = WAL');
+		const database = drizzle(sqlite, { schema });
+		migrate(database, { migrationsFolder: './drizzle' });
+		const provider = new LocalSubprocessSandboxProvider({ workspaceRoot: temporaryRoot, database });
+
+		try {
+			const started = await provider.startProcess({
+				sessionKey: 'session-a',
+				runId: 'run-a',
+				command: 'bun',
+				args: ['-e', 'await new Promise(() => {})']
+			});
+			const runningRow = sqlite
+				.prepare(
+					'SELECT pid, process_group_id AS processGroupId, background, status FROM sandbox_commands WHERE id = ?'
+				)
+				.get(started.processId) as {
+				pid: number | null;
+				processGroupId: number | null;
+				background: number;
+				status: string;
+			};
+			expect(runningRow).toMatchObject({
+				pid: started.pid,
+				processGroupId: started.processGroupId,
+				background: 1,
+				status: 'running'
+			});
+
+			await provider.killProcess({ sessionKey: 'session-a', processId: started.processId });
+			await waitForTrackedProcessesOrThrow(provider, 0);
+			const killedRow = sqlite
+				.prepare('SELECT status FROM sandbox_commands WHERE id = ?')
+				.get(started.processId) as { status: string };
+			expect(killedRow.status).toBe('killed');
+			expect(started.pid).toEqual(expect.any(Number));
+			expect(started.processGroupId).toBe(started.pid);
+		} finally {
+			await provider.cancelSession('session-a');
+			sqlite.close();
+		}
+	});
+
 	it('kills only the specific command when its AbortSignal fires, not other same-session processes', async () => {
 		expect.assertions(3);
 
@@ -408,6 +487,15 @@ async function waitForTrackedProcesses(
 		if (provider.trackedProcessCount === expectedCount) return;
 		await delay(20);
 	}
+}
+
+async function waitForTrackedProcessesOrThrow(
+	provider: LocalSubprocessSandboxProvider,
+	expectedCount: number
+): Promise<void> {
+	await waitForTrackedProcesses(provider, expectedCount);
+	if (provider.trackedProcessCount === expectedCount) return;
+	expect(provider.trackedProcessCount).toBe(expectedCount);
 }
 
 function createRecordingDatabase(insertedSnapshots: unknown[]): DatabaseClient {

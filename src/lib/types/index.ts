@@ -165,6 +165,7 @@ export type SubagentWorkflowInput = {
 	budgetDebit: BudgetLedgerEntry;
 	/** Model ID to use for the subagent's model call. */
 	model?: string;
+	maxTokens?: number;
 };
 
 export type SubagentWorkflowResult = {

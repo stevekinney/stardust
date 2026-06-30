@@ -40,9 +40,15 @@ import { hashApprovalArguments } from '../policy/arguments-hash';
 import { fetchWithSsrfGuard } from '../policy/ssrf';
 import type { ArtifactStore } from '../artifacts/artifact-store';
 import { spillLargeOutput } from '../artifacts/spill';
+import { TAVILY_API_KEY } from '../config';
+import type { MemoryCandidate, MemoryLayer, MemorySearchResult } from '../memory';
 import type {
 	SandboxCommandInput,
 	SandboxCommandResult,
+	SandboxProcessKillInput,
+	SandboxProcessKillResult,
+	SandboxProcessStartInput,
+	SandboxProcessStartResult,
 	SandboxProvider
 } from '../sandbox/sandbox-provider';
 
@@ -51,6 +57,10 @@ const webFetchInput = z.object({
 	headers: z.record(z.string(), z.string()).optional(),
 	maxBytes: z.number().int().positive().max(256_000).optional()
 });
+
+function readTavilyApiKey(): string {
+	return process.env.TAVILY_API_KEY ?? TAVILY_API_KEY;
+}
 
 const webSearchInput = z.object({
 	query: z.string().min(1),
@@ -83,7 +93,7 @@ const searchFilesInput = z.object({
 
 const memorySearchInput = z.object({
 	query: z.string().min(1),
-	sessionId: z.string().min(1),
+	layers: z.array(z.enum(['session', 'durable', 'action-sensitive'])).optional(),
 	limit: z.number().int().positive().max(20).default(10)
 });
 
@@ -260,33 +270,11 @@ for (const tool of registeredTools) {
 	);
 }
 
-/**
- * Tools that are registered for policy/metadata routing but not yet backed by a
- * real implementation. They are hidden from `getToolManifest()` (and therefore
- * from the model) until the backing infrastructure exists. Hiding is preferable to
- * returning a stub result that the model may misinterpret as real output.
- *
- * `memory.search` is intentionally kept hidden: the workflow pre-injects
- * confirmed memory notes into the system prompt via `searchMemory` before each
- * `callModel` invocation (agentRunWorkflow, retrievedMemory path), satisfying
- * ARCHITECTURE.md:293 without exposing an on-demand tool to the model.
- */
-const UNIMPLEMENTED_TOOLS = new Set([
-	'web.search',
-	'memory.search',
-	'memory.writeCandidate',
-	'process.start',
-	'process.kill',
-	'delegate.research',
-	'delegate.code',
-	'delegate.critic'
-]);
-
 function isToolConfigured(tool: RegisteredTool): boolean {
-	return !UNIMPLEMENTED_TOOLS.has(tool.name);
+	return tool.name !== 'web.search' || readTavilyApiKey().length > 0;
 }
 
-function getConfiguredTools(): RegisteredTool[] {
+export function getConfiguredTools(): RegisteredTool[] {
 	return registeredTools.filter(isToolConfigured);
 }
 
@@ -338,6 +326,66 @@ function requireCommandRunner(
 	return commandRunner;
 }
 
+function requireSessionRun(input: { sessionKey?: string; runId?: string }): {
+	sessionKey: string;
+	runId: string;
+} {
+	if (!input.sessionKey) {
+		throw new Error('sessionKey is required for session-scoped tools but was not provided');
+	}
+	if (!input.runId) {
+		throw new Error('runId is required for run-scoped tools but was not provided');
+	}
+	return { sessionKey: input.sessionKey, runId: input.runId };
+}
+
+function toMemoryLayer(layer: 'session' | 'durable' | 'action-sensitive'): MemoryLayer {
+	return layer === 'action-sensitive' ? 'action_sensitive' : layer;
+}
+
+async function searchWebWithTavily(input: {
+	query: string;
+	maxResults: number;
+	includeDomains?: string[];
+	excludeDomains?: string[];
+	fetcher?: typeof fetch;
+}) {
+	const apiKey = readTavilyApiKey();
+	if (!apiKey) throw new Error('TAVILY_API_KEY is required for web.search');
+	const response = await (input.fetcher ?? fetch)('https://api.tavily.com/search', {
+		method: 'POST',
+		headers: {
+			'content-type': 'application/json',
+			authorization: `Bearer ${apiKey}`
+		},
+		body: JSON.stringify({
+			query: input.query,
+			max_results: input.maxResults,
+			include_domains: input.includeDomains,
+			exclude_domains: input.excludeDomains
+		})
+	});
+	if (!response.ok) {
+		throw new Error(`web.search failed with HTTP ${response.status}`);
+	}
+	const payload = (await response.json()) as {
+		results?: Array<{ title?: unknown; url?: unknown; content?: unknown; snippet?: unknown }>;
+	};
+	return {
+		query: input.query,
+		results: (payload.results ?? []).slice(0, input.maxResults).map((result) => ({
+			title: typeof result.title === 'string' ? result.title : '',
+			url: typeof result.url === 'string' ? result.url : '',
+			snippet:
+				typeof result.snippet === 'string'
+					? result.snippet
+					: typeof result.content === 'string'
+						? result.content
+						: ''
+		}))
+	};
+}
+
 export async function executeRegisteredTool(input: {
 	call: ToolCallInput;
 	sessionId?: string;
@@ -356,6 +404,22 @@ export async function executeRegisteredTool(input: {
 	sandboxProvider?: SandboxProvider;
 	/** Heartbeat-aware Temporal Activity wrapper for sandbox subprocess execution. */
 	runSandboxCommand?: (input: SandboxCommandInput) => Promise<SandboxCommandResult>;
+	startSandboxProcess?: (input: SandboxProcessStartInput) => Promise<SandboxProcessStartResult>;
+	killSandboxProcess?: (input: SandboxProcessKillInput) => Promise<SandboxProcessKillResult>;
+	searchMemory?: (input: {
+		sessionId: string;
+		query: string;
+		layers?: MemoryLayer[];
+		limit?: number;
+	}) => Promise<MemorySearchResult[]>;
+	writeMemoryCandidate?: (input: {
+		sessionId: string;
+		runId: string;
+		layer: MemoryLayer;
+		content: string;
+		tags?: string[];
+		reason?: string | null;
+	}) => Promise<MemoryCandidate>;
 }): Promise<ToolExecutionResult> {
 	const decision = validateToolCall(getConfiguredTools(), input.call);
 	if (decision.status === 'denied') {
@@ -384,6 +448,11 @@ export async function executeRegisteredTool(input: {
 					input.fetcher
 				);
 				break;
+			case 'web.search': {
+				const args = webSearchInput.parse(input.call.arguments);
+				content = await searchWebWithTavily({ ...args, fetcher: input.fetcher });
+				break;
+			}
 			case 'workspace.readFile': {
 				const [sandbox, sessionKey] = requireSandbox(input.sandboxProvider, input.sessionKey);
 				const args = pathInput.parse(input.call.arguments);
@@ -481,6 +550,34 @@ export async function executeRegisteredTool(input: {
 				};
 				break;
 			}
+			case 'process.start': {
+				const [sandbox, sessionKey] = requireSandbox(input.sandboxProvider, input.sessionKey);
+				const startProcess = input.startSandboxProcess ?? sandbox.startProcess.bind(sandbox);
+				const args = processStartInput.parse(input.call.arguments);
+				content = await startProcess({
+					sessionKey,
+					runId: input.runId ?? 'tool',
+					command: args.command,
+					args: args.args,
+					cwd: args.workingDirectory,
+					timeoutMs: args.timeoutMs,
+					toolCallId: input.call.id
+				});
+				break;
+			}
+			case 'process.kill': {
+				const [, sessionKey] = requireSandbox(input.sandboxProvider, input.sessionKey);
+				const killProcess =
+					input.killSandboxProcess ??
+					input.sandboxProvider!.killProcess.bind(input.sandboxProvider);
+				const args = processKillInput.parse(input.call.arguments);
+				content = await killProcess({
+					sessionKey,
+					processId: args.processId,
+					signal: args.signal
+				});
+				break;
+			}
 			case 'workspace.searchFiles': {
 				const [, sessionKey] = requireSandbox(input.sandboxProvider, input.sessionKey);
 				const runCommand = requireCommandRunner(input.runSandboxCommand);
@@ -513,6 +610,37 @@ export async function executeRegisteredTool(input: {
 					gitCommitSha: snapshot.gitCommitSha,
 					createdAt: snapshot.createdAt
 				};
+				break;
+			}
+			case 'memory.search': {
+				if (!input.searchMemory) {
+					throw new Error('searchMemory is required for memory.search but was not provided');
+				}
+				const { sessionKey } = requireSessionRun(input);
+				const args = memorySearchInput.parse(input.call.arguments);
+				content = await input.searchMemory({
+					sessionId: sessionKey,
+					query: args.query,
+					layers: args.layers?.map(toMemoryLayer),
+					limit: args.limit
+				});
+				break;
+			}
+			case 'memory.writeCandidate': {
+				if (!input.writeMemoryCandidate) {
+					throw new Error(
+						'writeMemoryCandidate is required for memory.writeCandidate but was not provided'
+					);
+				}
+				const { sessionKey, runId } = requireSessionRun(input);
+				const args = memoryWriteCandidateInput.parse(input.call.arguments);
+				content = await input.writeMemoryCandidate({
+					sessionId: sessionKey,
+					runId,
+					layer: toMemoryLayer(args.layer),
+					content: args.content,
+					reason: args.rationale ?? null
+				});
 				break;
 			}
 			default:

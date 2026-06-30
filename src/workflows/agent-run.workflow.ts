@@ -16,6 +16,7 @@ import type {
 	RunBudget,
 	RunTimelineLane,
 	SubagentKind,
+	SubagentWorkflowResult,
 	ToolCallInput,
 	ToolExecutionInput,
 	ToolExecutionResult,
@@ -165,8 +166,20 @@ const policyActivities = proxyActivities<PolicyActivities>({
 	retry: { maximumAttempts: 3 }
 });
 
+const generalToolActivities = proxyActivities<ToolActivities>({
+	taskQueue: TASK_QUEUE_TOOLS,
+	startToCloseTimeout: '35 seconds',
+	retry: { maximumAttempts: 1 }
+});
+
 const sandboxActivities = proxyActivities<ToolActivities>({
 	taskQueue: TASK_QUEUE_SANDBOX,
+	startToCloseTimeout: '35 seconds',
+	retry: { maximumAttempts: 1 }
+});
+
+const memoryToolActivities = proxyActivities<ToolActivities>({
+	taskQueue: TASK_QUEUE_MEMORY,
 	startToCloseTimeout: '35 seconds',
 	retry: { maximumAttempts: 1 }
 });
@@ -226,6 +239,39 @@ function createBudgetLedger(budget: RunBudget): BudgetLedgerSnapshot {
 		estimatedCostUsd: budget.maxEstimatedCostUsd
 	};
 	return { limit, used: createEmptyUsage(), remaining: { ...limit }, entries: [] };
+}
+
+function isDelegateToolName(
+	name: string
+): name is 'delegate.research' | 'delegate.code' | 'delegate.critic' {
+	return name === 'delegate.research' || name === 'delegate.code' || name === 'delegate.critic';
+}
+
+function delegateKindForToolName(
+	name: 'delegate.research' | 'delegate.code' | 'delegate.critic'
+): SubagentKind {
+	if (name === 'delegate.research') return 'research';
+	if (name === 'delegate.code') return 'code';
+	return 'critic';
+}
+
+function toolActivitiesForTaskQueue(taskQueue: string): ToolActivities {
+	if (taskQueue === TASK_QUEUE_TOOLS) return generalToolActivities;
+	if (taskQueue === TASK_QUEUE_MEMORY) return memoryToolActivities;
+	return sandboxActivities;
+}
+
+function mergeBudgetLedgers(
+	budget: RunBudget,
+	ledgers: BudgetLedgerSnapshot[]
+): BudgetLedgerSnapshot {
+	const merged = createBudgetLedger(budget);
+	for (const ledger of ledgers) {
+		merged.used = addUsage(merged.used, ledger.used);
+		merged.entries.push(...ledger.entries);
+	}
+	merged.remaining = subtractUsage(merged.limit, merged.used);
+	return merged;
 }
 
 function addUsage(left: ModelUsage, right: ModelUsage): ModelUsage {
@@ -483,6 +529,113 @@ type MutableApprovalState = {
 	recordedApprovalResolution: ApprovalResolution | null;
 };
 
+type MutableDelegateState = {
+	budgetLedger: BudgetLedgerSnapshot;
+	childWorkflowCount: number;
+	timelineLanes: RunTimelineLane[];
+	criticAnnotations: CriticAnnotation[];
+};
+
+function readDelegateArguments(argumentsValue: unknown): { prompt: string; maxTokens?: number } {
+	if (!argumentsValue || typeof argumentsValue !== 'object') {
+		throw ApplicationFailure.nonRetryable('delegate tool arguments must be an object');
+	}
+	const record = argumentsValue as { prompt?: unknown; maxTokens?: unknown };
+	if (typeof record.prompt !== 'string' || record.prompt.length === 0) {
+		throw ApplicationFailure.nonRetryable('delegate tool prompt must be a non-empty string');
+	}
+	if (record.maxTokens !== undefined) {
+		if (
+			typeof record.maxTokens !== 'number' ||
+			!Number.isInteger(record.maxTokens) ||
+			record.maxTokens <= 0
+		) {
+			throw ApplicationFailure.nonRetryable('delegate tool maxTokens must be a positive integer');
+		}
+		return { prompt: record.prompt, maxTokens: record.maxTokens };
+	}
+	return { prompt: record.prompt };
+}
+
+async function executeDelegateToolCall(
+	input: AgentRunInput,
+	toolCall: ToolCallInput,
+	state: MutableDelegateState
+): Promise<{ result: ToolExecutionResult; subagent: SubagentWorkflowResult }> {
+	if (!isDelegateToolName(toolCall.name)) {
+		throw ApplicationFailure.nonRetryable(`Not a delegate tool: ${toolCall.name}`);
+	}
+	const kind = delegateKindForToolName(toolCall.name);
+	const label = kind === 'research' ? 'Research' : kind === 'code' ? 'Code' : 'Critic';
+	const args = readDelegateArguments(toolCall.arguments);
+	const subagentRunId = `${input.runId}:${toolCall.id}:${kind}`;
+	const workflowId = `agent-run:${subagentRunId}`;
+	const budgetDebit = reserveBudgetEntry({
+		ledger: state.budgetLedger,
+		runId: `${input.runId}:${toolCall.id}`,
+		kind,
+		label
+	});
+
+	await observabilityActivities.recordSubagentStarted({
+		sessionId: input.sessionKey,
+		runId: input.runId,
+		subagentRunId,
+		kind,
+		label
+	});
+
+	const workflowInput = {
+		parentRunId: input.runId,
+		subagentRunId,
+		sessionKey: input.sessionKey,
+		kind,
+		message: args.prompt,
+		...(kind === 'critic' ? { finalAnswer: args.prompt } : {}),
+		budgetDebit,
+		...(input.model !== undefined ? { model: input.model } : {}),
+		...(args.maxTokens !== undefined ? { maxTokens: args.maxTokens } : {})
+	};
+
+	const subagent =
+		kind === 'research'
+			? await executeChild(researchSubagentWorkflow, { workflowId, args: [workflowInput] })
+			: kind === 'code'
+				? await executeChild(codeSubagentWorkflow, { workflowId, args: [workflowInput] })
+				: await executeChild(criticSubagentWorkflow, { workflowId, args: [workflowInput] });
+
+	reconcileBudgetEntry(state.budgetLedger, budgetDebit, subagent.budgetDebit.usage);
+	state.childWorkflowCount++;
+	state.timelineLanes.push(subagent.timelineLane);
+	if (subagent.annotations) {
+		state.criticAnnotations.push(...subagent.annotations);
+	}
+
+	await observabilityActivities.recordSubagentCompleted({
+		sessionId: input.sessionKey,
+		runId: input.runId,
+		subagentRunId,
+		kind,
+		label,
+		status: subagent.status,
+		budget: subagent.budgetDebit.usage
+	});
+
+	return {
+		subagent,
+		result: {
+			callId: toolCall.id,
+			toolName: toolCall.name,
+			outcome: 'success',
+			content: {
+				subagentRunId,
+				kind,
+				finalAnswer: subagent.finalAnswer
+			}
+		}
+	};
+}
+
 /**
  * Runs policy evaluation → durable approval wait → tool execution for a single
  * tool call. Returns the `ToolExecutionResult` if executed, or a terminal
@@ -491,7 +644,8 @@ type MutableApprovalState = {
 async function handleToolCall(
 	input: AgentRunInput,
 	toolCall: ToolCallInput,
-	state: MutableApprovalState
+	state: MutableApprovalState,
+	delegateState: MutableDelegateState
 ): Promise<
 	| { kind: 'executed'; result: ToolExecutionResult }
 	| { kind: 'terminal'; status: AgentRunResult['status']; finalAnswer: string }
@@ -508,7 +662,8 @@ async function handleToolCall(
 	}
 
 	if (decision.status === 'allowed') {
-		const result = await sandboxActivities.executeTool({
+		const activities = toolActivitiesForTaskQueue(decision.tool.metadata.taskQueue);
+		const result = await activities.executeTool({
 			call: toolCall,
 			sessionId: input.sessionKey,
 			sessionKey: input.sessionKey,
@@ -593,7 +748,25 @@ async function handleToolCall(
 
 	state.status = 'running';
 	state.pendingApproval = null;
-	const result = await sandboxActivities.executeTool({
+	if (isDelegateToolName(toolCall.name)) {
+		if (
+			delegateState.childWorkflowCount >= (input.budget ?? DEFAULT_RUN_BUDGET).maxChildWorkflows
+		) {
+			return {
+				kind: 'terminal',
+				status: 'complete',
+				finalAnswer: `Run stopped: child workflow budget exhausted (${(input.budget ?? DEFAULT_RUN_BUDGET).maxChildWorkflows} child workflows).`
+			};
+		}
+		const delegate = await executeDelegateToolCall(
+			input,
+			{ ...toolCall, arguments: recordedResolution.canonicalArguments },
+			delegateState
+		);
+		return { kind: 'executed', result: delegate.result };
+	}
+	const activities = toolActivitiesForTaskQueue(decision.tool.metadata.taskQueue);
+	const result = await activities.executeTool({
 		call: { ...toolCall, arguments: recordedResolution.canonicalArguments },
 		sessionId: input.sessionKey,
 		sessionKey: input.sessionKey,
@@ -664,6 +837,12 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 				criticAnnotations: CriticAnnotation[];
 		  }
 		| undefined;
+	const delegateToolState: MutableDelegateState = {
+		budgetLedger: createBudgetLedger(budget),
+		childWorkflowCount: 0,
+		timelineLanes: [],
+		criticAnnotations: []
+	};
 
 	/**
 	 * Steering messages queued by the session via steeringSignal.
@@ -810,12 +989,22 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 				}
 				toolCallCount++;
 				actionsCount++;
+				if (isDelegateToolName(toolCall.name)) {
+					if (delegateToolState.childWorkflowCount >= budget.maxChildWorkflows) {
+						finalAnswer = `Run stopped: child workflow budget exhausted (${budget.maxChildWorkflows} child workflows).`;
+						break outer;
+					}
+					if (actionsCount >= budget.maxActions) {
+						finalAnswer = `Run stopped: action budget exhausted (${budget.maxActions} actions).`;
+						break outer;
+					}
+				}
 
 				// Reset before the call so that a non-null value after the call
 				// unambiguously came from THIS tool call's approval path (not a
 				// previous one that went through the 'allowed' fast path).
 				recordedApprovalResolution = null;
-				const outcome = await handleToolCall(input, toolCall, approvalState);
+				const outcome = await handleToolCall(input, toolCall, approvalState, delegateToolState);
 
 				// Write an action-sensitive candidate when the user opted to have the
 				// approval decision remembered (remember===true). This covers both the
@@ -859,6 +1048,9 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 						totalUsage
 					);
 				}
+				if (isDelegateToolName(toolCall.name)) {
+					actionsCount++;
+				}
 
 				await observabilityActivities.persistToolResult({
 					sessionId: input.sessionKey,
@@ -876,7 +1068,9 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 			// Three child workflows are always spawned as a unit, so both caps must
 			// allow at least three.
 			const remainingActions = budget.maxActions - actionsCount;
-			const childWorkflowsAllowed = Math.min(budget.maxChildWorkflows, remainingActions);
+			const remainingChildWorkflows =
+				budget.maxChildWorkflows - delegateToolState.childWorkflowCount;
+			const childWorkflowsAllowed = Math.min(remainingChildWorkflows, remainingActions);
 			delegationResult = await runDelegatedSubagents(
 				input,
 				finalAnswer,
@@ -905,11 +1099,22 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 			memoryWriteErrors.push('Failed to write session memory candidate');
 		}
 
-		// Compute grand total usage: parent model calls + reconciled subagent usage.
-		const grandTotalUsage = addUsage(
-			totalUsage,
-			delegationResult?.budgetLedger.used ?? createEmptyUsage()
-		);
+		const activeBudgetLedgers = [
+			...(delegateToolState.childWorkflowCount > 0 ? [delegateToolState.budgetLedger] : []),
+			...(delegationResult ? [delegationResult.budgetLedger] : [])
+		];
+		const combinedBudgetLedger =
+			activeBudgetLedgers.length > 0 ? mergeBudgetLedgers(budget, activeBudgetLedgers) : undefined;
+		const timelineLanes = [
+			...delegateToolState.timelineLanes,
+			...(delegationResult?.timelineLanes ?? [])
+		];
+		const criticAnnotations = [
+			...delegateToolState.criticAnnotations,
+			...(delegationResult?.criticAnnotations ?? [])
+		];
+		const subagentUsage = combinedBudgetLedger?.used ?? createEmptyUsage();
+		const grandTotalUsage = addUsage(totalUsage, subagentUsage);
 
 		status = 'complete';
 		await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
@@ -921,7 +1126,11 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 				finalAnswer,
 				memoryRefs: memoryCandidateIds,
 				...(memoryWriteErrors.length > 0 ? { memoryWriteErrors } : {}),
-				...delegationResult
+				...(combinedBudgetLedger ? { budgetLedger: combinedBudgetLedger } : {}),
+				...(timelineLanes.length > 0 ? { timelineLanes } : {}),
+				...(input.delegateSubagents === true || criticAnnotations.length > 0
+					? { criticAnnotations }
+					: {})
 			},
 			grandTotalUsage
 		);

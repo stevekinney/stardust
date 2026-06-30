@@ -3,7 +3,8 @@ import { db } from '../lib/server/db/client';
 import { getArtifactStore } from '../lib/server/artifacts';
 import { getSandboxProvider } from '../lib/server/sandbox';
 import { executeRegisteredTool } from '../lib/server/tools/registry';
-import { runSandboxCommand } from './sandbox.activities';
+import { searchMemory, writeMemoryCandidate } from './memory.activities';
+import { killSandboxProcess, runSandboxCommand, startSandboxProcess } from './sandbox.activities';
 
 const artifactStore = getArtifactStore();
 const sandboxProvider = getSandboxProvider({ database: db });
@@ -16,6 +17,10 @@ export async function executeTool(
 		database: db,
 		artifactStore,
 		sandboxProvider,
-		runSandboxCommand
+		runSandboxCommand,
+		startSandboxProcess,
+		killSandboxProcess,
+		searchMemory,
+		writeMemoryCandidate
 	});
 }

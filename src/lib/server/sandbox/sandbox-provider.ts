@@ -29,6 +29,32 @@ export interface SandboxCommandResult {
 	completedAt: string;
 }
 
+export type SandboxProcessStartInput = SandboxCommandInput;
+
+export interface SandboxProcessStartResult {
+	processId: string;
+	sessionKey: string;
+	workspacePath: string;
+	command: string;
+	args: string[];
+	status: 'running';
+	pid: number | null;
+	processGroupId: number | null;
+	startedAt: string;
+}
+
+export interface SandboxProcessKillInput {
+	sessionKey: string;
+	processId: string;
+	signal?: NodeJS.Signals;
+}
+
+export interface SandboxProcessKillResult {
+	processId: string;
+	killed: boolean;
+	status: 'killed' | 'not_found';
+}
+
 export interface SandboxFileInput {
 	sessionKey: string;
 	path: string;
@@ -97,9 +123,10 @@ export interface SandboxProvider {
 		input: SandboxCommandInput,
 		options?: SandboxRunCommandOptions
 	): Promise<SandboxCommandResult>;
+	startProcess(input: SandboxProcessStartInput): Promise<SandboxProcessStartResult>;
 	snapshot(input: SandboxSnapshotInput): Promise<SandboxSnapshotResult>;
 	restore(sessionKey: string, gitCommitSha: string): Promise<void>;
 	createEphemeralSandbox(sessionKey: string): Promise<SandboxEphemeralSandbox>;
-	killProcess(processId: string): Promise<boolean>;
+	killProcess(input: SandboxProcessKillInput): Promise<SandboxProcessKillResult>;
 	cancelSession(sessionKey: string): Promise<void>;
 }

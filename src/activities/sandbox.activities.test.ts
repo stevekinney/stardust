@@ -24,6 +24,7 @@ const mockProvider = vi.hoisted(() => ({
 	readFile: vi.fn(),
 	writeFile: vi.fn(),
 	runCommand: vi.fn(),
+	startProcess: vi.fn(),
 	snapshot: vi.fn(),
 	restore: vi.fn(),
 	createEphemeralSandbox: vi.fn(),

@@ -110,6 +110,15 @@ describe('migration', () => {
 		);
 	});
 
+	it('adds sandbox background process metadata columns', () => {
+		const columns = sqlite.prepare(`PRAGMA table_info(sandbox_commands)`).all() as {
+			name: string;
+		}[];
+		expect(columns.map((column) => column.name)).toEqual(
+			expect.arrayContaining(['pid', 'process_group_id', 'background'])
+		);
+	});
+
 	it('FTS5 mirror syncs on insert', () => {
 		const id = 'fts-test-1';
 		sqlite

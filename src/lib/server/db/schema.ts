@@ -215,6 +215,9 @@ export const sandboxCommands = sqliteTable('sandbox_commands', {
 	toolCallId: text('tool_call_id'),
 	command: text('command').notNull(),
 	args: text('args'), // JSON string[]
+	pid: integer('pid'),
+	processGroupId: integer('process_group_id'),
+	background: integer('background', { mode: 'boolean' }).notNull().default(false),
 	status: text('status', {
 		enum: ['pending', 'running', 'complete', 'failed', 'timeout', 'killed']
 	})

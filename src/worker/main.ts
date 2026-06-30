@@ -26,6 +26,7 @@ export const modelTaskQueueActivities = {
 
 export const toolsTaskQueueActivities = {
 	evaluateToolCallPolicy: policyActivities.evaluateToolCallPolicy,
+	executeTool: toolActivities.executeTool,
 	forwardApprovalToRun: policyActivities.forwardApprovalToRun,
 	listToolManifest: policyActivities.listToolManifest,
 	persistToolResult: observabilityActivities.persistToolResult,
@@ -41,16 +42,19 @@ export const sandboxTaskQueueActivities = {
 	cancelSandboxSession: sandboxActivities.cancelSandboxSession,
 	ensureSandboxWorkspace: sandboxActivities.ensureSandboxWorkspace,
 	executeTool: toolActivities.executeTool,
+	killSandboxProcess: sandboxActivities.killSandboxProcess,
 	readSandboxFile: sandboxActivities.readSandboxFile,
 	restoreSandbox: sandboxActivities.restoreSandbox,
 	runEphemeralSandboxCommand: sandboxActivities.runEphemeralSandboxCommand,
 	runSandboxCommand: sandboxActivities.runSandboxCommand,
 	snapshotSandbox: sandboxActivities.snapshotSandbox,
+	startSandboxProcess: sandboxActivities.startSandboxProcess,
 	writeSandboxFile: sandboxActivities.writeSandboxFile
 };
 
 export const memoryTaskQueueActivities = {
 	confirmMemoryCandidate: memoryActivities.confirmMemoryCandidate,
+	executeTool: toolActivities.executeTool,
 	generateEmbedding: memoryActivities.generateEmbedding,
 	listMemoryNotes: memoryActivities.listMemoryNotes,
 	loadMemoryCompactionInput: memoryActivities.loadMemoryCompactionInput,
