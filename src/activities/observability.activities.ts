@@ -156,6 +156,8 @@ export async function recordRunCompleted(input: {
 	finalAnswer: string;
 	/** Grand total token usage (parent model calls + reconciled subagent usage). */
 	usage?: ModelUsage;
+	/** Human-readable error message included in the lifecycle payload when status is 'failed'. */
+	reason?: string;
 }): Promise<void> {
 	const now = new Date().toISOString();
 	await db
@@ -178,21 +180,32 @@ export async function recordRunCompleted(input: {
 	}).catch((error: unknown) => {
 		if (!(error instanceof Error) || !error.message.includes('UNIQUE')) throw error;
 	});
+	const transcriptLifecyclePayload: Record<string, unknown> = {
+		status: input.status,
+		recoverySafe: true
+	};
+	if (input.status === 'failed' && input.reason != null) {
+		transcriptLifecyclePayload.reason = input.reason;
+	}
 	await appendTranscriptEvent(db, {
 		id: `${input.runId}:completed`,
 		sessionId: input.sessionId,
 		runId: input.runId,
 		kind: 'lifecycle',
-		payload: JSON.stringify({ status: input.status, recoverySafe: true }),
+		payload: JSON.stringify(transcriptLifecyclePayload),
 		createdAt: now
 	}).catch((error: unknown) => {
 		if (!(error instanceof Error) || !error.message.includes('UNIQUE')) throw error;
 	});
+	const streamLifecyclePayload: Record<string, unknown> = { status: input.status };
+	if (input.status === 'failed' && input.reason != null) {
+		streamLifecyclePayload.reason = input.reason;
+	}
 	await publishStreamEvent(db, {
 		sessionId: input.sessionId,
 		runId: input.runId,
 		kind: 'lifecycle',
-		payload: JSON.stringify({ status: input.status }),
+		payload: JSON.stringify(streamLifecyclePayload),
 		createdAt: now
 	});
 

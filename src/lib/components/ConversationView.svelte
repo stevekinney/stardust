@@ -17,9 +17,10 @@
 		userMessage?: UserMessage | null;
 		events?: StreamEvent[];
 		running?: boolean;
+		onRetry?: (() => void) | null;
 	};
 
-	let { userMessage = null, events = [], running = false }: Props = $props();
+	let { userMessage = null, events = [], running = false, onRetry = null }: Props = $props();
 
 	type ToolState = {
 		id: string;
@@ -47,6 +48,8 @@
 		const toolOrder: string[] = [];
 		const subagents = new SvelteMap<string, SubagentState>();
 		const lifecycleEvents: Array<{ status: string }> = [];
+		let terminalStatus: 'complete' | 'failed' | 'cancelled' | null = null;
+		let failureReason: string | null = null;
 		const approvalRequests: Array<{ approvalId: string; toolName: string }> = [];
 		const memoryCandidates: Array<{ content: string }> = [];
 
@@ -92,9 +95,21 @@
 					break;
 				}
 
-				case 'lifecycle':
-					lifecycleEvents.push({ status: payload.status as string });
+				case 'lifecycle': {
+					const lifecycleStatus = payload.status as string;
+					lifecycleEvents.push({ status: lifecycleStatus });
+					if (
+						lifecycleStatus === 'complete' ||
+						lifecycleStatus === 'failed' ||
+						lifecycleStatus === 'cancelled'
+					) {
+						terminalStatus = lifecycleStatus as 'complete' | 'failed' | 'cancelled';
+					}
+					if (lifecycleStatus === 'failed' && typeof payload.reason === 'string') {
+						failureReason = payload.reason;
+					}
 					break;
+				}
 
 				case 'subagent.start': {
 					const subRunId = payload.subagentRunId as string;
@@ -137,6 +152,8 @@
 			tools: toolOrder.map((id) => tools.get(id)!).filter(Boolean),
 			subagents: Array.from(subagents.values()),
 			lifecycleEvents,
+			terminalStatus,
+			failureReason,
 			approvalRequests,
 			memoryCandidates
 		};
@@ -247,21 +264,41 @@
 		</div>
 	{/if}
 
-	<!-- Lifecycle: completion marker -->
+	<!-- Lifecycle: completion marker (complete only) -->
 	{#each renderModel.lifecycleEvents as lifecycle (lifecycle.status + '-terminal')}
-		{#if lifecycle.status === 'complete' || lifecycle.status === 'failed' || lifecycle.status === 'cancelled'}
-			<div
-				class="lifecycle-marker lifecycle-terminal"
-				class:lifecycle-failed={lifecycle.status === 'failed'}
-				class:lifecycle-cancelled={lifecycle.status === 'cancelled'}
-				role="status"
-				aria-label="Run {lifecycle.status}"
-			>
+		{#if lifecycle.status === 'complete'}
+			<div class="lifecycle-marker lifecycle-terminal" role="status" aria-label="Run complete">
 				<span class="lifecycle-dot"></span>
-				<span class="lifecycle-label">Run {lifecycle.status}</span>
+				<span class="lifecycle-label">Run complete</span>
 			</div>
 		{/if}
 	{/each}
+
+	<!-- Failure / cancellation banner -->
+	{#if renderModel.terminalStatus === 'failed' || renderModel.terminalStatus === 'cancelled'}
+		<div
+			class="run-failure-banner"
+			class:run-failure-cancelled={renderModel.terminalStatus === 'cancelled'}
+			role="alert"
+			aria-label="Run {renderModel.terminalStatus}"
+		>
+			<span class="run-failure-icon">{renderModel.terminalStatus === 'failed' ? '✗' : '⊘'}</span>
+			<span class="run-failure-message">
+				{#if renderModel.terminalStatus === 'failed'}
+					{#if renderModel.failureReason}
+						<span class="run-failure-reason">{renderModel.failureReason}</span>
+					{:else}
+						This run failed.
+					{/if}
+				{:else}
+					This run was cancelled.
+				{/if}
+			</span>
+			{#if onRetry}
+				<button class="run-failure-retry" onclick={onRetry} type="button">Retry</button>
+			{/if}
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -324,14 +361,6 @@
 
 	.lifecycle-terminal .lifecycle-dot {
 		background: #17603a;
-	}
-
-	.lifecycle-failed .lifecycle-dot {
-		background: #9b2c2c;
-	}
-
-	.lifecycle-cancelled .lifecycle-dot {
-		background: #92400e;
 	}
 
 	.lifecycle-label {
@@ -476,5 +505,57 @@
 
 	.memory-content {
 		line-height: 1.5;
+	}
+
+	.run-failure-banner {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 10px 14px;
+		border: 1px solid #f5c6c6;
+		border-left: 3px solid #9b2c2c;
+		border-radius: 6px;
+		background: #fff1f1;
+		color: #7b1d1d;
+		font-size: 0.875rem;
+	}
+
+	.run-failure-banner.run-failure-cancelled {
+		border-color: #fcd34d;
+		border-left-color: #92400e;
+		background: #fffbeb;
+		color: #78350f;
+	}
+
+	.run-failure-icon {
+		flex-shrink: 0;
+		font-style: normal;
+		font-weight: 700;
+	}
+
+	.run-failure-message {
+		flex: 1;
+	}
+
+	.run-failure-reason {
+		display: block;
+		word-break: break-word;
+	}
+
+	.run-failure-retry {
+		flex-shrink: 0;
+		padding: 4px 12px;
+		border: 1px solid currentColor;
+		border-radius: 4px;
+		background: transparent;
+		color: inherit;
+		font-size: 0.8rem;
+		font-weight: 700;
+		cursor: pointer;
+		transition: background 0.1s;
+	}
+
+	.run-failure-retry:hover {
+		background: rgba(0, 0, 0, 0.06);
 	}
 </style>

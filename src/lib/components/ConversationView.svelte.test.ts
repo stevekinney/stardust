@@ -1,5 +1,5 @@
 import { mount, unmount } from 'svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import ConversationView, { type StreamEvent } from './ConversationView.svelte';
 
 function makeEvent(id: number, kind: string, payload: Record<string, unknown>): StreamEvent {
@@ -231,6 +231,136 @@ describe('ConversationView', () => {
 		const notice = document.querySelector('[aria-label="Approval required: shell.exec"]');
 		expect(notice).toBeInstanceOf(HTMLElement);
 		expect(notice!.textContent).toContain('shell.exec');
+
+		unmount(component);
+	});
+
+	it('renders a failure banner when run status is failed', () => {
+		const events: StreamEvent[] = [makeEvent(1, 'lifecycle', { status: 'failed' })];
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: { events }
+		});
+
+		const banner = document.querySelector('[aria-label="Run failed"]');
+		expect(banner).toBeInstanceOf(HTMLElement);
+
+		unmount(component);
+	});
+
+	it('renders a cancellation banner when run status is cancelled', () => {
+		const events: StreamEvent[] = [makeEvent(1, 'lifecycle', { status: 'cancelled' })];
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: { events }
+		});
+
+		const banner = document.querySelector('[aria-label="Run cancelled"]');
+		expect(banner).toBeInstanceOf(HTMLElement);
+
+		unmount(component);
+	});
+
+	it('does not render a failure banner for completed runs', () => {
+		const events: StreamEvent[] = [makeEvent(1, 'lifecycle', { status: 'complete' })];
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: { events }
+		});
+
+		expect(document.querySelector('[aria-label="Run failed"]')).toBeNull();
+		expect(document.querySelector('[aria-label="Run cancelled"]')).toBeNull();
+
+		unmount(component);
+	});
+
+	it('renders a retry button when onRetry is provided and run is failed', () => {
+		const events: StreamEvent[] = [makeEvent(1, 'lifecycle', { status: 'failed' })];
+		const onRetry = vi.fn();
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: { events, onRetry }
+		});
+
+		const button = document.querySelector('.run-failure-retry');
+		expect(button).toBeInstanceOf(HTMLElement);
+		expect(button!.textContent?.trim()).toBe('Retry');
+
+		unmount(component);
+	});
+
+	it('calls onRetry when the retry button is clicked', () => {
+		const events: StreamEvent[] = [makeEvent(1, 'lifecycle', { status: 'failed' })];
+		const onRetry = vi.fn();
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: { events, onRetry }
+		});
+
+		const button = document.querySelector('.run-failure-retry') as HTMLButtonElement;
+		button.click();
+		expect(onRetry).toHaveBeenCalledOnce();
+
+		unmount(component);
+	});
+
+	it('does not render a retry button when onRetry is not provided', () => {
+		const events: StreamEvent[] = [makeEvent(1, 'lifecycle', { status: 'failed' })];
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: { events }
+		});
+
+		expect(document.querySelector('.run-failure-retry')).toBeNull();
+
+		unmount(component);
+	});
+
+	it('renders a retry button when onRetry is provided and run is cancelled', () => {
+		const events: StreamEvent[] = [makeEvent(1, 'lifecycle', { status: 'cancelled' })];
+		const onRetry = vi.fn();
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: { events, onRetry }
+		});
+
+		const button = document.querySelector('.run-failure-retry');
+		expect(button).toBeInstanceOf(HTMLElement);
+		expect(button!.textContent?.trim()).toBe('Retry');
+
+		unmount(component);
+	});
+
+	it('renders the failure reason from the lifecycle payload when status is failed', () => {
+		const events: StreamEvent[] = [
+			makeEvent(1, 'lifecycle', {
+				status: 'failed',
+				reason: 'Timeout exceeded: model did not respond'
+			})
+		];
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: { events }
+		});
+
+		const banner = document.querySelector('[aria-label="Run failed"]');
+		expect(banner).toBeInstanceOf(HTMLElement);
+		expect(banner!.textContent).toContain('Timeout exceeded: model did not respond');
+
+		unmount(component);
+	});
+
+	it('renders the failure banner without undefined or null when no reason is present', () => {
+		const events: StreamEvent[] = [makeEvent(1, 'lifecycle', { status: 'failed' })];
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: { events }
+		});
+
+		const banner = document.querySelector('[aria-label="Run failed"]');
+		expect(banner).toBeInstanceOf(HTMLElement);
+		expect(banner!.textContent).not.toContain('undefined');
+		expect(banner!.textContent).not.toContain('null');
 
 		unmount(component);
 	});

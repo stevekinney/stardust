@@ -106,6 +106,8 @@ type ObservabilityActivities = {
 		status: AgentRunResult['status'];
 		finalAnswer: string;
 		usage?: ModelUsage;
+		/** Human-readable error message included in the lifecycle payload when status is 'failed'. */
+		reason?: string;
 	}): Promise<void>;
 	recordSubagentStarted(input: {
 		sessionId: string;
@@ -458,14 +460,16 @@ async function runDelegatedSubagents(
 async function completeRun(
 	input: AgentRunInput,
 	result: AgentRunResult,
-	usage?: ModelUsage
+	usage?: ModelUsage,
+	reason?: string
 ): Promise<AgentRunResult> {
 	await observabilityActivities.recordRunCompleted({
 		sessionId: input.sessionKey,
 		runId: input.runId,
 		status: result.status,
 		finalAnswer: result.finalAnswer,
-		usage
+		usage,
+		reason
 	});
 	return result;
 }
@@ -932,16 +936,18 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 		// forever. Wrap in nonCancellable so a concurrent cancellation does not
 		// suppress this write.
 		status = 'failed';
+		const errorMessage = e instanceof Error ? e.message : String(e);
 		await CancellationScope.nonCancellable(() =>
 			completeRun(
 				input,
 				{
 					runId: input.runId,
 					status: 'failed',
-					finalAnswer: e instanceof Error ? e.message : String(e),
+					finalAnswer: errorMessage,
 					memoryRefs: []
 				},
-				totalUsage
+				totalUsage,
+				errorMessage
 			)
 		);
 		throw e;
