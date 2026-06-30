@@ -275,6 +275,7 @@
 			userMessage={currentUserMessage ? { text: currentUserMessage } : null}
 			{events}
 			{running}
+			onRetry={currentUserMessage ? () => handleSubmit(currentUserMessage!) : null}
 		/>
 	</div>
 
