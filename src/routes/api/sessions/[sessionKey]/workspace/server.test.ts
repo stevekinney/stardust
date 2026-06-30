@@ -14,7 +14,7 @@ import { GET } from './+server';
 
 // Terminal methods in the Drizzle query chain used by this route:
 //   select().from().where().limit()   → sessions, sandboxes (one at a time)
-//   select().from().where().orderBy() → commands, snapshots, artifacts (Promise.all)
+//   select().from().where().orderBy() → commands, snapshots, artifacts, tool invocations (Promise.all)
 const mockLimit = vi.fn();
 const mockOrderBy = vi.fn();
 
@@ -38,7 +38,8 @@ vi.mock('$lib/server/db/schema', () => ({
 	sandboxes: {},
 	sandboxCommands: { createdAt: null },
 	sandboxSnapshots: { createdAt: null },
-	artifacts: { createdAt: null }
+	artifacts: { createdAt: null },
+	toolInvocations: { createdAt: null }
 }));
 
 // drizzle-orm helpers used inside the handler — they just need to be callable.
@@ -104,13 +105,18 @@ function makeRequest(sessionKey: string): Parameters<typeof GET>[0] {
  *   3. commands → orderBy  (Promise.all, first)
  *   4. snapshots → orderBy (Promise.all, second)
  *   5. artifacts → orderBy (Promise.all, third)
+ *   6. tool invocations → orderBy (Promise.all, fourth)
  */
-function primeDb(commandRows: (typeof baseCommandRow)[] = []) {
+function primeDb(
+	commandRows: (typeof baseCommandRow)[] = [],
+	toolRows: Array<Record<string, unknown>> = []
+) {
 	mockLimit.mockResolvedValueOnce([sessionRow]); // session
 	mockLimit.mockResolvedValueOnce([sandboxRow]); // sandbox
 	mockOrderBy.mockResolvedValueOnce(commandRows); // commands
 	mockOrderBy.mockResolvedValueOnce([]); // snapshots
 	mockOrderBy.mockResolvedValueOnce([]); // artifacts
+	mockOrderBy.mockResolvedValueOnce(toolRows); // tool invocations
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -173,6 +179,39 @@ describe('GET /api/sessions/[sessionKey]/workspace', () => {
 
 		expect(body.commands[0].stdout).toBeNull();
 		expect(body.commands[0].stderr).toBeNull();
+	});
+
+	it('projects persisted workspace.diff tool results as workspace diffs', async () => {
+		primeDb(
+			[],
+			[
+				{
+					id: 'tool-001',
+					toolName: 'workspace.diff',
+					resultInline: JSON.stringify({
+						base: 'abc123',
+						head: 'working-tree',
+						path: 'src/example.ts',
+						patch: 'diff --git a/src/example.ts b/src/example.ts\n+export const value = 1;\n'
+					}),
+					completedAt: '2026-06-26T00:01:00.000Z',
+					createdAt: '2026-06-26T00:00:59.000Z'
+				}
+			]
+		);
+
+		const response = await GET(makeRequest('test-session'));
+		const body = await response.json();
+
+		expect(response.status).toBe(200);
+		expect(body.diffs).toEqual([
+			expect.objectContaining({
+				fromSnapshotId: 'abc123',
+				toSnapshotId: 'working-tree',
+				fileName: 'src/example.ts',
+				patch: expect.stringContaining('+export const value = 1;')
+			})
+		]);
 	});
 
 	it('returns 400 for an invalid sessionKey', async () => {

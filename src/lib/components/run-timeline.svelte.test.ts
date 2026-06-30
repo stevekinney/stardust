@@ -104,7 +104,22 @@ const projection: RunInspectorProjection = {
 	activityAttempts: [],
 	workflowExecutions: [],
 	scheduleRunLinkage: [],
-	capabilityEvidence: [],
+	capabilityEvidence: [
+		{
+			id: 'browser',
+			label: 'Browser',
+			count: 1,
+			status: 'used',
+			evidence: '1/1 complete'
+		},
+		{
+			id: 'temporal-mcp',
+			label: 'Temporal MCP',
+			count: 0,
+			status: 'available',
+			evidence: 'Read-only Temporal triage ready'
+		}
+	],
 	toolInvocations: [],
 	approvalRequests: [],
 	idempotencyEntries: [],
@@ -124,6 +139,22 @@ describe('RunTimeline', () => {
 
 		expect(document.body.textContent).toContain('complete');
 		expect(document.body.textContent).toContain('claude-opus-4-5');
+
+		unmount(component);
+	});
+
+	it('renders capability evidence for demo-oriented agent tools', () => {
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection }
+		});
+
+		const capabilityStrip = document.querySelector('.capability-strip');
+		expect(capabilityStrip?.getAttribute('aria-label')).toBe('Agent capabilities');
+		expect(document.body.textContent).toContain('Browser');
+		expect(document.body.textContent).toContain('1/1 complete');
+		expect(document.body.textContent).toContain('Temporal MCP');
+		expect(document.body.textContent).toContain('Read-only Temporal triage ready');
 
 		unmount(component);
 	});
