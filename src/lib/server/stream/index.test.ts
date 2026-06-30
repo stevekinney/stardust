@@ -337,5 +337,28 @@ describe('transcript events', () => {
 
 		expect(transcript.map((event) => event.id)).toEqual(['transcript-001', 'transcript-002']);
 		expect(transcript.map((event) => event.sequence)).toEqual([1, 2]);
+		expect(transcript.map((event) => event.sessionSequence)).toEqual([1, 2]);
+	});
+
+	it('assigns a session-level transcript cursor across runs', async () => {
+		await appendTranscriptEvent(database, {
+			id: 'transcript-session-cursor-a',
+			runId: 'run-session-cursor-a',
+			sessionId: 'session-cursor',
+			kind: 'user_message',
+			payload: JSON.stringify({ text: 'first run' })
+		});
+		await appendTranscriptEvent(database, {
+			id: 'transcript-session-cursor-b',
+			runId: 'run-session-cursor-b',
+			sessionId: 'session-cursor',
+			kind: 'assistant_message',
+			payload: JSON.stringify({ text: 'second run' })
+		});
+
+		const transcript = await reconstructSessionTranscript(database, 'session-cursor');
+
+		expect(transcript.map((event) => event.sequence)).toEqual([1, 1]);
+		expect(transcript.map((event) => event.sessionSequence)).toEqual([1, 2]);
 	});
 });

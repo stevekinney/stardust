@@ -1,75 +1,45 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import type { DurabilityEvidence } from '$lib/server/observability/projection';
 
-	type DurabilityStats = {
-		eventsLost: number;
-		autoRetries: number;
-		workerCrashes: number;
-		lastDurableEvent: string | null;
+	type Props = {
+		evidence?: DurabilityEvidence | null;
+		compact?: boolean;
 	};
 
-	let stats = $state<DurabilityStats>({
-		eventsLost: 0,
-		autoRetries: 0,
-		workerCrashes: 0,
-		lastDurableEvent: null
-	});
+	let { evidence = null, compact = false }: Props = $props();
 
-	async function pollStats() {
-		try {
-			const response = await fetch('/api/sessions');
-			if (response.ok) {
-				const body = (await response.json()) as {
-					sessions: Array<{ updatedAt: string; archivedAt: string | null }>;
-				};
-				const active = body.sessions.filter((s) => !s.archivedAt);
-				const latestUpdate = active.reduce<string | null>((latest, s) => {
-					if (!latest) return s.updatedAt;
-					return new Date(s.updatedAt) > new Date(latest) ? s.updatedAt : latest;
-				}, null);
-
-				stats = {
-					eventsLost: 0,
-					autoRetries: stats.autoRetries,
-					workerCrashes: 0,
-					lastDurableEvent: latestUpdate
-				};
-			}
-		} catch {
-			// Non-fatal
-		}
+	function formatValue(value: number | null | undefined): string {
+		return value == null ? '—' : String(value);
 	}
-
-	function formatEventId(iso: string | null): string {
-		if (!iso) return '—';
-		const date = new Date(iso);
-		return `#${Math.floor(date.getTime() / 1000) % 1000}`;
-	}
-
-	onMount(() => {
-		void pollStats();
-		const interval = setInterval(() => void pollStats(), 15_000);
-		return () => clearInterval(interval);
-	});
 </script>
 
-<div class="ribbon" role="status" aria-label="Durability status">
+<div class="ribbon" class:compact role="status" aria-label="Durability evidence">
 	<div class="rib">
-		<span class="rib-n">{stats.eventsLost}</span>
-		<span class="rib-l">events lost</span>
+		<span class="rib-n">{formatValue(evidence?.streamGapCount)}</span>
+		<span class="rib-l">stream gaps</span>
 	</div>
 	<div class="rib">
-		<span class="rib-n rib-success">{stats.autoRetries}</span>
-		<span class="rib-l">auto-retry · no action</span>
+		<span class="rib-n rib-success">{formatValue(evidence?.retryAttemptCount)}</span>
+		<span class="rib-l">retry attempts</span>
 	</div>
 	<div class="rib">
-		<span class="rib-n">{stats.workerCrashes}</span>
-		<span class="rib-l">worker crashes</span>
+		<span class="rib-n">{formatValue(evidence?.heartbeatBackedCommandCount)}</span>
+		<span class="rib-l">heartbeat commands</span>
 	</div>
 	<div class="rib">
-		<span class="rib-n rib-accent">{formatEventId(stats.lastDurableEvent)}</span>
-		<span class="rib-l">last durable event</span>
+		<span class="rib-n rib-accent">{formatValue(evidence?.latestTranscriptSequence)}</span>
+		<span class="rib-l">transcript cursor</span>
 	</div>
+	{#if !compact}
+		<div class="rib">
+			<span class="rib-n">{formatValue(evidence?.idempotencyReplayCount)}</span>
+			<span class="rib-l">idempotency rows</span>
+		</div>
+		<div class="rib">
+			<span class="rib-n">{formatValue(evidence?.scheduleFireCount)}</span>
+			<span class="rib-l">schedule fires</span>
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -78,15 +48,22 @@
 		border-bottom: 1px solid var(--cinder-border-muted);
 		background: linear-gradient(180deg, var(--cinder-surface-inset) 0%, var(--cinder-surface) 100%);
 		flex: none;
+		overflow-x: auto;
 	}
 
 	.rib {
-		flex: 1;
+		flex: 1 0 7rem;
 		display: flex;
 		flex-direction: column;
 		align-items: center;
 		gap: 2px;
 		padding: 10px 8px;
+		min-width: 0;
+	}
+
+	.compact .rib {
+		flex-basis: 5.5rem;
+		padding: 8px 6px;
 	}
 
 	.rib + .rib {

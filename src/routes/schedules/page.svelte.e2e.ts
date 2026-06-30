@@ -29,6 +29,7 @@ test('new schedule button opens the create form and submits a schedule', async (
 						status: 'active',
 						lastRunAt: null,
 						nextRunAt: new Date(Date.now() + 3_600_000).toISOString(),
+						fireEvents: [],
 						createdAt: new Date().toISOString(),
 						updatedAt: new Date().toISOString()
 					}

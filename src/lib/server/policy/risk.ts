@@ -24,6 +24,31 @@ export const LOW_RISK_TOOL: ToolMetadata = toolMetadata({
 	idempotencyBehavior: 'safe'
 });
 
+/** Read-only repository, browser, Temporal, and artifact inspection tools. */
+export const REPOSITORY_INSPECT_TOOL: ToolMetadata = toolMetadata({
+	...LOW_RISK_TOOL,
+	timeoutMs: 15_000
+});
+
+export const BROWSER_INSPECT_TOOL: ToolMetadata = toolMetadata({
+	...LOW_RISK_TOOL,
+	taskQueue: TASK_QUEUE_SANDBOX,
+	timeoutMs: 30_000,
+	retry: { maximumAttempts: 1 }
+});
+
+export const TEMPORAL_MCP_TOOL: ToolMetadata = toolMetadata({
+	...LOW_RISK_TOOL,
+	timeoutMs: 30_000,
+	retry: { maximumAttempts: 1 }
+});
+
+export const SAFE_ARTIFACT_TOOL: ToolMetadata = toolMetadata({
+	...LOW_RISK_TOOL,
+	timeoutMs: 10_000,
+	retry: { maximumAttempts: 1 }
+});
+
 /**
  * Mutating workspace tools (`workspace.writeFile`, `workspace.applyPatch`).
  * Risk is High per the MVP spec — these overwrite or patch files and require approval.
@@ -36,6 +61,36 @@ export const MUTATING_WORKSPACE_TOOL: ToolMetadata = toolMetadata({
 	timeoutMs: 15_000,
 	retry: { maximumAttempts: 1 },
 	idempotencyBehavior: 'key-required'
+});
+
+/** Sandbox restore rewrites workspace state to a prior git snapshot. */
+export const SANDBOX_RESTORE_TOOL: ToolMetadata = toolMetadata({
+	risk: 'high',
+	requiresApproval: true,
+	taskQueue: TASK_QUEUE_SANDBOX,
+	timeoutMs: 20_000,
+	retry: { maximumAttempts: 1 },
+	idempotencyBehavior: 'key-required'
+});
+
+/** Structured verification commands execute project scripts and may mutate caches. */
+export const VERIFICATION_TOOL: ToolMetadata = toolMetadata({
+	risk: 'medium',
+	requiresApproval: true,
+	taskQueue: TASK_QUEUE_SANDBOX,
+	timeoutMs: 30_000,
+	retry: { maximumAttempts: 1 },
+	idempotencyBehavior: 'unsafe'
+});
+
+/** Browser actions can mutate application state through UI interactions. */
+export const BROWSER_ACTION_TOOL: ToolMetadata = toolMetadata({
+	risk: 'medium',
+	requiresApproval: true,
+	taskQueue: TASK_QUEUE_SANDBOX,
+	timeoutMs: 30_000,
+	retry: { maximumAttempts: 1 },
+	idempotencyBehavior: 'unsafe'
 });
 
 /**

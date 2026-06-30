@@ -22,9 +22,13 @@
 	const sessionKey = $derived(data.sessionKey);
 
 	let running = $state(false);
-	let events = $state<StreamEvent[]>([]);
+	let liveEvents = $state<StreamEvent[]>([]);
+	let canonicalEvents = $state<StreamEvent[]>([]);
+	let transcriptMode = $state<'live' | 'canonical'>('live');
+	let events = $derived(transcriptMode === 'live' ? liveEvents : canonicalEvents);
 	let currentUserMessage = $state<string | null>(null);
 	let errorMessage = $state<string | null>(null);
+	let streamGapNotice = $state<string | null>(null);
 	let inspector = $state.raw<RunInspectorProjection | null>(null);
 	let inspectorOpen = $state(true);
 
@@ -43,6 +47,27 @@
 	const isRecovered = $derived(inspector?.run.status === 'recovered');
 
 	let abortController: AbortController | null = null;
+
+	const demoPrompts = [
+		{
+			label: 'Verify change',
+			message: 'Run verification for the current change and summarize failures.'
+		},
+		{
+			label: 'Inspect UI',
+			message: 'Inspect the local app UI in the browser and capture evidence.'
+		},
+		{
+			label: 'Triage workflow',
+			message:
+				'Use Temporal MCP to triage the latest workflow and summarize durable execution state.'
+		},
+		{
+			label: 'Workspace diff',
+			message: 'Compare the current workspace diff and explain the risk.'
+		},
+		{ label: 'Create report', message: 'Create a run report artifact with the important evidence.' }
+	];
 
 	/** Controls which pane is active on tablet (641–1024px). */
 	let tabletView = $state<'conversation' | 'run'>('conversation');
@@ -86,7 +111,7 @@
 			};
 
 			let seq = 0;
-			events = body.events
+			canonicalEvents = body.events
 				.filter((e) => e.kind !== 'user_message')
 				.flatMap((e) => {
 					if (e.kind === 'tool_call') {
@@ -105,6 +130,9 @@
 					}
 					return [{ id: seq++, kind: KIND_MAP[e.kind] ?? e.kind, payload: e.payload }];
 				});
+			if (!running && liveEvents.length === 0) {
+				transcriptMode = 'canonical';
+			}
 		} catch {
 			// Non-fatal
 		}
@@ -115,8 +143,10 @@
 
 		running = true;
 		errorMessage = null;
+		streamGapNotice = null;
 		currentUserMessage = message;
-		events = [];
+		transcriptMode = 'live';
+		liveEvents = [];
 
 		let model: string | undefined;
 		let maxBudgetUsd: number | undefined;
@@ -216,9 +246,16 @@
 			}
 		}
 
-		if (!kind || !data || kind === 'stream.gap') return;
+		if (!kind || !data) return;
 
-		events = [...events, { id: id ?? events.length, kind, payload: data }];
+		if (kind === 'stream.gap') {
+			streamGapNotice = 'Live stream gap detected; rebuilt from transcript_events.';
+			transcriptMode = 'canonical';
+			void loadTranscript().then(() => loadLatestRunInspector());
+			return;
+		}
+
+		liveEvents = [...liveEvents, { id: id ?? liveEvents.length, kind, payload: data }];
 	}
 
 	async function loadLatestRunInspector() {
@@ -250,9 +287,8 @@
 
 	/** Durable event id for the phone monitor 3-col ribbon, derived from inspector run. */
 	const phoneDurableEventId = $derived.by(() => {
-		const startedAt = inspector?.run.startedAt;
-		if (!startedAt) return '—';
-		return `#${Math.floor(new Date(startedAt).getTime() / 1000) % 1000}`;
+		const cursor = inspector?.durabilityEvidence.latestTranscriptSequence;
+		return cursor == null ? '—' : String(cursor);
 	});
 
 	/** Extracts the first tool name from a tool_call payload for phone step labels. */
@@ -319,20 +355,19 @@
 		return `${n}`;
 	}
 
-	// Budget bar — derived from projection when available, falling back to realistic mocks.
-	const budgetSpend = $derived(inspector?.run.usage?.estimatedCostUsd ?? 0.42);
-	const budgetMax = $derived(inspector?.run.budget?.maxEstimatedCostUsd ?? 2.0);
+	const budgetSpend = $derived(inspector?.run.usage?.estimatedCostUsd ?? null);
+	const budgetMax = $derived(inspector?.run.budget?.maxEstimatedCostUsd ?? null);
 	const budgetPercent = $derived(
-		budgetMax > 0 ? Math.min(100, (budgetSpend / budgetMax) * 100) : 0
+		budgetMax != null && budgetSpend != null && budgetMax > 0
+			? Math.min(100, (budgetSpend / budgetMax) * 100)
+			: 0
 	);
 	const budgetTokensUsed = $derived(
-		inspector?.run.usage
-			? inspector.run.usage.inputTokens + inspector.run.usage.outputTokens
-			: 48000
+		inspector?.run.usage ? inspector.run.usage.inputTokens + inspector.run.usage.outputTokens : null
 	);
-	const budgetTokensMax = $derived(inspector?.run.budget?.maxTokens ?? 200000);
+	const budgetTokensMax = $derived(inspector?.run.budget?.maxTokens ?? null);
 	const budgetModelCalls = $derived(
-		inspector?.transcript.filter((e) => e.kind === 'assistant_message').length ?? 6
+		inspector?.transcript.filter((e) => e.kind === 'assistant_message').length ?? null
 	);
 
 	/** Build a Cinder ApprovalOperation from the session toolCall. */
@@ -452,7 +487,7 @@
 	{/if}
 
 	{#if isRecovered}
-		<RecoveryView />
+		<RecoveryView projection={inspector} />
 	{:else}
 		<!-- Tablet toggle bar (641–1024px only) — hidden on desktop and phone via CSS -->
 		<div class="tablet-bar">
@@ -473,7 +508,7 @@
 				<span class="spacer"></span>
 				<span class="inspector-chip">wf_{sessionKey.slice(0, 4)}</span>
 			</div>
-			<DurabilityRibbon />
+			<DurabilityRibbon evidence={inspector?.durabilityEvidence ?? null} compact />
 		</div>
 		<div class="split-surface" class:tablet-show-run={tabletView === 'run'}>
 			<div class="conversation-pane">
@@ -498,7 +533,20 @@
 					{#if events.length > 0}
 						<span class="pane-meta">{events.length} events</span>
 					{/if}
+					<SegmentedControl
+						id="transcript-mode"
+						label="Transcript mode"
+						selectionMode="single"
+						size="sm"
+						bind:value={transcriptMode}
+					>
+						<Segment value="live">Live</Segment>
+						<Segment value="canonical">Canonical</Segment>
+					</SegmentedControl>
 				</div>
+				{#if streamGapNotice}
+					<div class="stream-gap-notice" role="status">{streamGapNotice}</div>
+				{/if}
 				<div class="chat-area">
 					<ConversationView
 						sessionId={sessionKey}
@@ -624,36 +672,58 @@
 					</div>
 
 					<div class="inspector-durability-wrapper">
-						<DurabilityRibbon />
+						<DurabilityRibbon evidence={inspector.durabilityEvidence} />
 					</div>
 
 					<dl class="inspector-metadata" aria-label="Run execution metadata">
 						<div class="inspector-metadata-item">
-							<dt>Activity</dt>
-							<dd>agentSession</dd>
+							<dt>Workflow</dt>
+							<dd>{inspector.run.workflowId}</dd>
 						</div>
 						<div class="inspector-metadata-item">
 							<dt>Task queue</dt>
-							<dd>agent-main</dd>
+							<dd>{inspector.taskQueues.join(', ')}</dd>
 						</div>
 						<div class="inspector-metadata-item">
-							<dt>Attempt</dt>
-							<dd>1</dd>
+							<dt>Temporal run</dt>
+							<dd>{inspector.run.temporalRunId ?? 'not available'}</dd>
 						</div>
 					</dl>
 
+					<div class="demo-prompt-strip" aria-label="Demo prompts">
+						{#each demoPrompts as prompt (prompt.label)}
+							<button
+								type="button"
+								class="demo-prompt-chip"
+								disabled={running}
+								onclick={() => handleSubmit(prompt.message)}
+							>
+								{prompt.label}
+							</button>
+						{/each}
+					</div>
+
 					<div class="budget-bar">
-						<div class="budget-row">
-							<span class="budget-label">Budget</span>
-							<span class="budget-value">${budgetSpend.toFixed(2)} / ${budgetMax.toFixed(2)}</span>
-						</div>
-						<div class="budget-track">
-							<div class="budget-fill" style="width: {budgetPercent}%"></div>
-						</div>
-						<div class="budget-meta">
-							{formatCompact(budgetTokensUsed)} / {formatCompact(budgetTokensMax)} tokens · {budgetModelCalls}
-							model calls
-						</div>
+						{#if budgetSpend != null && budgetMax != null}
+							<div class="budget-row">
+								<span class="budget-label">Budget</span>
+								<span class="budget-value">${budgetSpend.toFixed(2)} / ${budgetMax.toFixed(2)}</span
+								>
+							</div>
+							<div class="budget-track">
+								<div class="budget-fill" style="width: {budgetPercent}%"></div>
+							</div>
+							<div class="budget-meta">
+								{budgetTokensUsed == null ? 'not available' : formatCompact(budgetTokensUsed)} /
+								{budgetTokensMax == null ? 'not available' : formatCompact(budgetTokensMax)}
+								tokens · {budgetModelCalls == null ? 'not available' : budgetModelCalls} model calls
+							</div>
+						{:else}
+							<div class="budget-row">
+								<span class="budget-label">Budget</span>
+								<span class="budget-value">not available</span>
+							</div>
+						{/if}
 					</div>
 
 					<div class="inspector-body">
@@ -727,16 +797,18 @@
 
 				<div class="phone-ribbon-3">
 					<div class="p3rib">
-						<span class="p3rib-n">0</span>
-						<span class="p3rib-l">lost</span>
+						<span class="p3rib-n">{inspector?.durabilityEvidence.streamGapCount ?? '—'}</span>
+						<span class="p3rib-l">gaps</span>
 					</div>
 					<div class="p3rib">
-						<span class="p3rib-n p3rib-success">0</span>
-						<span class="p3rib-l">auto-retry</span>
+						<span class="p3rib-n p3rib-success"
+							>{inspector?.durabilityEvidence.retryAttemptCount ?? '—'}</span
+						>
+						<span class="p3rib-l">retry</span>
 					</div>
 					<div class="p3rib">
 						<span class="p3rib-n p3rib-accent">{phoneDurableEventId}</span>
-						<span class="p3rib-l">durable</span>
+						<span class="p3rib-l">transcript</span>
 					</div>
 				</div>
 
@@ -956,6 +1028,15 @@
 		border-radius: var(--cinder-radius-sm);
 	}
 
+	.stream-gap-notice {
+		flex: none;
+		padding: 7px 14px;
+		border-bottom: 1px solid var(--cinder-color-warning-border);
+		background: var(--cinder-color-warning-bg);
+		color: var(--cinder-color-warning-fg);
+		font: 500 12px / 1.35 system-ui;
+	}
+
 	.spacer {
 		flex: 1;
 	}
@@ -1046,6 +1127,36 @@
 		font: 500 12px system-ui;
 		font-family: var(--cinder-font-mono);
 		color: var(--cinder-text);
+	}
+
+	.demo-prompt-strip {
+		display: flex;
+		flex: none;
+		flex-wrap: wrap;
+		gap: 6px;
+		padding: 10px 14px;
+		border-bottom: 1px solid var(--cinder-border-muted);
+		background: var(--cinder-bg);
+	}
+
+	.demo-prompt-chip {
+		border: 1px solid var(--cinder-border-muted);
+		border-radius: 999px;
+		padding: 4px 9px;
+		background: var(--cinder-surface);
+		color: var(--cinder-text);
+		font: 650 11px / 1.2 system-ui;
+		cursor: pointer;
+	}
+
+	.demo-prompt-chip:hover:not(:disabled) {
+		border-color: var(--cinder-accent);
+		color: var(--cinder-accent-text);
+	}
+
+	.demo-prompt-chip:disabled {
+		cursor: not-allowed;
+		opacity: 0.55;
 	}
 
 	.budget-bar {

@@ -202,8 +202,24 @@ export type ScheduleProjection = {
 	status: 'active' | 'paused' | 'deleted';
 	lastRunAt: string | null;
 	nextRunAt: string | null;
+	fireEvents: ScheduleFireProjection[];
 	createdAt: string;
 	updatedAt: string;
+};
+
+export type ScheduleFireProjection = {
+	id: string;
+	scheduleId: string;
+	triggerSource: 'scheduled' | 'manual' | 'demo' | 'unknown';
+	scheduledTime: string | null;
+	actualTriggerTime: string;
+	overlapPolicy: string;
+	scheduledWorkflowId: string | null;
+	scheduledTemporalRunId: string | null;
+	targetSessionKey: string;
+	acceptedRunId: string | null;
+	status: 'started' | 'accepted' | 'failed';
+	error: string | null;
 };
 
 export type TriggerScheduleResult = {

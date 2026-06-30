@@ -11,7 +11,12 @@ import {
 	readStreamEventsAfterCursor,
 	reconstructSessionTranscript
 } from '../lib/server/stream';
-import { recordRunCompleted, recordRunStarted } from './observability.activities';
+import {
+	recordRunCompleted,
+	recordRunStarted,
+	recordSubagentCompleted,
+	recordSubagentStarted
+} from './observability.activities';
 
 const TEST_DB_DIR = join(tmpdir(), 'stardust-observability-activities-test');
 const TEST_DB_PATH = join(TEST_DB_DIR, 'test.db');
@@ -158,6 +163,27 @@ describe('recordRunCompleted', () => {
 			replay.events.filter((event) => event.deduplicationKey === 'lifecycle:completed')
 		).toHaveLength(1);
 	});
+
+	it('marks the workflow execution row completed when a run completes', async () => {
+		await recordRunStarted({
+			sessionId: 'obs-session-workflow-row',
+			runId: 'run-workflow-row',
+			message: 'hello'
+		});
+
+		await recordRunCompleted({
+			sessionId: 'obs-session-workflow-row',
+			runId: 'run-workflow-row',
+			status: 'complete',
+			finalAnswer: 'done'
+		});
+
+		const row = sqlite
+			.prepare('SELECT status, closed_at FROM workflow_executions WHERE id = ?')
+			.get('run-workflow-row:workflow') as { status: string; closed_at: string | null };
+		expect(row.status).toBe('completed');
+		expect(row.closed_at).not.toBeNull();
+	});
 });
 
 describe('recordRunStarted', () => {
@@ -233,5 +259,63 @@ describe('recordRunStarted', () => {
 		expect(
 			replay.events.filter((event) => event.deduplicationKey === 'lifecycle:started')
 		).toHaveLength(1);
+	});
+});
+
+describe('subagent observability', () => {
+	it('persists subagent lanes to canonical transcript and workflow execution rows', async () => {
+		await recordRunStarted({
+			sessionId: 'obs-session-subagent',
+			runId: 'run-subagent-parent',
+			message: 'delegate'
+		});
+
+		await recordSubagentStarted({
+			sessionId: 'obs-session-subagent',
+			runId: 'run-subagent-parent',
+			subagentRunId: 'run-subagent-parent:research',
+			kind: 'research',
+			label: 'Research'
+		});
+		await recordSubagentCompleted({
+			sessionId: 'obs-session-subagent',
+			runId: 'run-subagent-parent',
+			subagentRunId: 'run-subagent-parent:research',
+			kind: 'research',
+			label: 'Research',
+			status: 'complete',
+			budget: { inputTokens: 10, outputTokens: 4, estimatedCostUsd: 0.001 }
+		});
+
+		const transcript = await reconstructSessionTranscript(database, 'obs-session-subagent');
+		expect(
+			transcript.some((event) => {
+				if (event.kind !== 'lifecycle') return false;
+				const payload = JSON.parse(event.payload) as { type?: string };
+				return payload.type === 'subagent.start';
+			})
+		).toBe(true);
+		expect(
+			transcript.some((event) => {
+				if (event.kind !== 'lifecycle') return false;
+				const payload = JSON.parse(event.payload) as { type?: string };
+				return payload.type === 'subagent.complete';
+			})
+		).toBe(true);
+
+		const workflowRow = sqlite
+			.prepare(
+				`SELECT workflow_id, parent_workflow_id, status FROM workflow_executions WHERE id = ?`
+			)
+			.get('run-subagent-parent:research:workflow') as {
+			workflow_id: string;
+			parent_workflow_id: string;
+			status: string;
+		};
+		expect(workflowRow).toMatchObject({
+			workflow_id: 'agent-run:run-subagent-parent:research',
+			parent_workflow_id: 'agent-run:run-subagent-parent',
+			status: 'completed'
+		});
 	});
 });

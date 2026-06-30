@@ -22,6 +22,8 @@ const REQUIRED_TABLES = [
 	'sandbox_snapshots',
 	'sandbox_commands',
 	'schedules',
+	'workflow_executions',
+	'schedule_fire_events',
 	'stream_events',
 	'idempotency_ledger'
 ];
@@ -107,6 +109,39 @@ describe('migration', () => {
 		const indexes = sqlite.prepare(`PRAGMA index_list(stream_events)`).all() as { name: string }[];
 		expect(indexes.map((index) => index.name)).toContain(
 			'stream_events_run_id_deduplication_key_unique'
+		);
+	});
+
+	it('adds Temporal teaching observability tables and transcript cursors', () => {
+		const sessionColumns = sqlite.prepare(`PRAGMA table_info(sessions)`).all() as {
+			name: string;
+		}[];
+		expect(sessionColumns.map((column) => column.name)).toContain('transcript_cursor');
+
+		const transcriptColumns = sqlite.prepare(`PRAGMA table_info(transcript_events)`).all() as {
+			name: string;
+		}[];
+		expect(transcriptColumns.map((column) => column.name)).toContain('session_sequence');
+
+		const transcriptIndexes = sqlite.prepare(`PRAGMA index_list(transcript_events)`).all() as {
+			name: string;
+		}[];
+		expect(transcriptIndexes.map((index) => index.name)).toContain(
+			'transcript_events_session_id_session_sequence_unique'
+		);
+
+		const workflowColumns = sqlite.prepare(`PRAGMA table_info(workflow_executions)`).all() as {
+			name: string;
+		}[];
+		expect(workflowColumns.map((column) => column.name)).toEqual(
+			expect.arrayContaining(['workflow_id', 'temporal_run_id', 'workflow_type', 'task_queue'])
+		);
+
+		const fireColumns = sqlite.prepare(`PRAGMA table_info(schedule_fire_events)`).all() as {
+			name: string;
+		}[];
+		expect(fireColumns.map((column) => column.name)).toEqual(
+			expect.arrayContaining(['schedule_id', 'accepted_run_id', 'scheduled_workflow_id'])
 		);
 	});
 

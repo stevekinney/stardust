@@ -163,6 +163,42 @@ describe('schedule client', () => {
 		});
 	});
 
+	it('links schedule fire rows to produced runs in the projection', async () => {
+		await repository.upsert({
+			scheduleId: 'schedule-fixed',
+			name: 'Daily digest',
+			cronExpression: '0 9 * * *',
+			prompt: 'Write the daily digest.'
+		});
+		sqlite
+			.prepare(
+				`INSERT INTO schedule_fire_events (id, schedule_id, trigger_source, actual_trigger_time, overlap_policy, scheduled_workflow_id, scheduled_temporal_run_id, target_session_key, accepted_run_id, status)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			)
+			.run(
+				'fire-001',
+				'schedule-fixed',
+				'manual',
+				'2026-01-01T09:00:03.000Z',
+				'BUFFER_ONE',
+				'scheduled-agent:schedule-fixed',
+				'temporal-run-001',
+				'sched-schedule-fixed',
+				'run-accepted-001',
+				'accepted'
+			);
+
+		const projection = await repository.findByScheduleId('schedule-fixed');
+
+		expect(projection?.fireEvents).toHaveLength(1);
+		expect(projection?.fireEvents[0]).toMatchObject({
+			scheduleId: 'schedule-fixed',
+			scheduledWorkflowId: 'scheduled-agent:schedule-fixed',
+			acceptedRunId: 'run-accepted-001',
+			overlapPolicy: 'BUFFER_ONE'
+		});
+	});
+
 	it('pauses a Temporal Schedule and refreshes projection state', async () => {
 		await repository.upsert({
 			scheduleId: 'schedule-fixed',

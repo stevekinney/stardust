@@ -36,9 +36,15 @@
 		actionMeter,
 		temporalWebUrl,
 		taskQueue,
+		taskQueues,
+		temporalConcepts,
+		temporalHistorySummary,
+		durabilityEvidence,
 		recoveryMarkers,
 		timelineLanes,
-		toolInvocations
+		capabilityEvidence,
+		toolInvocations,
+		approvalRequests
 	} = $derived(projection);
 
 	const recoveryPayloads = $derived(new Set(recoveryMarkers));
@@ -106,6 +112,17 @@
 		return new Date(value).toLocaleTimeString();
 	}
 
+	function formatNullable(value: string | number | null | undefined): string {
+		return value == null || value === '' ? 'not available' : String(value);
+	}
+
+	function waitState(): string {
+		const pending = approvalRequests.filter((approval) => approval.status === 'pending').length;
+		if (pending > 0) return `${pending} approval wait${pending === 1 ? '' : 's'}`;
+		if (run.status === 'running') return 'running';
+		return 'none';
+	}
+
 	function formatDuration(startedAt: string | null, completedAt: string | null): string {
 		if (!startedAt || !completedAt) return '';
 		const ms = new Date(completedAt).getTime() - new Date(startedAt).getTime();
@@ -128,6 +145,19 @@
 			lifecycle: '◎'
 		};
 		return markers[kind] ?? '·';
+	}
+
+	function primitiveForStep(kind: string): string {
+		const primitives: Record<string, string> = {
+			user_message: 'Workflow input',
+			assistant_message: 'Activity result',
+			tool_call: 'Activity scheduled',
+			tool_result: 'Activity completed',
+			approval_request: 'Update requested',
+			approval_resolution: 'Update completed',
+			lifecycle: 'Workflow event'
+		};
+		return primitives[kind] ?? 'Workflow event';
 	}
 
 	function isToolCallPayload(value: unknown): value is ToolCallPayload {
@@ -225,6 +255,55 @@
 		</div>
 	</div>
 
+	<section class="capability-strip" aria-label="Agent capabilities">
+		{#each capabilityEvidence as capability (capability.id)}
+			<div class="capability-pill" data-status={capability.status}>
+				<span class="capability-label">{capability.label}</span>
+				<span class="capability-count">{capability.count}</span>
+				<span class="capability-evidence">{capability.evidence}</span>
+			</div>
+		{/each}
+	</section>
+
+	<dl class="truth-strip" aria-label="Run truth strip">
+		<div>
+			<dt>Workflow ID</dt>
+			<dd><code>{run.workflowId}</code></dd>
+		</div>
+		<div>
+			<dt>Temporal run ID</dt>
+			<dd><code>{formatNullable(run.temporalRunId)}</code></dd>
+		</div>
+		<div>
+			<dt>Run ID</dt>
+			<dd><code>{run.id}</code></dd>
+		</div>
+		<div>
+			<dt>Status</dt>
+			<dd>{run.status}</dd>
+		</div>
+		<div>
+			<dt>Task queues</dt>
+			<dd>{taskQueues.join(', ')}</dd>
+		</div>
+		<div>
+			<dt>Wait state</dt>
+			<dd>{waitState()}</dd>
+		</div>
+		<div>
+			<dt>Stream cursor</dt>
+			<dd>{formatNullable(durabilityEvidence.latestStreamEventId)}</dd>
+		</div>
+		<div>
+			<dt>Transcript cursor</dt>
+			<dd>{formatNullable(durabilityEvidence.latestSessionTranscriptSequence)}</dd>
+		</div>
+		<div>
+			<dt>Temporal history</dt>
+			<dd>{temporalHistorySummary.source}</dd>
+		</div>
+	</dl>
+
 	{#if run.startedAt}
 		<!-- Raw <dl> preserved: DescriptionList only supports plain string definitions;
 		     run metadata entries require formatted timestamp/duration values not supported as snippets. -->
@@ -245,6 +324,31 @@
 			</div>
 		</dl>
 	{/if}
+
+	<section class="temporal-concepts" aria-labelledby="temporal-concepts-heading">
+		<div class="concept-header">
+			<h3 id="temporal-concepts-heading">Temporal Concepts</h3>
+			<span class="concept-source">{temporalHistorySummary.source} evidence</span>
+		</div>
+		{#if temporalConcepts.length === 0}
+			<p class="muted empty">No Temporal concept evidence recorded for this run.</p>
+		{:else}
+			<ul class="concept-list">
+				{#each temporalConcepts as concept (concept.id)}
+					<li class="concept-row" data-primitive={concept.primitive}>
+						<span class="concept-primitive">{concept.primitive}</span>
+						<div class="concept-body">
+							<div class="concept-title">{concept.label}</div>
+							<div class="concept-summary">{concept.summary}</div>
+							{#if engineerView}
+								<div class="concept-evidence">{concept.evidence}</div>
+							{/if}
+						</div>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</section>
 
 	<!-- Raw <details> preserved: Cinder Collapsible renders an <aside> and changes
 	     focus/toggle behavior. The action-meter uses <details open> which Collapsible
@@ -357,6 +461,7 @@
 								>
 							{/if}
 							<span class="kind-badge">{kindLabel(event.kind)}</span>
+							<span class="primitive-badge">{primitiveForStep(event.kind)}</span>
 							<span class="sequence">#{event.sequence}</span>
 							{#if event.durationMs !== undefined}
 								<span class="step-duration" data-step-duration aria-label="duration"
@@ -569,6 +674,57 @@
 		font-family: var(--cinder-font-mono);
 	}
 
+	.capability-strip {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+		gap: 0.45rem;
+	}
+
+	.capability-pill {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-areas:
+			'label count'
+			'evidence evidence';
+		gap: 0.2rem 0.45rem;
+		min-width: 0;
+		border: 1px solid var(--cinder-border-muted);
+		border-radius: 6px;
+		padding: 0.48rem 0.55rem;
+		background: var(--cinder-surface-inset);
+	}
+
+	.capability-pill[data-status='used'] {
+		border-color: var(--cinder-color-success-border);
+		background: var(--cinder-color-success-bg);
+	}
+
+	.capability-pill[data-status='attention'] {
+		border-color: var(--cinder-color-danger-border);
+		background: var(--cinder-color-danger-bg);
+	}
+
+	.capability-label {
+		grid-area: label;
+		min-width: 0;
+		color: var(--cinder-text);
+		font: 700 0.72rem / 1.2 system-ui;
+		overflow-wrap: anywhere;
+	}
+
+	.capability-count {
+		grid-area: count;
+		font: 700 0.78rem var(--cinder-font-mono);
+		color: var(--cinder-text);
+	}
+
+	.capability-evidence {
+		grid-area: evidence;
+		color: var(--cinder-text-subtle);
+		font: 500 0.68rem / 1.3 system-ui;
+		overflow-wrap: anywhere;
+	}
+
 	.run-meta {
 		display: flex;
 		flex-wrap: wrap;
@@ -586,6 +742,110 @@
 	.run-meta dd {
 		margin: 0;
 		font-size: 0.9rem;
+	}
+
+	.truth-strip {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+		gap: 1px;
+		margin: 0;
+		border: 1px solid var(--cinder-border-muted);
+		border-radius: 8px;
+		overflow: hidden;
+		background: var(--cinder-border-muted);
+	}
+
+	.truth-strip div {
+		display: grid;
+		gap: 0.2rem;
+		min-width: 0;
+		padding: 0.55rem 0.65rem;
+		background: var(--cinder-surface-inset);
+	}
+
+	.truth-strip dt {
+		color: var(--cinder-text-subtle);
+		font-size: 0.68rem;
+		font-weight: 700;
+		text-transform: uppercase;
+	}
+
+	.truth-strip dd {
+		margin: 0;
+		font-size: 0.78rem;
+		color: var(--cinder-text);
+		overflow-wrap: anywhere;
+	}
+
+	.temporal-concepts {
+		display: grid;
+		gap: 0.55rem;
+		border-top: 1px solid var(--cinder-border-muted);
+		padding-top: 0.75rem;
+	}
+
+	.concept-header {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.concept-source {
+		font: 600 0.72rem system-ui;
+		color: var(--cinder-text-subtle);
+		text-transform: uppercase;
+	}
+
+	.concept-list {
+		display: grid;
+		gap: 0.45rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.concept-row {
+		display: grid;
+		grid-template-columns: 7.5rem minmax(0, 1fr);
+		gap: 0.75rem;
+		align-items: start;
+		border: 1px solid var(--cinder-border-muted);
+		border-radius: 8px;
+		padding: 0.6rem 0.7rem;
+		background: var(--cinder-surface-inset);
+	}
+
+	.concept-primitive {
+		display: inline-flex;
+		width: fit-content;
+		border-radius: var(--cinder-radius-sm);
+		border: 1px solid var(--cinder-border-muted);
+		padding: 0.18rem 0.42rem;
+		font: 650 0.68rem var(--cinder-font-mono);
+		color: var(--cinder-accent-text);
+		background: var(--cinder-surface);
+	}
+
+	.concept-body {
+		display: grid;
+		gap: 0.18rem;
+		min-width: 0;
+	}
+
+	.concept-title {
+		font: 650 0.85rem system-ui;
+		color: var(--cinder-text);
+	}
+
+	.concept-summary,
+	.concept-evidence {
+		font: 400 0.78rem / 1.45 system-ui;
+		color: var(--cinder-text-subtle);
+	}
+
+	.concept-evidence {
+		font-family: var(--cinder-font-mono);
+		overflow-wrap: anywhere;
 	}
 
 	.action-meter {
@@ -756,6 +1016,14 @@
 		font-size: 0.72rem;
 		font-weight: 700;
 		text-transform: capitalize;
+	}
+
+	.primitive-badge {
+		padding: 0.1rem 0.45rem;
+		border-radius: 4px;
+		border: 1px solid var(--cinder-border-muted);
+		color: var(--cinder-text-subtle);
+		font-size: 0.7rem;
 	}
 
 	.sequence {

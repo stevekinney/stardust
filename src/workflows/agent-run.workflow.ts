@@ -247,6 +247,10 @@ function isDelegateToolName(
 	return name === 'delegate.research' || name === 'delegate.code' || name === 'delegate.critic';
 }
 
+function isDelegateParallelToolName(name: string): name is 'delegate.parallel' {
+	return name === 'delegate.parallel';
+}
+
 function delegateKindForToolName(
 	name: 'delegate.research' | 'delegate.code' | 'delegate.critic'
 ): SubagentKind {
@@ -557,6 +561,46 @@ function readDelegateArguments(argumentsValue: unknown): { prompt: string; maxTo
 	return { prompt: record.prompt };
 }
 
+function readDelegateParallelArguments(
+	argumentsValue: unknown
+): Array<{ kind: SubagentKind; prompt: string; maxTokens?: number }> {
+	if (!argumentsValue || typeof argumentsValue !== 'object') {
+		throw ApplicationFailure.nonRetryable('delegate.parallel arguments must be an object');
+	}
+	const tasks = (argumentsValue as { tasks?: unknown }).tasks;
+	if (!Array.isArray(tasks) || tasks.length === 0 || tasks.length > 3) {
+		throw ApplicationFailure.nonRetryable('delegate.parallel tasks must contain 1 to 3 tasks');
+	}
+	const seen = new Set<SubagentKind>();
+	return tasks.map((task) => {
+		if (!task || typeof task !== 'object') {
+			throw ApplicationFailure.nonRetryable('delegate.parallel task must be an object');
+		}
+		const record = task as { kind?: unknown; prompt?: unknown; maxTokens?: unknown };
+		if (record.kind !== 'research' && record.kind !== 'code' && record.kind !== 'critic') {
+			throw ApplicationFailure.nonRetryable('delegate.parallel task kind is invalid');
+		}
+		if (seen.has(record.kind)) {
+			throw ApplicationFailure.nonRetryable(`delegate.parallel duplicate kind: ${record.kind}`);
+		}
+		seen.add(record.kind);
+		if (typeof record.prompt !== 'string' || record.prompt.length === 0) {
+			throw ApplicationFailure.nonRetryable('delegate.parallel task prompt must be non-empty');
+		}
+		if (record.maxTokens !== undefined) {
+			if (
+				typeof record.maxTokens !== 'number' ||
+				!Number.isInteger(record.maxTokens) ||
+				record.maxTokens <= 0
+			) {
+				throw ApplicationFailure.nonRetryable('delegate.parallel maxTokens must be positive');
+			}
+			return { kind: record.kind, prompt: record.prompt, maxTokens: record.maxTokens };
+		}
+		return { kind: record.kind, prompt: record.prompt };
+	});
+}
+
 async function executeDelegateToolCall(
 	input: AgentRunInput,
 	toolCall: ToolCallInput,
@@ -631,6 +675,117 @@ async function executeDelegateToolCall(
 				subagentRunId,
 				kind,
 				finalAnswer: subagent.finalAnswer
+			}
+		}
+	};
+}
+
+async function executeDelegateParallelToolCall(
+	input: AgentRunInput,
+	toolCall: ToolCallInput,
+	state: MutableDelegateState
+): Promise<{ result: ToolExecutionResult; subagents: SubagentWorkflowResult[] }> {
+	const tasks = readDelegateParallelArguments(toolCall.arguments);
+	const budget = input.budget ?? DEFAULT_RUN_BUDGET;
+	if (state.childWorkflowCount + tasks.length > budget.maxChildWorkflows) {
+		throw ApplicationFailure.nonRetryable(
+			`delegate.parallel would exceed child workflow budget (${budget.maxChildWorkflows})`
+		);
+	}
+
+	const starts = tasks.map((task) => {
+		const label = task.kind === 'research' ? 'Research' : task.kind === 'code' ? 'Code' : 'Critic';
+		const subagentRunId = `${input.runId}:${toolCall.id}:${task.kind}`;
+		const budgetDebit = reserveBudgetEntry({
+			ledger: state.budgetLedger,
+			runId: `${input.runId}:${toolCall.id}`,
+			kind: task.kind,
+			label
+		});
+		return { ...task, label, subagentRunId, workflowId: `agent-run:${subagentRunId}`, budgetDebit };
+	});
+
+	await Promise.all(
+		starts.map((task) =>
+			observabilityActivities.recordSubagentStarted({
+				sessionId: input.sessionKey,
+				runId: input.runId,
+				subagentRunId: task.subagentRunId,
+				kind: task.kind,
+				label: task.label
+			})
+		)
+	);
+
+	const subagents = await Promise.all(
+		starts.map((task) => {
+			const workflowInput = {
+				parentRunId: input.runId,
+				subagentRunId: task.subagentRunId,
+				sessionKey: input.sessionKey,
+				kind: task.kind,
+				message: task.prompt,
+				...(task.kind === 'critic' ? { finalAnswer: task.prompt } : {}),
+				budgetDebit: task.budgetDebit,
+				...(input.model !== undefined ? { model: input.model } : {}),
+				...(task.maxTokens !== undefined ? { maxTokens: task.maxTokens } : {})
+			};
+			if (task.kind === 'research') {
+				return executeChild(researchSubagentWorkflow, {
+					workflowId: task.workflowId,
+					args: [workflowInput]
+				});
+			}
+			if (task.kind === 'code') {
+				return executeChild(codeSubagentWorkflow, {
+					workflowId: task.workflowId,
+					args: [workflowInput]
+				});
+			}
+			return executeChild(criticSubagentWorkflow, {
+				workflowId: task.workflowId,
+				args: [workflowInput]
+			});
+		})
+	);
+
+	for (const [index, subagent] of subagents.entries()) {
+		const task = starts[index]!;
+		reconcileBudgetEntry(state.budgetLedger, task.budgetDebit, subagent.budgetDebit.usage);
+		state.childWorkflowCount++;
+		state.timelineLanes.push(subagent.timelineLane);
+		if (subagent.annotations) {
+			state.criticAnnotations.push(...subagent.annotations);
+		}
+	}
+
+	await Promise.all(
+		subagents.map((subagent, index) => {
+			const task = starts[index]!;
+			return observabilityActivities.recordSubagentCompleted({
+				sessionId: input.sessionKey,
+				runId: input.runId,
+				subagentRunId: task.subagentRunId,
+				kind: task.kind,
+				label: task.label,
+				status: subagent.status,
+				budget: subagent.budgetDebit.usage
+			});
+		})
+	);
+
+	return {
+		subagents,
+		result: {
+			callId: toolCall.id,
+			toolName: toolCall.name,
+			outcome: 'success',
+			content: {
+				subagents: subagents.map((subagent) => ({
+					subagentRunId: subagent.subagentRunId,
+					kind: subagent.kind,
+					finalAnswer: subagent.finalAnswer
+				}))
 			}
 		}
 	};
@@ -748,6 +903,25 @@ async function handleToolCall(
 
 	state.status = 'running';
 	state.pendingApproval = null;
+	if (isDelegateParallelToolName(toolCall.name)) {
+		const tasks = readDelegateParallelArguments(recordedResolution.canonicalArguments);
+		if (
+			delegateState.childWorkflowCount + tasks.length >
+			(input.budget ?? DEFAULT_RUN_BUDGET).maxChildWorkflows
+		) {
+			return {
+				kind: 'terminal',
+				status: 'complete',
+				finalAnswer: `Run stopped: child workflow budget exhausted (${(input.budget ?? DEFAULT_RUN_BUDGET).maxChildWorkflows} child workflows).`
+			};
+		}
+		const delegate = await executeDelegateParallelToolCall(
+			input,
+			{ ...toolCall, arguments: recordedResolution.canonicalArguments },
+			delegateState
+		);
+		return { kind: 'executed', result: delegate.result };
+	}
 	if (isDelegateToolName(toolCall.name)) {
 		if (
 			delegateState.childWorkflowCount >= (input.budget ?? DEFAULT_RUN_BUDGET).maxChildWorkflows
@@ -989,7 +1163,7 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 				}
 				toolCallCount++;
 				actionsCount++;
-				if (isDelegateToolName(toolCall.name)) {
+				if (isDelegateToolName(toolCall.name) || isDelegateParallelToolName(toolCall.name)) {
 					if (delegateToolState.childWorkflowCount >= budget.maxChildWorkflows) {
 						finalAnswer = `Run stopped: child workflow budget exhausted (${budget.maxChildWorkflows} child workflows).`;
 						break outer;

@@ -57,6 +57,162 @@ describe('run inspector projection', () => {
 		expect(projection?.taskQueue).toBe(TASK_QUEUE_ORCHESTRATOR);
 	});
 
+	it('returns Temporal teaching evidence from durable SQLite rows', async () => {
+		const runId = 'run-teaching-evidence';
+		const now = '2026-06-26T04:00:00.000Z';
+		sqlite
+			.prepare(
+				`INSERT INTO runs (id, session_id, workflow_id, status, started_at, completed_at)
+				VALUES (?, ?, ?, ?, ?, ?)`
+			)
+			.run(runId, 'session-001', `agent-run:${runId}`, 'complete', now, now);
+		sqlite
+			.prepare(
+				`INSERT INTO workflow_executions (id, workflow_id, temporal_run_id, workflow_type, task_queue, session_id, run_id, status, started_at, closed_at, history_length)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			)
+			.run(
+				`${runId}:workflow`,
+				`agent-run:${runId}`,
+				'temporal-run-teaching',
+				'AgentRunWorkflow',
+				TASK_QUEUE_ORCHESTRATOR,
+				'session-001',
+				runId,
+				'completed',
+				now,
+				now,
+				27
+			);
+		sqlite
+			.prepare(
+				`INSERT INTO tool_invocations (id, session_id, run_id, tool_call_id, tool_name, args, args_hash, idempotency_key, status, risk, task_queue, started_at, completed_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			)
+			.run(
+				`${runId}:tool`,
+				'session-001',
+				runId,
+				'call-teaching',
+				'shell.exec',
+				'{}',
+				'hash',
+				`${runId}:tool`,
+				'complete',
+				'medium',
+				'tools-sandbox',
+				now,
+				now
+			);
+		sqlite
+			.prepare(`INSERT INTO sandboxes (id, session_id, name, workspace_path) VALUES (?, ?, ?, ?)`)
+			.run(`${runId}:sandbox`, 'session-001', `sd-${runId}`, `/tmp/${runId}`);
+		sqlite
+			.prepare(
+				`INSERT INTO sandbox_commands (id, sandbox_id, session_id, run_id, tool_call_id, command, status, started_at, completed_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			)
+			.run(
+				`${runId}:command`,
+				`${runId}:sandbox`,
+				'session-001',
+				runId,
+				'call-teaching',
+				'echo',
+				'complete',
+				now,
+				now
+			);
+		sqlite
+			.prepare(
+				`INSERT INTO approval_requests (id, session_id, run_id, tool_call_id, tool_name, status, proposed_args, args_hash, policy_version, expires_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			)
+			.run(
+				`${runId}:approval`,
+				'session-001',
+				runId,
+				'call-teaching',
+				'shell.exec',
+				'pending',
+				'{}',
+				'hash',
+				'policy',
+				'2026-06-26T04:30:00.000Z'
+			);
+		sqlite
+			.prepare(
+				`INSERT INTO idempotency_ledger (id, idempotency_key, run_id, tool_call_id, status, result_ref)
+				VALUES (?, ?, ?, ?, ?, ?)`
+			)
+			.run(`${runId}:ledger`, `${runId}:tool`, runId, 'call-teaching', 'complete', '{}');
+		sqlite
+			.prepare(
+				`INSERT INTO memory_notes (id, session_id, kind, content, run_id, confirmed_at)
+				VALUES (?, ?, ?, ?, ?, NULL)`
+			)
+			.run(`${runId}:memory`, 'session-001', 'durable', 'Candidate survives stream trim.', runId);
+		sqlite
+			.prepare(
+				`INSERT INTO schedule_fire_events (id, schedule_id, trigger_source, actual_trigger_time, overlap_policy, scheduled_workflow_id, target_session_key, accepted_run_id, status)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			)
+			.run(
+				`${runId}:fire`,
+				'schedule-teaching',
+				'demo',
+				now,
+				'BUFFER_ONE',
+				'scheduled-agent:schedule-teaching',
+				'session-001',
+				runId,
+				'accepted'
+			);
+
+		await appendTranscriptEvent(database, {
+			id: `${runId}:tool-call`,
+			runId,
+			sessionId: 'session-001',
+			kind: 'tool_call',
+			payload: JSON.stringify({
+				calls: [{ id: 'call-teaching', name: 'shell.exec', input: { command: 'echo demo' } }]
+			}),
+			createdAt: now
+		});
+		await appendTranscriptEvent(database, {
+			id: `${runId}:tool-result`,
+			runId,
+			sessionId: 'session-001',
+			kind: 'tool_result',
+			payload: JSON.stringify({ callId: 'call-teaching', content: 'demo', isError: false }),
+			createdAt: now
+		});
+
+		const projection = await readRunInspectorProjection(database, runId);
+
+		expect(projection?.run.temporalRunId).toBe('temporal-run-teaching');
+		expect(projection?.taskQueues).toContain('tools-sandbox');
+		expect(projection?.temporalHistorySummary.source).toBe('sqlite');
+		expect(projection?.temporalHistorySummary.historyLength).toBe(27);
+		expect(projection?.durabilityEvidence).toMatchObject({
+			latestTranscriptSequence: 2,
+			approvalWaitCount: 1,
+			idempotencyReplayCount: 1,
+			heartbeatBackedCommandCount: 1,
+			scheduleFireCount: 1,
+			memoryCandidateCount: 1
+		});
+		expect(projection?.activityAttempts[0]).toMatchObject({
+			callId: 'call-teaching',
+			heartbeatBacked: true,
+			attempts: 1
+		});
+		expect(projection?.scheduleRunLinkage[0]?.scheduleId).toBe('schedule-teaching');
+		expect(projection?.temporalConcepts.map((concept) => concept.primitive)).toEqual(
+			expect.arrayContaining(['workflow', 'task-queue', 'heartbeat', 'update', 'timer', 'schedule'])
+		);
+	});
+
 	it('builds timelineLanes from subagent.start and subagent.complete stream events', async () => {
 		// Seed a second run to test subagent lane reconstruction.
 		sqlite

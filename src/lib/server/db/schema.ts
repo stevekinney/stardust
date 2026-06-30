@@ -10,6 +10,7 @@ export const sessions = sqliteTable('sessions', {
 		.default('active'),
 	workflowId: text('workflow_id').notNull(),
 	summaryCursor: integer('summary_cursor').default(0),
+	transcriptCursor: integer('transcript_cursor').default(0),
 	memoryRefs: text('memory_refs'), // JSON array of memory_notes.id
 	/** Human-readable label for the session. Falls back to sessionKey when null. */
 	name: text('name'),
@@ -49,6 +50,7 @@ export const transcriptEvents = sqliteTable('transcript_events', {
 	sessionId: text('session_id').notNull(),
 	runId: text('run_id').notNull(),
 	sequence: integer('sequence').notNull(),
+	sessionSequence: integer('session_sequence').notNull(),
 	kind: text('kind', {
 		enum: [
 			'user_message',
@@ -63,6 +65,50 @@ export const transcriptEvents = sqliteTable('transcript_events', {
 	payload: text('payload').notNull(), // JSON
 	createdAt: text('created_at').notNull().default(new Date(0).toISOString())
 });
+
+// ── workflow_executions ──────────────────────────────────────────────────────
+// Durable app-side mirror of Temporal workflow executions for teaching surfaces.
+export const workflowExecutions = sqliteTable(
+	'workflow_executions',
+	{
+		id: text('id').primaryKey(),
+		workflowId: text('workflow_id').notNull(),
+		temporalRunId: text('temporal_run_id'),
+		workflowType: text('workflow_type').notNull(),
+		taskQueue: text('task_queue').notNull(),
+		parentWorkflowId: text('parent_workflow_id'),
+		parentTemporalRunId: text('parent_temporal_run_id'),
+		sessionId: text('session_id'),
+		runId: text('run_id'),
+		continuedFromExecutionId: text('continued_from_execution_id'),
+		continuedToExecutionId: text('continued_to_execution_id'),
+		status: text('status', {
+			enum: [
+				'running',
+				'completed',
+				'failed',
+				'cancelled',
+				'continued_as_new',
+				'terminated',
+				'timed_out',
+				'unknown'
+			]
+		})
+			.notNull()
+			.default('running'),
+		startedAt: text('started_at'),
+		closedAt: text('closed_at'),
+		historyLength: integer('history_length'),
+		createdAt: text('created_at').notNull().default(new Date(0).toISOString()),
+		updatedAt: text('updated_at').notNull().default(new Date(0).toISOString())
+	},
+	(table) => [
+		uniqueIndex('workflow_executions_workflow_id_temporal_run_id_unique').on(
+			table.workflowId,
+			table.temporalRunId
+		)
+	]
+);
 
 // ── audit_events ──────────────────────────────────────────────────────────────
 // Policy, approval, cancellation, retry, and operator action audit trail.
@@ -246,6 +292,31 @@ export const schedules = sqliteTable('schedules', {
 		.default('active'),
 	lastRunAt: text('last_run_at'),
 	nextRunAt: text('next_run_at'),
+	createdAt: text('created_at').notNull().default(new Date(0).toISOString()),
+	updatedAt: text('updated_at').notNull().default(new Date(0).toISOString())
+});
+
+// ── schedule_fire_events ─────────────────────────────────────────────────────
+// Durable linkage from a Temporal Schedule fire to the session update and accepted run.
+export const scheduleFireEvents = sqliteTable('schedule_fire_events', {
+	id: text('id').primaryKey(),
+	scheduleId: text('schedule_id').notNull(),
+	triggerSource: text('trigger_source', {
+		enum: ['scheduled', 'manual', 'demo', 'unknown']
+	})
+		.notNull()
+		.default('scheduled'),
+	scheduledTime: text('scheduled_time'),
+	actualTriggerTime: text('actual_trigger_time').notNull(),
+	overlapPolicy: text('overlap_policy').notNull(),
+	scheduledWorkflowId: text('scheduled_workflow_id'),
+	scheduledTemporalRunId: text('scheduled_temporal_run_id'),
+	targetSessionKey: text('target_session_key').notNull(),
+	acceptedRunId: text('accepted_run_id'),
+	status: text('status', { enum: ['started', 'accepted', 'failed'] })
+		.notNull()
+		.default('started'),
+	error: text('error'),
 	createdAt: text('created_at').notNull().default(new Date(0).toISOString()),
 	updatedAt: text('updated_at').notNull().default(new Date(0).toISOString())
 });

@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../lib/server/db/client';
-import { runs, sessions } from '../lib/server/db/schema';
+import { runs, sessions, workflowExecutions } from '../lib/server/db/schema';
 import type { ModelUsage, RunBudget, SubagentKind } from '../lib/types';
 import {
 	appendTranscriptEvent,
@@ -8,6 +8,7 @@ import {
 	publishStreamEvent,
 	trimCompletedRunStream
 } from '../lib/server/stream';
+import { TASK_QUEUE_ORCHESTRATOR } from '../lib/server/temporal/task-queues';
 
 type RunCompletionStatus = 'complete' | 'failed' | 'cancelled';
 
@@ -57,6 +58,29 @@ export async function recordRunStarted(input: {
 			}
 		});
 
+	await db
+		.insert(workflowExecutions)
+		.values({
+			id: `${input.runId}:workflow`,
+			workflowId: `agent-run:${input.runId}`,
+			workflowType: 'AgentRunWorkflow',
+			taskQueue: TASK_QUEUE_ORCHESTRATOR,
+			sessionId: input.sessionId,
+			runId: input.runId,
+			status: 'running',
+			startedAt: now,
+			createdAt: now,
+			updatedAt: now
+		})
+		.onConflictDoUpdate({
+			target: workflowExecutions.id,
+			set: {
+				status: 'running',
+				startedAt: now,
+				updatedAt: now
+			}
+		});
+
 	await appendTranscriptEvent(db, {
 		id: `${input.runId}:user-message`,
 		sessionId: input.sessionId,
@@ -95,17 +119,51 @@ export async function recordSubagentStarted(input: {
 	label: string;
 }): Promise<void> {
 	const now = new Date().toISOString();
+	const workflowId = `agent-run:${input.runId}:${input.kind}`;
+	const payload = {
+		type: 'subagent.start',
+		subagentRunId: input.subagentRunId,
+		kind: input.kind,
+		label: input.label,
+		startedAt: now
+	};
+	await db
+		.insert(workflowExecutions)
+		.values({
+			id: `${input.subagentRunId}:workflow`,
+			workflowId,
+			workflowType: `${input.kind}SubagentWorkflow`,
+			taskQueue: TASK_QUEUE_ORCHESTRATOR,
+			parentWorkflowId: `agent-run:${input.runId}`,
+			sessionId: input.sessionId,
+			runId: input.runId,
+			status: 'running',
+			startedAt: now,
+			createdAt: now,
+			updatedAt: now
+		})
+		.onConflictDoUpdate({
+			target: workflowExecutions.id,
+			set: {
+				status: 'running',
+				startedAt: now,
+				updatedAt: now
+			}
+		});
+	await appendTranscriptEvent(db, {
+		id: `${input.runId}:subagent:${input.subagentRunId}:started`,
+		sessionId: input.sessionId,
+		runId: input.runId,
+		kind: 'lifecycle',
+		payload: JSON.stringify(payload),
+		createdAt: now
+	});
 	await publishStreamEvent(db, {
 		sessionId: input.sessionId,
 		runId: input.runId,
 		kind: 'subagent.start',
 		deduplicationKey: `subagent:start:${input.subagentRunId}`,
-		payload: JSON.stringify({
-			subagentRunId: input.subagentRunId,
-			kind: input.kind,
-			label: input.label,
-			startedAt: now
-		}),
+		payload: JSON.stringify(payload),
 		createdAt: now
 	});
 }
@@ -120,19 +178,42 @@ export async function recordSubagentCompleted(input: {
 	budget?: ModelUsage;
 }): Promise<void> {
 	const now = new Date().toISOString();
+	const payload = {
+		type: 'subagent.complete',
+		subagentRunId: input.subagentRunId,
+		kind: input.kind,
+		label: input.label,
+		status: input.status,
+		budget: input.budget ?? null,
+		completedAt: now
+	};
+	await db
+		.update(workflowExecutions)
+		.set({
+			status:
+				input.status === 'complete'
+					? 'completed'
+					: input.status === 'failed'
+						? 'failed'
+						: 'cancelled',
+			closedAt: now,
+			updatedAt: now
+		})
+		.where(eq(workflowExecutions.id, `${input.subagentRunId}:workflow`));
+	await appendTranscriptEvent(db, {
+		id: `${input.runId}:subagent:${input.subagentRunId}:completed`,
+		sessionId: input.sessionId,
+		runId: input.runId,
+		kind: 'lifecycle',
+		payload: JSON.stringify(payload),
+		createdAt: now
+	});
 	await publishStreamEvent(db, {
 		sessionId: input.sessionId,
 		runId: input.runId,
 		kind: 'subagent.complete',
 		deduplicationKey: `subagent:complete:${input.subagentRunId}`,
-		payload: JSON.stringify({
-			subagentRunId: input.subagentRunId,
-			kind: input.kind,
-			label: input.label,
-			status: input.status,
-			budget: input.budget ?? null,
-			completedAt: now
-		}),
+		payload: JSON.stringify(payload),
 		createdAt: now
 	});
 }
@@ -173,6 +254,19 @@ export async function recordRunCompleted(input: {
 			updatedAt: now
 		})
 		.where(eq(runs.id, input.runId));
+	await db
+		.update(workflowExecutions)
+		.set({
+			status:
+				input.status === 'complete'
+					? 'completed'
+					: input.status === 'failed'
+						? 'failed'
+						: 'cancelled',
+			closedAt: now,
+			updatedAt: now
+		})
+		.where(eq(workflowExecutions.id, `${input.runId}:workflow`));
 	await appendTranscriptEvent(db, {
 		id: `${input.runId}:assistant-message`,
 		sessionId: input.sessionId,

@@ -8,6 +8,7 @@ const baseRun: RunInspectorProjection['run'] = {
 	id: 'run-001',
 	sessionId: 'session-001',
 	workflowId: 'agent-run:run-001',
+	temporalRunId: 'temporal-run-001',
 	status: 'complete',
 	model: 'claude-opus-4-5',
 	finalAnswer: 'Done.',
@@ -56,8 +57,54 @@ const projection: RunInspectorProjection = {
 	run: baseRun,
 	temporalWebUrl: 'http://localhost:7778/namespaces/default/workflows/agent-run%3Arun-001/history',
 	taskQueue: TASK_QUEUE_ORCHESTRATOR,
+	taskQueues: [TASK_QUEUE_ORCHESTRATOR, 'tools-sandbox'],
 	actionMeter,
 	transcript,
+	temporalConcepts: [
+		{
+			id: 'workflow-run',
+			primitive: 'workflow',
+			label: 'Workflow',
+			summary: 'AgentRunWorkflow owns this durable turn.',
+			evidence: 'agent-run:run-001 is complete.',
+			source: 'sqlite'
+		}
+	],
+	temporalHistorySummary: {
+		available: false,
+		source: 'sqlite',
+		workflowId: 'agent-run:run-001',
+		temporalRunId: 'temporal-run-001',
+		namespace: 'default',
+		historyLength: 3,
+		events: [],
+		counts: {
+			workflowEvents: 1,
+			activityEvents: 0,
+			timerEvents: 0,
+			childWorkflowEvents: 0,
+			updateEvents: 0,
+			signalEvents: 0,
+			continueAsNewEvents: 0,
+			retryEvents: 0
+		}
+	},
+	durabilityEvidence: {
+		latestTranscriptSequence: 3,
+		latestSessionTranscriptSequence: 3,
+		latestStreamEventId: 12,
+		streamGapCount: 0,
+		approvalWaitCount: 0,
+		retryAttemptCount: 0,
+		idempotencyReplayCount: 0,
+		heartbeatBackedCommandCount: 0,
+		scheduleFireCount: 0,
+		memoryCandidateCount: 0
+	},
+	activityAttempts: [],
+	workflowExecutions: [],
+	scheduleRunLinkage: [],
+	capabilityEvidence: [],
 	toolInvocations: [],
 	approvalRequests: [],
 	idempotencyEntries: [],

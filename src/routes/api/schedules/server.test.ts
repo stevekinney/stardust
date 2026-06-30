@@ -21,6 +21,7 @@ describe('schedules create route', () => {
 				status: 'active',
 				lastRunAt: null,
 				nextRunAt: '2026-01-02T09:00:00.000Z',
+				fireEvents: [],
 				createdAt: '2026-01-01T00:00:00.000Z',
 				updatedAt: '2026-01-01T00:00:00.000Z'
 			}
@@ -52,6 +53,7 @@ describe('schedules create route', () => {
 			status: 'active',
 			lastRunAt: null,
 			nextRunAt: null,
+			fireEvents: [],
 			createdAt: '2026-01-01T00:00:00.000Z',
 			updatedAt: '2026-01-01T00:00:00.000Z'
 		});

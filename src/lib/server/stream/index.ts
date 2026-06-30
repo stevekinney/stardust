@@ -170,6 +170,14 @@ export async function appendTranscriptEvent(
 			.limit(1)
 			.get();
 		const sequence = (last?.sequence ?? 0) + 1;
+		const lastSessionEvent = tx
+			.select({ sessionSequence: transcriptEvents.sessionSequence })
+			.from(transcriptEvents)
+			.where(eq(transcriptEvents.sessionId, input.sessionId))
+			.orderBy(desc(transcriptEvents.sessionSequence))
+			.limit(1)
+			.get();
+		const sessionSequence = (lastSessionEvent?.sessionSequence ?? 0) + 1;
 		const inserted = tx
 			.insert(transcriptEvents)
 			.values({
@@ -179,6 +187,7 @@ export async function appendTranscriptEvent(
 				kind: input.kind,
 				payload: input.payload,
 				sequence,
+				sessionSequence,
 				createdAt
 			})
 			.returning()
@@ -198,7 +207,7 @@ export async function reconstructSessionTranscript(
 		.select()
 		.from(transcriptEvents)
 		.where(eq(transcriptEvents.sessionId, sessionId))
-		.orderBy(asc(transcriptEvents.createdAt), asc(transcriptEvents.sequence));
+		.orderBy(asc(transcriptEvents.sessionSequence), asc(transcriptEvents.createdAt));
 }
 
 export async function trimCompletedRunStream(

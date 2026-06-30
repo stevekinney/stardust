@@ -1,18 +1,43 @@
 import type { ScheduleDescription } from '@temporalio/client';
-import { eq } from 'drizzle-orm';
-import type { CreateScheduleInput, ScheduleProjection } from '@src/lib/types';
+import { desc, eq } from 'drizzle-orm';
+import type {
+	CreateScheduleInput,
+	ScheduleFireProjection,
+	ScheduleProjection
+} from '@src/lib/types';
 import type { DatabaseClient } from '../db';
-import { schedules } from '../db';
+import { scheduleFireEvents, schedules } from '../db';
 import { getScheduledSessionKey } from '../temporal/scheduled-turn';
 
 type ScheduleRow = typeof schedules.$inferSelect;
+type ScheduleFireRow = typeof scheduleFireEvents.$inferSelect;
 
 export type UpsertScheduleProjectionInput = CreateScheduleInput & {
 	scheduleId: string;
 	descriptionFromTemporal?: ScheduleDescription;
 };
 
-function toScheduleProjection(row: ScheduleRow): ScheduleProjection {
+function toScheduleFireProjection(row: ScheduleFireRow): ScheduleFireProjection {
+	return {
+		id: row.id,
+		scheduleId: row.scheduleId,
+		triggerSource: row.triggerSource,
+		scheduledTime: row.scheduledTime,
+		actualTriggerTime: row.actualTriggerTime,
+		overlapPolicy: row.overlapPolicy,
+		scheduledWorkflowId: row.scheduledWorkflowId,
+		scheduledTemporalRunId: row.scheduledTemporalRunId,
+		targetSessionKey: row.targetSessionKey,
+		acceptedRunId: row.acceptedRunId,
+		status: row.status,
+		error: row.error
+	};
+}
+
+function toScheduleProjection(
+	row: ScheduleRow,
+	fireRows: ScheduleFireRow[] = []
+): ScheduleProjection {
 	return {
 		id: row.id,
 		temporalScheduleId: row.temporalScheduleId,
@@ -24,6 +49,7 @@ function toScheduleProjection(row: ScheduleRow): ScheduleProjection {
 		status: row.status,
 		lastRunAt: row.lastRunAt,
 		nextRunAt: row.nextRunAt,
+		fireEvents: fireRows.map(toScheduleFireProjection),
 		createdAt: row.createdAt,
 		updatedAt: row.updatedAt
 	};
@@ -44,7 +70,19 @@ export class SchedulesProjectionRepository {
 
 	async list(): Promise<ScheduleProjection[]> {
 		const rows = await this.database.select().from(schedules);
-		return rows.map(toScheduleProjection);
+		const fireRows = await this.database
+			.select()
+			.from(scheduleFireEvents)
+			.orderBy(desc(scheduleFireEvents.actualTriggerTime));
+		const byScheduleId = new Map<string, ScheduleFireRow[]>();
+		for (const fireRow of fireRows) {
+			const existing = byScheduleId.get(fireRow.scheduleId) ?? [];
+			if (existing.length < 10) existing.push(fireRow);
+			byScheduleId.set(fireRow.scheduleId, existing);
+		}
+		return rows.map((row) =>
+			toScheduleProjection(row, byScheduleId.get(row.temporalScheduleId) ?? [])
+		);
 	}
 
 	async upsert(input: UpsertScheduleProjectionInput): Promise<ScheduleProjection> {
@@ -122,7 +160,14 @@ export class SchedulesProjectionRepository {
 			.from(schedules)
 			.where(eq(schedules.temporalScheduleId, scheduleId))
 			.limit(1);
-		return rows[0] ? toScheduleProjection(rows[0]) : null;
+		if (!rows[0]) return null;
+		const fireRows = await this.database
+			.select()
+			.from(scheduleFireEvents)
+			.where(eq(scheduleFireEvents.scheduleId, scheduleId))
+			.orderBy(desc(scheduleFireEvents.actualTriggerTime))
+			.limit(10);
+		return toScheduleProjection(rows[0], fireRows);
 	}
 
 	async deleteByScheduleId(scheduleId: string): Promise<void> {

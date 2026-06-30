@@ -57,6 +57,13 @@
       "when": 1782425020000,
       "tag": "0007_sandbox_background_processes",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1782425030000,
+      "tag": "0008_temporal_teaching_observability",
+      "breakpoints": true
     }
   ]
 }

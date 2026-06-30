@@ -3,6 +3,7 @@
 	import Button from '@lostgradient/cinder/button';
 	import Input from '@lostgradient/cinder/input';
 	import Textarea from '@lostgradient/cinder/textarea';
+	import { resolve } from '$app/paths';
 	import PageHeader from '$lib/components/page-header.svelte';
 	import type { ScheduleProjection } from '$lib/types';
 
@@ -404,14 +405,14 @@
 							</div>
 							<div class="meta-col">
 								<div class="meta-key">Overlap</div>
-								<div class="meta-val">Skip if still running</div>
+								<div class="meta-val">
+									{selected.fireEvents[0]?.overlapPolicy ?? 'BUFFER_ONE'}
+								</div>
 							</div>
 							<div class="meta-col">
-								<div class="meta-key">Spec</div>
+								<div class="meta-key">Temporal schedule id</div>
 								<div class="meta-val">
-									<span class="mono lns"
-										>Temporal Schedule · {selected.temporalScheduleId.slice(0, 10)}</span
-									>
+									<span class="mono lns">{selected.temporalScheduleId}</span>
 								</div>
 							</div>
 						</div>
@@ -419,13 +420,50 @@
 
 					<div class="runs-section">
 						<div class="runs-label">Runs it produced</div>
-						{#if selected.lastRunAt}
-							<div class="run-row">
-								<i class="dot" style="background:var(--cinder-success)"></i>
-								<span class="run-time">Last run · {timeAgo(selected.lastRunAt)}</span>
-								<span class="spacer"></span>
-								<span class="badge badge-success">Complete</span>
+						{#if selected.fireEvents.length > 0}
+							<div class="fire-list">
+								{#each selected.fireEvents as fire (fire.id)}
+									<div class="run-row">
+										<i
+											class="dot"
+											style="background:{fire.status === 'failed'
+												? 'var(--cinder-danger)'
+												: fire.status === 'accepted'
+													? 'var(--cinder-success)'
+													: 'var(--cinder-info)'}"
+										></i>
+										<div class="run-fire-body">
+											<div class="run-time">
+												{fire.triggerSource} fire · {timeAgo(fire.actualTriggerTime)}
+											</div>
+											<div class="run-fire-meta">
+												<span class="mono"
+													>{fire.scheduledWorkflowId ?? 'workflow not available'}</span
+												>
+												{#if fire.acceptedRunId}
+													<span>accepted run <span class="mono">{fire.acceptedRunId}</span></span>
+												{/if}
+											</div>
+										</div>
+										<span class="spacer"></span>
+										<span class="badge" class:badge-success={fire.status === 'accepted'}>
+											{fire.status}
+										</span>
+										{#if fire.acceptedRunId}
+											<a
+												class="inspect-run"
+												href={resolve(`/sessions/${encodeURIComponent(fire.targetSessionKey)}`)}
+												>Inspect run</a
+											>
+										{/if}
+									</div>
+								{/each}
 							</div>
+						{:else if selected.lastRunAt}
+							<p class="page-meta">
+								Temporal reports a last fire {timeAgo(selected.lastRunAt)}, but no local fire ledger
+								row is available yet.
+							</p>
 						{:else}
 							<p class="page-meta">No runs yet.</p>
 						{/if}
@@ -758,9 +796,32 @@
 		padding: 11px 13px;
 	}
 
+	.fire-list {
+		display: grid;
+		gap: 9px;
+	}
+
+	.run-fire-body {
+		display: grid;
+		gap: 3px;
+		min-width: 0;
+	}
+
 	.run-time {
 		font: 600 12.5px system-ui;
 		color: var(--cinder-text);
+	}
+
+	.run-fire-meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		font: 400 10.5px / 1.35 system-ui;
+		color: var(--cinder-text-subtle);
+	}
+
+	.run-fire-meta .mono {
+		overflow-wrap: anywhere;
 	}
 
 	.badge {
@@ -768,6 +829,16 @@
 		font: 600 10px system-ui;
 		padding: 2px 7px;
 		border-radius: 6px;
+	}
+
+	.inspect-run {
+		font: 600 11px system-ui;
+		color: var(--cinder-accent-text);
+		text-decoration: none;
+	}
+
+	.inspect-run:hover {
+		text-decoration: underline;
 	}
 
 	.badge-success {

@@ -179,8 +179,12 @@ Core tables:
 - `artifacts`: Metadata for local files, patches, screenshots, logs, and large outputs.
 - `sandboxes`, `sandbox_snapshots`, `sandbox_commands`: Local subprocess workspace state.
 - `schedules`: User interface projection of Temporal Schedules.
+- `workflow_executions`: App-side evidence rows for workflow ID, Temporal run ID, workflow type, task queue, parent workflow, status, history length, and Continue-As-New linkage.
+- `schedule_fire_events`: Durable linkage from a Temporal Schedule fire to the scheduled workflow, target session update, accepted run ID, status, and overlap policy.
 
 The SQLite client must open the database in WAL mode so the Worker can write while SSE routes read. `transcript_events` is never trimmed. `stream_events` may be trimmed after a completed run once canonical state can reconstruct the view.
+
+Run inspection is a teaching projection over durable evidence, not a second source of truth. `RunInspectorProjection` maps SQLite rows plus Temporal workflow history, when reachable, into readable Temporal primitives: Workflows, Activities, Task Queues, Updates, Signals, Timers, Child Workflows, Schedules, retries, heartbeats, and Continue-As-New. If Temporal history is unavailable, the inspector degrades to SQLite-derived evidence and marks the history source accordingly instead of fabricating proof.
 
 ## Streaming Model
 
@@ -199,6 +203,8 @@ Stardust keeps a hard split between live state and durable truth:
 Token deltas are written out of band by the model Activity. They are coalesced before insert and are not returned to workflow code as streaming values. Workflow code sees a single deterministic model result.
 
 Canonical transcript events use deterministic identifiers for workflow-derived side effects such as lifecycle messages, tool calls, and tool results. Repeating the same Activity-side publication must not create duplicate transcript rows.
+
+Each transcript event also has a session-level sequence cursor. Memory compaction advances the session transcript cursor, not a per-run cursor, so long-running recurring sessions can compact across multiple runs without losing position.
 
 ## Model and Context
 
@@ -318,6 +324,7 @@ The demo path needs:
 - Trigger it immediately.
 - Submit the scheduled prompt into the target session with `submitTurn`.
 - Store enough projection data in SQLite for the Schedules surface.
+- Record every schedule fire in `schedule_fire_events` so the UI can show schedule ID, overlap policy, scheduled workflow, target session, accepted run ID, and inspect-run linkage.
 
 Fast-follow schedule management adds pause, resume, delete, and projection reconciliation from Temporal as the source of truth.
 

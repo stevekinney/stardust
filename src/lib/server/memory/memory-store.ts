@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { DatabaseClient } from '../db';
 import { memoryNotes, streamEvents } from '../db';
 import { publishStreamEvent } from '../stream';
@@ -200,25 +200,64 @@ export class MemoryStore {
 
 	/** List all unconfirmed memory candidates across all sessions. */
 	async listAllCandidates(): Promise<MemoryCandidate[]> {
-		const candidateEvents = await this.database
+		const candidateRows = await this.database
 			.select()
-			.from(streamEvents)
-			.where(eq(streamEvents.kind, 'memory.candidate'))
-			.orderBy(streamEvents.createdAt);
+			.from(memoryNotes)
+			.where(isNull(memoryNotes.confirmedAt))
+			.orderBy(memoryNotes.createdAt);
 
-		const confirmedNotes = await this.listAll();
-		const confirmedIds = new Set(confirmedNotes.map((note) => note.id));
+		return candidateRows.map(toMemoryCandidate);
+	}
 
-		return candidateEvents
-			.map((event) => {
-				try {
-					return JSON.parse(event.payload) as MemoryCandidate;
-				} catch {
-					return null;
-				}
-			})
-			.filter((candidate): candidate is MemoryCandidate => candidate !== null)
-			.filter((candidate) => !confirmedIds.has(candidate.id));
+	/** List unconfirmed memory candidates for one session. */
+	async listCandidatesBySession(sessionId: string): Promise<MemoryCandidate[]> {
+		const candidateRows = await this.database
+			.select()
+			.from(memoryNotes)
+			.where(and(eq(memoryNotes.sessionId, sessionId), isNull(memoryNotes.confirmedAt)))
+			.orderBy(memoryNotes.createdAt);
+
+		return candidateRows.map(toMemoryCandidate);
+	}
+
+	async findCandidateById(sessionId: string, candidateId: string): Promise<MemoryCandidate | null> {
+		const rows = await this.database
+			.select()
+			.from(memoryNotes)
+			.where(
+				and(
+					eq(memoryNotes.sessionId, sessionId),
+					eq(memoryNotes.id, candidateId),
+					isNull(memoryNotes.confirmedAt)
+				)
+			)
+			.limit(1);
+
+		return rows[0] ? toMemoryCandidate(rows[0]) : null;
+	}
+
+	async discardCandidate(sessionId: string, candidateId: string): Promise<boolean> {
+		const existing = await this.findCandidateById(sessionId, candidateId);
+		if (!existing) return false;
+		await this.database
+			.delete(memoryNotes)
+			.where(
+				and(
+					eq(memoryNotes.sessionId, sessionId),
+					eq(memoryNotes.id, candidateId),
+					isNull(memoryNotes.confirmedAt)
+				)
+			);
+		await this.database
+			.delete(streamEvents)
+			.where(
+				and(
+					eq(streamEvents.sessionId, sessionId),
+					eq(streamEvents.kind, 'memory.candidate'),
+					sql`json_extract(${streamEvents.payload}, '$.id') = ${candidateId}`
+				)
+			);
+		return true;
 	}
 
 	async searchLexical(input: LexicalMemorySearchInput): Promise<MemorySearchResult[]> {
@@ -471,6 +510,21 @@ export class MemoryStore {
 			createdAt: input.createdAt ?? new Date().toISOString()
 		};
 
+		await this.database
+			.insert(memoryNotes)
+			.values({
+				id: candidate.id,
+				sessionId: candidate.sessionId,
+				kind: MEMORY_LAYER_TO_KIND[candidate.layer],
+				content: candidate.content,
+				tags: JSON.stringify(candidate.tags),
+				runId: candidate.runId,
+				confirmedAt: null,
+				createdAt: candidate.createdAt,
+				updatedAt: candidate.createdAt
+			})
+			.onConflictDoNothing();
+
 		// Use the atomic stream-event publisher so that the sequence number
 		// is assigned inside a SQLite transaction, preventing collisions with
 		// concurrent stream events emitted for the same run.
@@ -478,6 +532,7 @@ export class MemoryStore {
 			runId: input.runId,
 			sessionId: input.sessionId,
 			kind: 'memory.candidate',
+			deduplicationKey: `memory-candidate:${candidate.id}`,
 			payload: JSON.stringify(candidate),
 			createdAt: candidate.createdAt
 		});
@@ -486,6 +541,21 @@ export class MemoryStore {
 	}
 
 	async confirmCandidate(candidate: MemoryCandidate, confirmedAt = new Date().toISOString()) {
+		const existing = await this.findById(candidate.id);
+		if (existing) {
+			await this.database
+				.update(memoryNotes)
+				.set({
+					confirmedAt,
+					updatedAt: confirmedAt
+				})
+				.where(eq(memoryNotes.id, candidate.id));
+
+			const confirmed = await this.findById(candidate.id);
+			if (!confirmed) throw new Error(`Memory note was not persisted: ${candidate.id}`);
+			return confirmed;
+		}
+
 		return this.createNote({
 			id: candidate.id,
 			sessionId: candidate.sessionId,
@@ -553,6 +623,7 @@ export class MemoryStore {
 		await this.database.run(sql`
 			UPDATE sessions
 			SET summary_cursor = ${input.toTranscriptCursor},
+				transcript_cursor = ${input.toTranscriptCursor},
 				memory_refs = ${JSON.stringify(memoryRefs)},
 				updated_at = ${now}
 			WHERE id = ${input.sessionId}
@@ -614,6 +685,19 @@ function toMemoryNote(row: MemoryNoteRow): MemoryNote {
 		confirmedAt: row.confirmedAt,
 		createdAt: row.createdAt,
 		updatedAt: row.updatedAt
+	};
+}
+
+function toMemoryCandidate(row: MemoryNoteRow): MemoryCandidate {
+	return {
+		id: row.id,
+		sessionId: row.sessionId,
+		runId: row.runId ?? 'session-memory',
+		layer: MEMORY_KIND_TO_LAYER[row.kind],
+		content: row.content,
+		tags: parseTags(row.tags),
+		reason: null,
+		createdAt: row.createdAt
 	};
 }
 

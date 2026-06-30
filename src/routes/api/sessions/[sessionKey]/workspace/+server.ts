@@ -7,7 +7,8 @@ import {
 	sandboxCommands,
 	sandboxSnapshots,
 	sandboxes,
-	sessions
+	sessions,
+	toolInvocations
 } from '$lib/server/db/schema';
 import type {
 	WorkspaceArtifact,
@@ -24,9 +25,8 @@ const IDENTIFIER_RE = /^[\w-]{1,128}$/;
  * Files are not returned — no persisted file-listing source exists; workspace files
  * are tracked by the sandbox filesystem rather than the database.
  *
- * Diffs between consecutive snapshots are not computed at request time to avoid
- * spawning git processes in the request handler. They require a persisted diff
- * artifact upstream (none exists yet).
+ * Diffs are projected from persisted `workspace.diff` tool results. This keeps
+ * request handlers read-only and avoids spawning git during UI refresh.
  */
 export const GET: RequestHandler = async ({ params }) => {
 	if (!IDENTIFIER_RE.test(params.sessionKey)) {
@@ -54,7 +54,7 @@ export const GET: RequestHandler = async ({ params }) => {
 		return json({ files: [], commands: [], snapshots: [], artifacts: [], diffs: [] });
 	}
 
-	const [commandRows, snapshotRows, artifactRows] = await Promise.all([
+	const [commandRows, snapshotRows, artifactRows, diffToolRows] = await Promise.all([
 		db
 			.select()
 			.from(sandboxCommands)
@@ -69,7 +69,12 @@ export const GET: RequestHandler = async ({ params }) => {
 			.select()
 			.from(artifacts)
 			.where(eq(artifacts.sessionId, session.id))
-			.orderBy(artifacts.createdAt)
+			.orderBy(artifacts.createdAt),
+		db
+			.select()
+			.from(toolInvocations)
+			.where(eq(toolInvocations.sessionId, session.id))
+			.orderBy(toolInvocations.createdAt)
 	]);
 
 	const commands: WorkspaceCommand[] = commandRows.map((row) => ({
@@ -99,10 +104,22 @@ export const GET: RequestHandler = async ({ params }) => {
 		createdAt: row.createdAt
 	}));
 
-	// Diffs between snapshots are not computed at request time.
-	// Computing them requires the workspace to still be present on disk and git
-	// to be available, which is not guaranteed in a stateless API handler.
-	const diffs: WorkspaceDiff[] = [];
+	const diffs: WorkspaceDiff[] = diffToolRows
+		.filter((row) => row.toolName === 'workspace.diff')
+		.flatMap((row, index) => {
+			const parsed = parseWorkspaceDiff(row.resultInline);
+			if (!parsed || !parsed.patch) return [];
+			return [
+				{
+					fromSnapshotId: parsed.base ?? 'working-tree',
+					toSnapshotId: parsed.head ?? 'working-tree',
+					patch: parsed.patch,
+					createdAt: row.completedAt ?? row.createdAt,
+					fileName: parsed.path ?? undefined,
+					stepRef: { number: index + 1, name: row.toolName }
+				}
+			];
+		});
 
 	return json({ files: [], commands, snapshots, artifacts: workspaceArtifacts, diffs });
 };
@@ -116,5 +133,27 @@ function parseStringArray(value: string | null | undefined): string[] {
 			: [];
 	} catch {
 		return [];
+	}
+}
+
+function parseWorkspaceDiff(value: string | null | undefined): {
+	base?: string;
+	head?: string | null;
+	path?: string | null;
+	patch?: string;
+} | null {
+	if (!value) return null;
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+		const record = parsed as Record<string, unknown>;
+		return {
+			base: typeof record.base === 'string' ? record.base : undefined,
+			head: typeof record.head === 'string' ? record.head : null,
+			path: typeof record.path === 'string' ? record.path : null,
+			patch: typeof record.patch === 'string' ? record.patch : undefined
+		};
+	} catch {
+		return null;
 	}
 }

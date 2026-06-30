@@ -10,6 +10,7 @@ import * as schema from '../db/schema';
 import { MemoryStore, createEmptyEmbedding, EMBEDDING_DIMENSION } from './memory-store';
 import { retrieveMemory } from './retrieval';
 import { generateLocalEmbedding } from './embedding';
+import { trimCompletedRunStream } from '../stream';
 
 const TEST_DB_DIR = join(tmpdir(), 'stardust-t7-memory-test');
 const TEST_DB_PATH = join(TEST_DB_DIR, 'test.db');
@@ -134,7 +135,7 @@ describe('MemoryStore', () => {
 		expect(results[0]?.content).toContain('amber terminal');
 	});
 
-	it('publishes write candidates without mutating durable memory before confirmation', async () => {
+	it('persists write candidates without exposing them as confirmed memory before confirmation', async () => {
 		const beforeCount = countMemoryNotes('session-candidate');
 
 		const candidate = await store.writeCandidate({
@@ -146,7 +147,14 @@ describe('MemoryStore', () => {
 			reason: 'User stated a durable planning preference.'
 		});
 
-		expect(countMemoryNotes('session-candidate')).toBe(beforeCount);
+		expect(countMemoryNotes('session-candidate')).toBe(beforeCount + 1);
+		expect(await store.findById(candidate.id)).toMatchObject({
+			id: candidate.id,
+			confirmedAt: null
+		});
+		expect((await store.listBySession('session-candidate')).map((note) => note.id)).not.toContain(
+			candidate.id
+		);
 		const streamRows = sqlite
 			.prepare(
 				`SELECT kind, payload FROM stream_events WHERE session_id = ? AND run_id = ? ORDER BY sequence`
@@ -209,6 +217,32 @@ describe('MemoryStore', () => {
 		expect(a.id).toBeDefined();
 		expect(b.id).toBeDefined();
 		expect(a.id).not.toBe(b.id);
+	});
+
+	it('keeps pending candidates visible after completed-run stream trimming', async () => {
+		const sessionId = 'session-candidate-trim';
+		const runId = 'run-candidate-trim';
+		sqlite
+			.prepare(`INSERT INTO runs (id, session_id, workflow_id, status) VALUES (?, ?, ?, ?)`)
+			.run(runId, sessionId, `agent-run:${runId}`, 'complete');
+
+		const candidate = await store.writeCandidate({
+			id: 'memory-candidate-trimmed-stream',
+			sessionId,
+			runId,
+			layer: 'durable',
+			content: 'This pending candidate survives stream trimming.'
+		});
+
+		await trimCompletedRunStream(drizzle(sqlite, { schema }), runId);
+
+		const streamRows = sqlite
+			.prepare(`SELECT id FROM stream_events WHERE run_id = ?`)
+			.all(runId) as { id: number }[];
+		expect(streamRows).toHaveLength(0);
+		expect((await store.listCandidatesBySession(sessionId)).map((item) => item.id)).toContain(
+			candidate.id
+		);
 	});
 
 	it('excludes unconfirmed compaction candidates from listBySession and searchLexical', async () => {
