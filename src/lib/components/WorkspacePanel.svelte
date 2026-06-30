@@ -226,11 +226,11 @@
 		font-weight: 700;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
-		color: color-mix(in srgb, CanvasText 60%, transparent);
+		color: var(--cinder-text-subtle);
 	}
 
 	.panel-section {
-		border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+		border-top: 1px solid var(--cinder-border-muted);
 		padding-top: 0.75rem;
 	}
 
@@ -248,9 +248,9 @@
 		gap: 0.5rem;
 		align-items: center;
 		padding: 0.4rem 0.6rem;
-		border: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+		border: 1px solid var(--cinder-border-muted);
 		border-radius: 5px;
-		background: Canvas;
+		background: var(--cinder-bg);
 		font-size: 0.85rem;
 	}
 
@@ -265,12 +265,12 @@
 	}
 
 	.item-meta {
-		color: color-mix(in srgb, CanvasText 50%, transparent);
+		color: var(--cinder-text-subtle);
 		font-size: 0.78rem;
 	}
 
 	.item-time {
-		color: color-mix(in srgb, CanvasText 45%, transparent);
+		color: var(--cinder-text-disabled);
 		font-size: 0.75rem;
 	}
 
@@ -279,30 +279,30 @@
 		border-radius: 999px;
 		font-size: 0.72rem;
 		font-weight: 700;
-		background: color-mix(in srgb, CanvasText 8%, transparent);
+		background: var(--cinder-surface-raised);
 		text-transform: capitalize;
 	}
 
 	.status-pill.success {
-		background: #e6f3ed;
-		color: #17603a;
+		background: var(--cinder-color-success-bg);
+		color: var(--cinder-color-success-fg);
 	}
 
 	.status-pill.failure {
-		background: #fff1f1;
-		color: #7b1d1d;
+		background: var(--cinder-color-danger-bg);
+		color: var(--cinder-color-danger-fg);
 	}
 
 	.exit-code {
 		font-family: ui-monospace, monospace;
 		font-size: 0.75rem;
-		color: color-mix(in srgb, CanvasText 55%, transparent);
+		color: var(--cinder-text-subtle);
 	}
 
 	.sha {
 		font-family: ui-monospace, monospace;
 		font-size: 0.8rem;
-		background: color-mix(in srgb, CanvasText 6%, transparent);
+		background: var(--cinder-surface-inset);
 		padding: 0.1rem 0.4rem;
 		border-radius: 3px;
 	}
@@ -310,13 +310,13 @@
 	.snap-reason {
 		flex: 1;
 		font-size: 0.85rem;
-		color: color-mix(in srgb, CanvasText 70%, transparent);
+		color: var(--cinder-text-subtle);
 	}
 
 	.command-item {
-		border: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+		border: 1px solid var(--cinder-border-muted);
 		border-radius: 5px;
-		background: Canvas;
+		background: var(--cinder-bg);
 		overflow: hidden;
 	}
 
@@ -326,14 +326,14 @@
 	}
 
 	.command-output {
-		border-top: 1px solid color-mix(in srgb, CanvasText 8%, transparent);
+		border-top: 1px solid var(--cinder-surface-raised);
 	}
 
 	.output-summary {
 		padding: 0.25rem 0.6rem;
 		font-size: 0.75rem;
 		font-weight: 600;
-		color: color-mix(in srgb, CanvasText 55%, transparent);
+		color: var(--cinder-text-subtle);
 		cursor: pointer;
 		user-select: none;
 	}
@@ -343,21 +343,21 @@
 		max-height: 10rem;
 		margin: 0;
 		padding: 0.4rem 0.6rem;
-		background: color-mix(in srgb, CanvasText 5%, Canvas);
+		background: var(--cinder-surface-inset);
 		font-size: 0.75rem;
 		line-height: 1.4;
 		white-space: pre;
 	}
 
 	.output-stderr {
-		background: color-mix(in srgb, #7b1d1d 4%, Canvas);
+		background: var(--cinder-color-danger-bg);
 	}
 
 	.diff-row {
-		border: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+		border: 1px solid var(--cinder-border-muted);
 		border-radius: 5px;
 		padding: 0.4rem 0.6rem;
-		background: Canvas;
+		background: var(--cinder-bg);
 		font-size: 0.85rem;
 	}
 
@@ -369,7 +369,7 @@
 	}
 
 	.diff-arrow {
-		color: color-mix(in srgb, CanvasText 45%, transparent);
+		color: var(--cinder-text-disabled);
 	}
 
 	.diff-patch {
@@ -378,7 +378,7 @@
 		margin: 0;
 		border-radius: 4px;
 		padding: 0.4rem;
-		background: color-mix(in srgb, CanvasText 5%, Canvas);
+		background: var(--cinder-surface-inset);
 		font-size: 0.75rem;
 		line-height: 1.4;
 		white-space: pre;

@@ -226,10 +226,10 @@
 		gap: 1rem;
 		max-width: 56rem;
 		padding: 1rem;
-		border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+		border: 1px solid var(--cinder-border);
 		border-radius: 8px;
-		background: Canvas;
-		color: CanvasText;
+		background: var(--cinder-bg);
+		color: var(--cinder-text);
 	}
 
 	.approval-header,
@@ -248,7 +248,7 @@
 	.eyebrow,
 	dt {
 		margin: 0;
-		color: color-mix(in srgb, CanvasText 60%, transparent);
+		color: var(--cinder-text-subtle);
 		font-size: 0.75rem;
 		font-weight: 600;
 		text-transform: uppercase;
@@ -273,7 +273,7 @@
 	.status {
 		padding: 0.25rem 0.5rem;
 		border-radius: 999px;
-		background: color-mix(in srgb, CanvasText 10%, transparent);
+		background: var(--cinder-surface-raised);
 		font-size: 0.75rem;
 		font-weight: 650;
 	}
@@ -300,9 +300,9 @@
 		min-height: 12rem;
 		margin: 0.35rem 0 0;
 		padding: 0.75rem;
-		border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+		border: 1px solid var(--cinder-border);
 		border-radius: 6px;
-		background: color-mix(in srgb, CanvasText 4%, Canvas);
+		background: var(--cinder-surface);
 		color: inherit;
 		font:
 			0.8125rem/1.45 ui-monospace,
@@ -322,7 +322,7 @@
 
 	.error {
 		margin: 0;
-		color: #b42318;
+		color: var(--cinder-color-danger-fg);
 		font-weight: 650;
 	}
 </style>

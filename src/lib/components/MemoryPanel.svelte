@@ -179,15 +179,15 @@
 	h3,
 	.layer-heading {
 		margin: 0 0 0.5rem;
-		font-size: 0.875rem;
+		font-size: var(--cinder-text-sm);
 		font-weight: 700;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
-		color: color-mix(in srgb, CanvasText 60%, transparent);
+		color: var(--cinder-text-subtle);
 	}
 
 	.layer-section {
-		border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+		border-top: 1px solid var(--cinder-border-muted);
 		padding-top: 0.75rem;
 	}
 
@@ -200,10 +200,10 @@
 	}
 
 	.note-item {
-		border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
-		border-radius: 6px;
+		border: 1px solid var(--cinder-border-muted);
+		border-radius: var(--cinder-radius-sm);
 		padding: 0.6rem 0.75rem;
-		background: Canvas;
+		background: var(--cinder-bg);
 	}
 
 	.note-content {
@@ -214,15 +214,15 @@
 
 	.note-time {
 		display: block;
-		color: color-mix(in srgb, CanvasText 45%, transparent);
-		font-size: 0.75rem;
+		color: var(--cinder-text-disabled);
+		font-size: var(--cinder-text-xs);
 	}
 
 	.note-run-id {
 		display: block;
-		color: color-mix(in srgb, CanvasText 45%, transparent);
-		font-size: 0.72rem;
-		font-family: ui-monospace, monospace;
+		color: var(--cinder-text-disabled);
+		font-size: var(--cinder-text-2xs);
+		font-family: var(--cinder-font-mono);
 	}
 
 	.tags {
@@ -234,19 +234,19 @@
 
 	.tag {
 		padding: 0.1rem 0.4rem;
-		border-radius: 4px;
-		background: color-mix(in srgb, CanvasText 8%, transparent);
-		font-size: 0.72rem;
+		border-radius: var(--cinder-radius-sm);
+		background: var(--cinder-surface);
+		font-size: var(--cinder-text-2xs);
 		font-weight: 600;
 	}
 
 	.candidates .layer-heading {
-		color: #7c3aed;
+		color: var(--cinder-accent);
 	}
 
 	.candidate-item {
-		border-color: #c4b5fd;
-		background: #f5f3ff;
+		border-color: var(--cinder-border);
+		background: var(--cinder-surface-raised);
 	}
 
 	.candidate-meta {
@@ -259,16 +259,16 @@
 
 	.layer-tag {
 		padding: 0.1rem 0.4rem;
-		border-radius: 4px;
-		background: #ddd6fe;
-		color: #5b21b6;
-		font-size: 0.72rem;
+		border-radius: var(--cinder-radius-sm);
+		background: color-mix(in srgb, var(--cinder-accent) 15%, var(--cinder-bg));
+		color: var(--cinder-accent-text);
+		font-size: var(--cinder-text-2xs);
 		font-weight: 700;
 		text-transform: capitalize;
 	}
 
 	.candidate-reason {
-		color: color-mix(in srgb, CanvasText 55%, transparent);
+		color: var(--cinder-text-subtle);
 		font-size: 0.8rem;
 		font-style: italic;
 	}

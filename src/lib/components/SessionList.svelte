@@ -159,7 +159,7 @@
 		margin: 0;
 		font-size: 1rem;
 		font-weight: 800;
-		color: #1d252c;
+		color: var(--cinder-text);
 	}
 
 	.list {
@@ -185,24 +185,24 @@
 		gap: 10px;
 		width: 100%;
 		padding: 10px 12px;
-		border: 1px solid #d7dde2;
-		border-radius: 6px;
-		background: #f9fafb;
-		color: inherit;
+		border: 1px solid var(--cinder-border-muted);
+		border-radius: var(--cinder-radius-md);
+		background: var(--cinder-surface);
+		color: var(--cinder-text);
 		font: inherit;
-		font-size: 0.875rem;
+		font-size: var(--cinder-text-sm);
 		cursor: pointer;
 		text-align: left;
 	}
 
 	.session-item:hover {
-		border-color: #174c77;
-		background: #f0f7ff;
+		border-color: var(--cinder-border);
+		background: var(--cinder-surface-hover);
 	}
 
 	.session-item.selected {
-		border-color: #174c77;
-		background: #eff6ff;
+		border-color: var(--cinder-accent);
+		background: var(--cinder-surface-raised);
 	}
 
 	.session-label {
@@ -221,40 +221,41 @@
 	}
 
 	.session-date {
-		color: #5e6f80;
-		font-size: 0.75rem;
+		color: var(--cinder-text-subtle);
+		font-size: var(--cinder-text-xs);
 	}
 
 	.status-pill {
 		display: inline-block;
 		padding: 0.12rem 0.5rem;
-		border-radius: 999px;
-		font-size: 0.7rem;
+		border-radius: var(--cinder-radius-full);
+		font-size: var(--cinder-text-2xs);
 		font-weight: 800;
 		text-transform: capitalize;
-		background: color-mix(in srgb, #1d252c 10%, transparent);
+		background: var(--cinder-surface-inset);
+		color: var(--cinder-text-subtle);
 	}
 
 	.status-pill[data-status='active'],
 	.status-pill[data-status='complete'] {
-		background: #e6f3ed;
-		color: #17603a;
+		background: var(--cinder-color-success-bg);
+		color: var(--cinder-color-success-fg);
 	}
 
 	.status-pill[data-status='failed'] {
-		background: #fff1f1;
-		color: #7b1d1d;
+		background: var(--cinder-color-danger-bg);
+		color: var(--cinder-color-danger-fg);
 	}
 
 	.status-pill[data-status='running'],
 	.status-pill[data-status='waiting_approval'] {
-		background: #eff6ff;
-		color: #1d4ed8;
+		background: var(--cinder-color-info-bg);
+		color: var(--cinder-color-info-fg);
 	}
 
 	.status-pill[data-status='idle'] {
-		background: #f3f4f6;
-		color: #374151;
+		background: var(--cinder-surface-inset);
+		color: var(--cinder-text-subtle);
 	}
 
 	.session-actions {
@@ -265,16 +266,16 @@
 
 	.error {
 		padding: 10px 14px;
-		background: #fff1f1;
-		border-left: 3px solid #9b2c2c;
-		color: #7b1d1d;
-		font-size: 0.875rem;
+		background: var(--cinder-color-danger-bg);
+		border-left: 3px solid var(--cinder-danger);
+		color: var(--cinder-color-danger-fg);
+		font-size: var(--cinder-text-sm);
 		margin: 0;
 	}
 
 	.muted {
-		color: #5e6f80;
-		font-size: 0.875rem;
+		color: var(--cinder-text-subtle);
+		font-size: var(--cinder-text-sm);
 		margin: 0;
 	}
 </style>

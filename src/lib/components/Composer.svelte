@@ -100,8 +100,8 @@
 		display: grid;
 		gap: 8px;
 		padding: 12px;
-		border-top: 1px solid #d7dde2;
-		background: #ffffff;
+		border-top: 1px solid var(--cinder-border);
+		background: var(--cinder-surface);
 	}
 
 	.main-row {

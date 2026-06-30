@@ -26,7 +26,7 @@
 
 	function loadSettings() {
 		if (typeof window === 'undefined') {
-			return { model: MODEL_OPTIONS[0].value, theme: 'system' as Theme, maxBudgetUsd: 5 };
+			return { model: MODEL_OPTIONS[0].value, theme: 'dark' as Theme, maxBudgetUsd: 5 };
 		}
 		try {
 			const raw = localStorage.getItem(SETTINGS_KEY);
@@ -34,7 +34,7 @@
 		} catch {
 			// ignore parse errors
 		}
-		return { model: MODEL_OPTIONS[0].value, theme: 'system' as Theme, maxBudgetUsd: 5 };
+		return { model: MODEL_OPTIONS[0].value, theme: 'dark' as Theme, maxBudgetUsd: 5 };
 	}
 
 	function saveSettings() {
@@ -184,11 +184,11 @@
 
 	.settings-section-title {
 		margin: 0;
-		font-size: 0.85rem;
+		font-size: var(--cinder-text-xs);
 		font-weight: 700;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
-		color: color-mix(in srgb, CanvasText 55%, transparent);
+		color: var(--cinder-text-subtle);
 	}
 
 	.field-group {
@@ -204,23 +204,23 @@
 	.budget-input {
 		width: 100%;
 		padding: 0.5rem 0.75rem;
-		border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
-		border-radius: 6px;
-		background: Canvas;
-		color: CanvasText;
+		border: 1px solid var(--cinder-border);
+		border-radius: var(--cinder-radius-md);
+		background: var(--cinder-surface-inset);
+		color: var(--cinder-text);
 		font: inherit;
-		font-size: 0.875rem;
+		font-size: var(--cinder-text-sm);
 	}
 
 	.budget-input:focus {
-		outline: 2px solid var(--cinder-accent, #2563eb);
+		outline: 2px solid var(--cinder-accent);
 		outline-offset: 2px;
 	}
 
 	.field-hint {
 		margin: 0;
-		font-size: 0.8rem;
-		color: color-mix(in srgb, CanvasText 55%, transparent);
+		font-size: var(--cinder-text-xs);
+		color: var(--cinder-text-subtle);
 	}
 
 	.settings-footer {
@@ -228,6 +228,6 @@
 		justify-content: flex-end;
 		gap: 0.5rem;
 		padding: 1rem 1.5rem;
-		border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+		border-top: 1px solid var(--cinder-border);
 	}
 </style>

@@ -36,8 +36,8 @@
 		justify-content: space-between;
 		gap: 16px;
 		padding: 12px 20px;
-		border-bottom: 1px solid #d7dde2;
-		background: #ffffff;
+		border-bottom: 1px solid var(--cinder-border);
+		background: var(--cinder-surface);
 	}
 
 	.header-left {
@@ -48,23 +48,23 @@
 	}
 
 	.back-link {
-		color: #5e6f80;
+		color: var(--cinder-text-subtle);
 		text-decoration: none;
-		font-size: 0.875rem;
+		font-size: var(--cinder-text-sm);
 		font-weight: 700;
 		white-space: nowrap;
 	}
 
 	.back-link:hover {
-		color: #174c77;
+		color: var(--cinder-accent-text);
 	}
 
 	.session-title {
 		margin: 0;
-		font-size: 0.95rem;
-		font-family: ui-monospace, monospace;
+		font-size: var(--cinder-text-base);
+		font-family: var(--cinder-font-mono);
 		font-weight: 600;
-		color: #1d252c;
+		color: var(--cinder-text);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -79,29 +79,29 @@
 
 	.new-session-button {
 		padding: 6px 14px;
-		border: 1px solid #174c77;
-		border-radius: 6px;
-		background: #174c77;
-		color: #ffffff;
+		border: 1px solid var(--cinder-accent);
+		border-radius: var(--cinder-radius-md);
+		background: var(--cinder-accent);
+		color: var(--cinder-accent-contrast);
 		font: inherit;
-		font-size: 0.8rem;
+		font-size: var(--cinder-text-xs);
 		font-weight: 700;
 		cursor: pointer;
 		white-space: nowrap;
 	}
 
 	.new-session-button:hover {
-		background: #1a5a8e;
+		background: var(--cinder-accent-hover);
 	}
 
 	.ops-link {
-		color: #5e6f80;
+		color: var(--cinder-text-subtle);
 		text-decoration: none;
-		font-size: 0.8rem;
+		font-size: var(--cinder-text-xs);
 		font-weight: 700;
 	}
 
 	.ops-link:hover {
-		color: #174c77;
+		color: var(--cinder-accent-text);
 	}
 </style>

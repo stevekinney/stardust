@@ -309,7 +309,7 @@
 
 	.muted {
 		margin: 0;
-		color: color-mix(in srgb, CanvasText 55%, transparent);
+		color: var(--cinder-text-subtle);
 		font-size: 0.85rem;
 	}
 
@@ -326,35 +326,35 @@
 		font-size: 0.75rem;
 		font-weight: 700;
 		text-transform: capitalize;
-		background: color-mix(in srgb, CanvasText 10%, transparent);
+		background: var(--cinder-surface);
 	}
 
 	.status-badge[data-status='complete'] {
-		background: #e6f3ed;
-		color: #17603a;
+		background: var(--cinder-color-success-bg);
+		color: var(--cinder-color-success-fg);
 	}
 
 	.status-badge[data-status='failed'] {
-		background: #fff1f1;
-		color: #7b1d1d;
+		background: var(--cinder-color-danger-bg);
+		color: var(--cinder-color-danger-fg);
 	}
 
 	.status-badge[data-status='running'] {
-		background: #eff6ff;
-		color: #1d4ed8;
+		background: var(--cinder-color-info-bg);
+		color: var(--cinder-color-info-fg);
 	}
 
 	.status-badge[data-status='waiting_approval'] {
-		background: #fef9c3;
-		color: #7a5b00;
+		background: var(--cinder-color-warning-bg);
+		color: var(--cinder-color-warning-fg);
 	}
 
 	.model-badge {
 		padding: 0.2rem 0.6rem;
 		border-radius: 999px;
-		background: color-mix(in srgb, CanvasText 7%, transparent);
+		background: var(--cinder-surface);
 		font-size: 0.75rem;
-		font-family: ui-monospace, monospace;
+		font-family: var(--cinder-font-mono);
 	}
 
 	.run-meta {
@@ -365,7 +365,7 @@
 	}
 
 	.run-meta dt {
-		color: color-mix(in srgb, CanvasText 55%, transparent);
+		color: var(--cinder-text-subtle);
 		font-size: 0.75rem;
 		font-weight: 700;
 		text-transform: uppercase;
@@ -377,7 +377,7 @@
 	}
 
 	.action-meter {
-		border-top: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+		border-top: 1px solid var(--cinder-border-muted);
 		padding-top: 0.75rem;
 	}
 
@@ -395,7 +395,7 @@
 	}
 
 	.breakdown dt {
-		color: color-mix(in srgb, CanvasText 55%, transparent);
+		color: var(--cinder-text-subtle);
 		font-size: 0.72rem;
 		font-weight: 700;
 		text-transform: uppercase;
@@ -408,7 +408,7 @@
 	}
 
 	.subagent-lanes {
-		border-top: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+		border-top: 1px solid var(--cinder-border-muted);
 		padding-top: 0.75rem;
 	}
 
@@ -422,10 +422,10 @@
 	}
 
 	.lane {
-		border: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+		border: 1px solid var(--cinder-border-muted);
 		border-radius: 6px;
 		padding: 0.5rem 0.75rem;
-		background: Canvas;
+		background: var(--cinder-bg);
 	}
 
 	.subagent-lane {
@@ -434,9 +434,9 @@
 		gap: 0.5rem;
 		align-items: center;
 		padding: 0.35rem 0.6rem;
-		border: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+		border: 1px solid var(--cinder-border-muted);
 		border-radius: 5px;
-		background: color-mix(in srgb, CanvasText 3%, Canvas);
+		background: var(--cinder-surface-inset);
 		font-size: 0.85rem;
 	}
 
@@ -459,32 +459,32 @@
 		font-size: 0.72rem;
 		font-weight: 700;
 		text-transform: capitalize;
-		background: color-mix(in srgb, CanvasText 8%, transparent);
+		background: var(--cinder-surface);
 	}
 
 	.lane-status[data-status='complete'] {
-		background: #e6f3ed;
-		color: #17603a;
+		background: var(--cinder-color-success-bg);
+		color: var(--cinder-color-success-fg);
 	}
 
 	.lane-status[data-status='failed'] {
-		background: #fff1f1;
-		color: #7b1d1d;
+		background: var(--cinder-color-danger-bg);
+		color: var(--cinder-color-danger-fg);
 	}
 
 	.lane-status[data-status='running'] {
-		background: #eff6ff;
-		color: #1d4ed8;
+		background: var(--cinder-color-info-bg);
+		color: var(--cinder-color-info-fg);
 	}
 
 	.lane-budget {
-		color: color-mix(in srgb, CanvasText 50%, transparent);
+		color: var(--cinder-text-subtle);
 		font-size: 0.72rem;
-		font-family: ui-monospace, monospace;
+		font-family: var(--cinder-font-mono);
 	}
 
 	.step-timeline {
-		border-top: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+		border-top: 1px solid var(--cinder-border-muted);
 		padding-top: 0.75rem;
 	}
 
@@ -497,15 +497,15 @@
 	}
 
 	.step {
-		border: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+		border: 1px solid var(--cinder-border-muted);
 		border-radius: 6px;
 		padding: 0.6rem 0.75rem;
-		background: Canvas;
+		background: var(--cinder-bg);
 	}
 
 	.step.recovery {
-		border-color: #6d28d9;
-		background: #f5f3ff;
+		border-color: var(--cinder-accent);
+		background: var(--cinder-surface);
 	}
 
 	.recovery-marker {
@@ -513,7 +513,7 @@
 		align-items: center;
 		gap: 0.35rem;
 		margin-bottom: 0.4rem;
-		color: #6d28d9;
+		color: var(--cinder-accent);
 		font-size: 0.8rem;
 	}
 
@@ -535,41 +535,41 @@
 	.kind-badge {
 		padding: 0.1rem 0.45rem;
 		border-radius: 4px;
-		background: color-mix(in srgb, CanvasText 8%, transparent);
+		background: var(--cinder-surface);
 		font-size: 0.72rem;
 		font-weight: 700;
 		text-transform: capitalize;
 	}
 
 	.sequence {
-		color: color-mix(in srgb, CanvasText 45%, transparent);
+		color: var(--cinder-text-subtle);
 		font-size: 0.75rem;
-		font-family: ui-monospace, monospace;
+		font-family: var(--cinder-font-mono);
 	}
 
 	.step-duration {
 		padding: 0.1rem 0.4rem;
 		border-radius: 4px;
-		background: color-mix(in srgb, #0369a1 10%, transparent);
-		color: #0369a1;
+		background: var(--cinder-color-info-bg);
+		color: var(--cinder-color-info-fg);
 		font-size: 0.72rem;
-		font-family: ui-monospace, monospace;
+		font-family: var(--cinder-font-mono);
 		font-weight: 600;
 	}
 
 	.step-attempts {
 		padding: 0.1rem 0.4rem;
 		border-radius: 4px;
-		background: color-mix(in srgb, #c2410c 10%, transparent);
-		color: #c2410c;
+		background: var(--cinder-color-warning-bg);
+		color: var(--cinder-color-warning-fg);
 		font-size: 0.72rem;
-		font-family: ui-monospace, monospace;
+		font-family: var(--cinder-font-mono);
 		font-weight: 700;
 	}
 
 	.timestamp {
 		margin-left: auto;
-		color: color-mix(in srgb, CanvasText 45%, transparent);
+		color: var(--cinder-text-subtle);
 		font-size: 0.75rem;
 	}
 
@@ -579,7 +579,7 @@
 		margin: 0.4rem 0 0;
 		border-radius: 4px;
 		padding: 0.5rem;
-		background: color-mix(in srgb, CanvasText 5%, Canvas);
+		background: var(--cinder-surface-inset);
 		font-size: 0.75rem;
 		line-height: 1.4;
 	}
@@ -590,9 +590,9 @@
 
 	/* — engineer overlay — */
 	.engineer-overlay {
-		border-top: 2px solid #7c3aed;
+		border-top: 2px solid var(--cinder-accent);
 		padding-top: 0.75rem;
-		background: color-mix(in srgb, #7c3aed 4%, Canvas);
+		background: var(--cinder-surface);
 		border-radius: 4px;
 		padding: 0.75rem;
 	}
@@ -605,7 +605,7 @@
 	}
 
 	.eng-meta dt {
-		color: color-mix(in srgb, CanvasText 55%, transparent);
+		color: var(--cinder-text-subtle);
 		font-size: 0.72rem;
 		font-weight: 700;
 		text-transform: uppercase;
@@ -624,37 +624,37 @@
 	/* — per-kind engineer markers — */
 	.eng-kind-marker {
 		font-size: 0.8rem;
-		font-family: ui-monospace, monospace;
+		font-family: var(--cinder-font-mono);
 		font-weight: 700;
-		color: #7c3aed;
+		color: var(--cinder-accent);
 	}
 
 	.eng-kind-marker[data-eng-kind='user_message'] {
-		color: #1d4ed8;
+		color: var(--cinder-color-info-fg);
 	}
 
 	.eng-kind-marker[data-eng-kind='assistant_message'] {
-		color: #047857;
+		color: var(--cinder-color-success-fg);
 	}
 
 	.eng-kind-marker[data-eng-kind='tool_call'] {
-		color: #b45309;
+		color: var(--cinder-color-warning-fg);
 	}
 
 	.eng-kind-marker[data-eng-kind='tool_result'] {
-		color: #6d28d9;
+		color: var(--cinder-accent);
 	}
 
 	.eng-kind-marker[data-eng-kind='approval_request'] {
-		color: #c2410c;
+		color: var(--cinder-color-danger-fg);
 	}
 
 	.eng-kind-marker[data-eng-kind='approval_resolution'] {
-		color: #16a34a;
+		color: var(--cinder-color-success-fg);
 	}
 
 	.eng-kind-marker[data-eng-kind='lifecycle'] {
-		color: #6b7280;
+		color: var(--cinder-text-disabled);
 	}
 
 	.raw-event-content {
@@ -670,7 +670,7 @@
 	}
 
 	.raw-event-meta dt {
-		color: color-mix(in srgb, CanvasText 55%, transparent);
+		color: var(--cinder-text-subtle);
 		font-size: 0.72rem;
 		font-weight: 700;
 		text-transform: uppercase;
@@ -685,7 +685,7 @@
 		overflow: auto;
 		padding: 0.75rem;
 		border-radius: 4px;
-		background: color-mix(in srgb, CanvasText 5%, Canvas);
+		background: var(--cinder-surface-inset);
 		font-size: 0.75rem;
 		line-height: 1.5;
 	}

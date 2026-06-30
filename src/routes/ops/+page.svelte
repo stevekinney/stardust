@@ -796,21 +796,6 @@
 </main>
 
 <style>
-	:global(body) {
-		margin: 0;
-		background: #f6f7f8;
-		color: #1d252c;
-		font-family:
-			Inter,
-			ui-sans-serif,
-			system-ui,
-			-apple-system,
-			BlinkMacSystemFont,
-			'Segoe UI',
-			sans-serif;
-	}
-
-	/* Raw <button> session/run row elements need font inheritance */
 	button {
 		font: inherit;
 	}
@@ -838,8 +823,8 @@
 
 	.eyebrow {
 		margin: 0 0 4px;
-		color: #5e6f80;
-		font-size: 0.85rem;
+		color: var(--cinder-text-subtle);
+		font-size: var(--cinder-text-sm);
 		font-weight: 700;
 		text-transform: uppercase;
 	}
@@ -863,10 +848,10 @@
 	}
 
 	.panel {
-		border: 1px solid #d7dde2;
-		border-radius: 8px;
+		border: 1px solid var(--cinder-border);
+		border-radius: var(--cinder-radius-lg);
 		padding: 20px;
-		background: #ffffff;
+		background: var(--cinder-surface);
 	}
 
 	.section-heading {
@@ -882,7 +867,6 @@
 		margin-bottom: 0;
 	}
 
-	/* Sessions navigation */
 	.session-list {
 		display: grid;
 		gap: 6px;
@@ -895,25 +879,25 @@
 		gap: 12px;
 		width: 100%;
 		padding: 10px 14px;
-		border: 1px solid #d7dde2;
-		border-radius: 6px;
-		background: #f9fafb;
+		border: 1px solid var(--cinder-border-muted);
+		border-radius: var(--cinder-radius-md);
+		background: var(--cinder-surface-inset);
 		color: inherit;
 		font: inherit;
-		font-size: 0.9rem;
+		font-size: var(--cinder-text-sm);
 		cursor: pointer;
 		text-align: left;
 	}
 
 	.session-row.selected,
 	.run-row.selected {
-		border-color: #174c77;
-		background: #eff6ff;
+		border-color: var(--cinder-accent);
+		background: var(--cinder-surface-raised);
 	}
 
 	.session-key {
-		font-family: ui-monospace, monospace;
-		font-size: 0.85rem;
+		font-family: var(--cinder-font-mono);
+		font-size: var(--cinder-text-sm);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -928,53 +912,54 @@
 
 	.session-date,
 	.run-date {
-		color: #5e6f80;
-		font-size: 0.78rem;
+		color: var(--cinder-text-subtle);
+		font-size: var(--cinder-text-xs);
 	}
 
 	.status-pill {
 		display: inline-block;
 		padding: 0.15rem 0.5rem;
-		border-radius: 999px;
-		font-size: 0.72rem;
+		border-radius: var(--cinder-radius-full);
+		font-size: var(--cinder-text-2xs);
 		font-weight: 700;
 		text-transform: capitalize;
-		background: color-mix(in srgb, #1d252c 10%, transparent);
+		background: var(--cinder-surface-inset);
+		color: var(--cinder-text-subtle);
 	}
 
 	.status-pill[data-status='active'],
 	.status-pill[data-status='complete'] {
-		background: #e6f3ed;
-		color: #17603a;
+		background: var(--cinder-color-success-bg);
+		color: var(--cinder-color-success-fg);
 	}
 
 	.status-pill[data-status='failed'] {
-		background: #fff1f1;
-		color: #7b1d1d;
+		background: var(--cinder-color-danger-bg);
+		color: var(--cinder-color-danger-fg);
 	}
 
 	.status-pill[data-status='running'],
 	.status-pill[data-status='waiting_approval'] {
-		background: #eff6ff;
-		color: #1d4ed8;
+		background: var(--cinder-color-info-bg);
+		color: var(--cinder-color-info-fg);
 	}
 
 	.status-pill[data-status='idle'],
 	.status-pill[data-status='pending'] {
-		background: #f3f4f6;
-		color: #374151;
+		background: var(--cinder-surface-inset);
+		color: var(--cinder-text-subtle);
 	}
 
 	.runs-panel {
 		margin-top: 16px;
 		padding-top: 16px;
-		border-top: 1px solid #e7ebef;
+		border-top: 1px solid var(--cinder-border-muted);
 	}
 
 	.runs-panel h3 {
-		font-size: 0.9rem;
+		font-size: var(--cinder-text-sm);
 		margin-bottom: 10px;
-		color: #40505f;
+		color: var(--cinder-text-muted);
 	}
 
 	.run-list {
@@ -991,34 +976,32 @@
 		gap: 10px;
 		width: 100%;
 		padding: 8px 12px;
-		border: 1px solid #d7dde2;
-		border-radius: 5px;
-		background: #f9fafb;
+		border: 1px solid var(--cinder-border-muted);
+		border-radius: var(--cinder-radius-sm);
+		background: var(--cinder-surface-inset);
 		color: inherit;
 		font: inherit;
-		font-size: 0.85rem;
+		font-size: var(--cinder-text-sm);
 		cursor: pointer;
 		text-align: left;
 	}
 
 	.run-id {
-		font-family: ui-monospace, monospace;
-		font-size: 0.8rem;
+		font-family: var(--cinder-font-mono);
+		font-size: var(--cinder-text-xs);
 	}
 
 	.run-model {
-		font-family: ui-monospace, monospace;
-		font-size: 0.75rem;
-		color: #5e6f80;
+		font-family: var(--cinder-font-mono);
+		font-size: var(--cinder-text-xs);
+		color: var(--cinder-text-subtle);
 	}
 
-	/* Inspector panels layout */
 	.inspector-layout {
 		display: grid;
 		gap: 16px;
 	}
 
-	/* Schedule list */
 	.schedule-list {
 		display: grid;
 		gap: 12px;
@@ -1028,9 +1011,9 @@
 		display: grid;
 		gap: 14px;
 		padding: 18px;
-		border: 1px solid #d7dde2;
-		border-radius: 8px;
-		background: #ffffff;
+		border: 1px solid var(--cinder-border);
+		border-radius: var(--cinder-radius-lg);
+		background: var(--cinder-surface);
 	}
 
 	.schedule-summary {
@@ -1048,23 +1031,23 @@
 	.schedule-summary p,
 	.prompt {
 		margin-bottom: 0;
-		color: #40505f;
+		color: var(--cinder-text-muted);
 	}
 
 	.schedule-summary span {
-		border-radius: 999px;
+		border-radius: var(--cinder-radius-full);
 		padding: 4px 10px;
-		background: #e6f3ed;
-		color: #17603a;
-		font-size: 0.8rem;
+		background: var(--cinder-color-success-bg);
+		color: var(--cinder-color-success-fg);
+		font-size: var(--cinder-text-xs);
 		font-weight: 800;
 		text-transform: capitalize;
 		flex-shrink: 0;
 	}
 
 	.schedule-summary span.paused {
-		background: #fff3d7;
-		color: #775000;
+		background: var(--cinder-color-warning-bg);
+		color: var(--cinder-color-warning-fg);
 	}
 
 	dl {
@@ -1075,8 +1058,8 @@
 	}
 
 	dt {
-		color: #5e6f80;
-		font-size: 0.8rem;
+		color: var(--cinder-text-subtle);
+		font-size: var(--cinder-text-xs);
 		font-weight: 800;
 		text-transform: uppercase;
 	}
@@ -1087,18 +1070,16 @@
 	}
 
 	.prompt {
-		border-top: 1px solid #e7ebef;
+		border-top: 1px solid var(--cinder-border-muted);
 		padding-top: 12px;
 	}
 
-	/* Forms */
 	form {
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 14px;
 	}
 
-	/* .prompt-field targets the Cinder Textarea root wrapper for the schedule prompt field */
 	:global(.prompt-field) {
 		grid-column: 1 / -1;
 	}
@@ -1108,8 +1089,6 @@
 		align-items: end;
 	}
 
-	/* All action buttons now use Cinder Button. Session/run row raw <button>
-	   elements have their own rules (.session-row, .run-row) below. */
 	:global(.form-submit) {
 		justify-self: start;
 	}
@@ -1120,27 +1099,26 @@
 		gap: 8px;
 	}
 
-	/* Messages */
 	.error {
-		border-left: 4px solid #9b2c2c;
+		border-left: 4px solid var(--cinder-danger);
 		padding: 12px 14px;
-		background: #fff1f1;
-		color: #7b1d1d;
+		background: var(--cinder-color-danger-bg);
+		color: var(--cinder-color-danger-fg);
 		margin: 0;
 	}
 
 	.muted {
-		color: #5e6f80;
+		color: var(--cinder-text-subtle);
 		margin: 0;
 	}
 
 	.notice {
-		border-left: 4px solid #92400e;
+		border-left: 4px solid var(--cinder-warning);
 		padding: 10px 14px;
-		background: #fffbeb;
-		color: #78350f;
+		background: var(--cinder-color-warning-bg);
+		color: var(--cinder-color-warning-fg);
 		margin: 0 0 0.75rem;
-		font-size: 0.875rem;
+		font-size: var(--cinder-text-sm);
 	}
 
 	@media (max-width: 760px) {

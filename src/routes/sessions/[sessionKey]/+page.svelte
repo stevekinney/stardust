@@ -4,27 +4,21 @@
 	import { resolve } from '$app/paths';
 	import ConversationView, { type StreamEvent } from '$lib/components/ConversationView.svelte';
 	import Composer from '$lib/components/Composer.svelte';
-	import SessionHeader from '$lib/components/SessionHeader.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 
 	const sessionKey = $derived(data.sessionKey);
 
-	// — conversation state —
 	let running = $state(false);
 	let events = $state<StreamEvent[]>([]);
 	let currentUserMessage = $state<string | null>(null);
 	let errorMessage = $state<string | null>(null);
 
-	// — SSE abort controller —
 	let abortController: AbortController | null = null;
 
-	// Auto-submit the initial message when navigating from the home composer,
-	// or rehydrate the conversation from the transcript when resuming.
 	onMount(() => {
 		if (data.startMessage) {
-			// Clear the ?start= param from the URL immediately so refresh doesn't re-submit.
 			void goto(resolve(`/sessions/${encodeURIComponent(sessionKey)}`), { replaceState: true });
 			void handleSubmit(data.startMessage);
 		} else {
@@ -32,30 +26,15 @@
 		}
 	});
 
-	/**
-	 * Fetch the canonical transcript for this session and populate the render state.
-	 *
-	 * Transcript events use underscore-style kinds (e.g. `tool_call`) while the
-	 * ConversationView expects dot-style kinds (e.g. `tool.call`). We normalise
-	 * on the way in.
-	 *
-	 * `tool_call` transcript events are special: they pack multiple calls into a
-	 * single row as `{ calls: [{id, name, input}] }`, but ConversationView expects
-	 * one event per call with shape `{ id, name, input }`. We expand them here.
-	 *
-	 * `user_message` transcript payloads use `{ text }` (not `{ message }`).
-	 */
 	async function loadTranscript() {
 		try {
 			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/transcript`);
-			if (!response.ok) return; // 404 = new session, that's fine
+			if (!response.ok) return;
 
 			const body = (await response.json()) as {
 				events: Array<{ id: string; kind: string; payload: string; sequence: number }>;
 			};
 
-			// Extract the last user_message as the current user message header.
-			// The transcript payload for user_message is { text: string }.
 			const userMsgEvents = body.events.filter((e) => e.kind === 'user_message');
 			if (userMsgEvents.length > 0) {
 				const lastUserMsg = userMsgEvents[userMsgEvents.length - 1];
@@ -67,15 +46,12 @@
 				}
 			}
 
-			// Map transcript kinds (underscore) → stream event kinds (dot).
-			// tool_call is omitted here because it needs special expansion below.
 			const KIND_MAP: Record<string, string> = {
 				assistant_message: 'assistant.message',
 				tool_result: 'tool.result',
 				approval_request: 'approval.request',
 				approval_resolution: 'approval.resolution',
 				lifecycle: 'lifecycle'
-				// user_message is rendered via currentUserMessage above
 			};
 
 			let seq = 0;
@@ -83,9 +59,6 @@
 				.filter((e) => e.kind !== 'user_message')
 				.flatMap((e) => {
 					if (e.kind === 'tool_call') {
-						// Each tool_call transcript event holds an array of calls.
-						// Expand into one tool.call event per call so ConversationView
-						// can render individual tool cards.
 						try {
 							const parsed = JSON.parse(e.payload) as {
 								calls?: Array<{ id: string; name: string; input: unknown }>;
@@ -102,7 +75,7 @@
 					return [{ id: seq++, kind: KIND_MAP[e.kind] ?? e.kind, payload: e.payload }];
 				});
 		} catch {
-			// Non-fatal: the conversation simply starts fresh if transcript can't be loaded.
+			// Non-fatal
 		}
 	}
 
@@ -114,8 +87,6 @@
 		currentUserMessage = message;
 		events = [];
 
-		// Read model and budget from persisted settings so each turn respects the
-		// user's current selection without requiring a page reload.
 		let model: string | undefined;
 		let maxBudgetUsd: number | undefined;
 		try {
@@ -130,7 +101,7 @@
 				}
 			}
 		} catch {
-			// Ignore parse errors — proceed with defaults.
+			// Ignore parse errors
 		}
 
 		try {
@@ -154,9 +125,6 @@
 				throw new Error('Turn was not accepted by the session workflow');
 			}
 
-			// Open the SSE stream using fetch + ReadableStream so that named
-			// events are dispatched correctly. EventSource.onmessage only fires
-			// for un-named frames and would miss all events here.
 			await consumeStream(body.streamUrl);
 		} catch (caught) {
 			errorMessage = caught instanceof Error ? caught.message : 'Unknown error';
@@ -184,9 +152,7 @@
 
 				buffer += decoder.decode(value, { stream: true });
 
-				// Parse SSE frames: each frame is separated by a blank line.
 				const frames = buffer.split('\n\n');
-				// Keep the incomplete last chunk in the buffer.
 				buffer = frames.pop() ?? '';
 
 				for (const frame of frames) {
@@ -194,7 +160,6 @@
 				}
 			}
 		} catch (caught) {
-			// AbortError is expected when the user interrupts.
 			if (caught instanceof Error && caught.name !== 'AbortError') {
 				throw caught;
 			}
@@ -221,8 +186,6 @@
 
 		if (!kind || !data || kind === 'stream.gap') return;
 
-		// Append the event to the reactive list. The ConversationView derives
-		// its render model from this array.
 		events = [...events, { id: id ?? events.length, kind, payload: data }];
 	}
 
@@ -234,17 +197,8 @@
 		});
 	}
 
-	async function handleNewSession() {
-		const response = await fetch('/api/sessions', { method: 'POST' });
-		if (!response.ok) return;
-		const body = (await response.json()) as { sessionKey: string };
-		void goto(resolve(`/sessions/${encodeURIComponent(body.sessionKey)}`));
-	}
-
 	async function handleInterrupt() {
-		// Abort the client-side SSE read first so the UI stops waiting.
 		abortController?.abort();
-		// Then tell the server to cancel the active run.
 		try {
 			await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/interrupt`, {
 				method: 'POST',
@@ -252,7 +206,7 @@
 				body: JSON.stringify({})
 			});
 		} catch {
-			// Non-fatal: the run will time out naturally if this fails.
+			// Non-fatal
 		}
 	}
 </script>
@@ -261,71 +215,67 @@
 	<title>Session — Stardust</title>
 </svelte:head>
 
-<div class="conversation-page">
-	<SessionHeader {sessionKey} onNewSession={handleNewSession} />
-
+<div class="session-page">
 	{#if errorMessage}
 		<div class="error-banner" role="alert">
 			{errorMessage}
 		</div>
 	{/if}
 
-	<div class="stream-area" aria-label="Message stream" aria-live="polite">
-		<ConversationView
-			userMessage={currentUserMessage ? { text: currentUserMessage } : null}
-			{events}
-			{running}
-			onRetry={currentUserMessage ? () => handleSubmit(currentUserMessage!) : null}
-		/>
-	</div>
+	<div class="conversation-pane">
+		<div class="stream-area" aria-label="Message stream" aria-live="polite">
+			<ConversationView
+				userMessage={currentUserMessage ? { text: currentUserMessage } : null}
+				{events}
+				{running}
+				onRetry={currentUserMessage ? () => handleSubmit(currentUserMessage!) : null}
+			/>
+		</div>
 
-	<div class="composer-area">
-		<Composer
-			{running}
-			onSubmit={handleSubmit}
-			onSteer={handleSteer}
-			onInterrupt={handleInterrupt}
-		/>
+		<div class="composer-area">
+			<Composer
+				{running}
+				onSubmit={handleSubmit}
+				onSteer={handleSteer}
+				onInterrupt={handleInterrupt}
+			/>
+		</div>
 	</div>
 </div>
 
 <style>
-	:global(body) {
-		margin: 0;
-		background: #f6f7f8;
-		color: #1d252c;
-		font-family:
-			Inter,
-			ui-sans-serif,
-			system-ui,
-			-apple-system,
-			BlinkMacSystemFont,
-			'Segoe UI',
-			sans-serif;
-	}
-
-	.conversation-page {
-		display: grid;
-		grid-template-rows: auto auto 1fr auto;
-		height: 100dvh;
+	.session-page {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
 		overflow: hidden;
 	}
 
 	.error-banner {
 		padding: 10px 20px;
-		background: #fff1f1;
-		border-bottom: 1px solid #f5c6c6;
-		color: #7b1d1d;
-		font-size: 0.875rem;
+		background: var(--cinder-color-danger-bg);
+		border-bottom: 1px solid var(--cinder-color-danger-border);
+		color: var(--cinder-color-danger-fg);
+		font-size: var(--cinder-text-sm);
+		flex: none;
+	}
+
+	.conversation-pane {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		overflow: hidden;
 	}
 
 	.stream-area {
+		flex: 1;
 		overflow-y: auto;
-		background: #ffffff;
+		background: var(--cinder-bg);
 	}
 
 	.composer-area {
-		border-top: 1px solid #d7dde2;
-		background: #ffffff;
+		flex: none;
+		border-top: 1px solid var(--cinder-border);
+		background: var(--cinder-surface);
 	}
 </style>
