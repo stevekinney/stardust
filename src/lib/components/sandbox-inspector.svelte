@@ -1,5 +1,6 @@
 <script lang="ts">
-	import Callout from '@lostgradient/cinder/callout';
+	import Alert from '@lostgradient/cinder/alert';
+	import Badge from '@lostgradient/cinder/badge';
 	import EmptyState from '@lostgradient/cinder/empty-state';
 
 	export type SandboxInfo = {
@@ -59,10 +60,34 @@
 	function formatTimestamp(value: string): string {
 		return new Date(value).toLocaleTimeString();
 	}
+
+	function statusLabel(status: SandboxInfo['status']): string {
+		if (status === 'active') return 'Running';
+		if (status === 'terminated') return 'Stopped';
+		return status.charAt(0).toUpperCase() + status.slice(1);
+	}
+
+	function exitBadgeVariant(
+		exitCode: number | null,
+		status: SandboxCommandRow['status']
+	): 'success' | 'danger' | 'warning' | 'neutral' {
+		if (exitCode === 0) return 'success';
+		if (exitCode !== null) return 'danger';
+		if (status === 'running' || status === 'pending') return 'warning';
+		if (status === 'timeout') return 'warning';
+		return 'neutral';
+	}
+
+	function formatDuration(startedAt: string | null, completedAt: string | null): string {
+		if (!startedAt || !completedAt) return '—';
+		const ms = new Date(completedAt).getTime() - new Date(startedAt).getTime();
+		if (ms < 1000) return `${ms}ms`;
+		return `${(ms / 1000).toFixed(1)}s`;
+	}
 </script>
 
 <section class="sandbox-inspector" aria-labelledby="sandbox-inspector-heading">
-	<h2 id="sandbox-inspector-heading">Sandbox Inspector</h2>
+	<h2 id="sandbox-inspector-heading" class="visually-hidden">Sandbox Inspector</h2>
 
 	{#if !sandbox}
 		<EmptyState
@@ -71,80 +96,105 @@
 			headingLevel={3}
 		/>
 	{:else}
-		<!-- Callout does not support data-caveat natively; data attribute passes through via rest spread -->
-		<Callout variant="warning" data-caveat>
-			<strong>Note:</strong> This sandbox is a local subprocess — not microVM-isolated. It is safe only
-			for a trusted, single-user local POC.
-		</Callout>
+		<!-- Header -->
+		<div class="sandbox-header">
+			<div class="header-icon" aria-hidden="true">
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					width="18"
+					height="18"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+				>
+					<path
+						d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"
+					/>
+					<polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+					<line x1="12" y1="22.08" x2="12" y2="12" />
+				</svg>
+			</div>
+			<div class="header-info">
+				<div class="header-title">Sandbox · {sandbox.sessionId}</div>
+				<div class="header-sub">{sandbox.provider} · {sandbox.status} · created recently</div>
+			</div>
+			<span class="spacer"></span>
+			<span class="status-chip" data-status={sandbox.status}>
+				<i class="status-dot" aria-hidden="true"></i>
+				{statusLabel(sandbox.status)}
+			</span>
+		</div>
 
-		<!-- Raw <dl> preserved: DescriptionList only supports plain string definitions;
-		     sandbox metadata uses <code> and status-pill <span> elements which require HTML. -->
-		<dl class="sandbox-meta">
-			<div>
-				<dt>Provider</dt>
-				<dd>{sandbox.provider}</dd>
+		<!-- 4-column stat grid -->
+		<div class="stat-grid">
+			<div class="stat-cell">
+				<div class="stat-label">Provider</div>
+				<div class="stat-value mono">{sandbox.provider}</div>
 			</div>
-			<div>
-				<dt>Status</dt>
-				<dd>
-					<span class="status-pill" data-status={sandbox.status}>{sandbox.status}</span>
-				</dd>
+			<div class="stat-cell">
+				<div class="stat-label">Working dir</div>
+				<div class="stat-value mono">{sandbox.workspacePath}</div>
 			</div>
-			<div>
-				<dt>Name</dt>
-				<dd><code>{sandbox.name}</code></dd>
+			<div class="stat-cell">
+				<div class="stat-label">Commands run</div>
+				<div class="stat-value">{commands.length}</div>
 			</div>
-			<div>
-				<dt>Workspace</dt>
-				<dd><code class="workspace-path">{sandbox.workspacePath}</code></dd>
+			<div class="stat-cell">
+				<div class="stat-label">Snapshots</div>
+				<div class="stat-value">{snapshots.length}</div>
 			</div>
-			<div>
-				<dt>Git initialized</dt>
-				<dd>{sandbox.gitInitialized ? 'Yes' : 'No'}</dd>
-			</div>
-		</dl>
+		</div>
 
+		<!-- Recent commands table -->
 		{#if commands.length > 0}
-			<div class="panel-section">
-				<h3>Recent Commands</h3>
-				<ul class="item-list">
+			<div class="commands-panel">
+				<div class="commands-header">
+					<span class="col-cmd">Recent commands</span>
+					<span class="col-exit">Exit</span>
+					<span class="col-dur">Duration</span>
+					<span class="col-step">Step</span>
+				</div>
+				<div class="commands-body">
 					{#each commands as cmd (cmd.id)}
 						{@const args = parseArgs(cmd.args)}
-						<li class="command-item">
-							<div class="item-row">
-								<code class="cmd-text">
-									{cmd.command}{args.length > 0 ? ' ' + args.join(' ') : ''}
-								</code>
-								<span
-									class="status-pill"
-									class:success={cmd.status === 'complete' && cmd.exitCode === 0}
-									class:failure={cmd.status === 'failed' ||
-										(cmd.exitCode !== null && cmd.exitCode !== 0)}
-									data-status={cmd.status}
-								>
-									{cmd.status}
-								</span>
+						{@const cmdText = cmd.command + (args.length > 0 ? ' ' + args.join(' ') : '')}
+						<div class="command-row">
+							<code class="col-cmd cmd-text">{cmdText}</code>
+							<span class="col-exit exit-cell">
 								{#if cmd.exitCode !== null}
-									<span class="exit-code">exit {cmd.exitCode}</span>
+									<Badge variant={exitBadgeVariant(cmd.exitCode, cmd.status)} size="sm" mono
+										>{cmd.exitCode}</Badge
+									>
+								{:else}
+									<Badge variant={exitBadgeVariant(cmd.exitCode, cmd.status)} size="sm"
+										>{cmd.status}</Badge
+									>
 								{/if}
-							</div>
-							{#if cmd.stdoutRef || cmd.stderrRef}
-								<details class="command-output" data-command-output>
-									<summary class="output-summary">Output</summary>
-									{#if cmd.stdoutRef}
-										<pre class="output-pre">{cmd.stdoutRef}</pre>
-									{/if}
-									{#if cmd.stderrRef}
-										<pre class="output-pre output-stderr">{cmd.stderrRef}</pre>
-									{/if}
-								</details>
-							{/if}
-						</li>
+								<span class="visually-hidden">{cmd.status}</span>
+							</span>
+							<span class="col-dur duration">{formatDuration(cmd.startedAt, cmd.completedAt)}</span>
+							<span class="col-step subtle">—</span>
+						</div>
+						{#if cmd.stdoutRef || cmd.stderrRef}
+							<details class="command-output" data-command-output>
+								<summary class="output-summary">Output</summary>
+								{#if cmd.stdoutRef}
+									<pre class="output-pre">{cmd.stdoutRef}</pre>
+								{/if}
+								{#if cmd.stderrRef}
+									<pre class="output-pre output-stderr">{cmd.stderrRef}</pre>
+								{/if}
+							</details>
+						{/if}
 					{/each}
-				</ul>
+				</div>
 			</div>
 		{/if}
 
+		<!-- Snapshots -->
 		{#if snapshots.length > 0}
 			<div class="panel-section">
 				<h3>Snapshots</h3>
@@ -163,111 +213,240 @@
 				</ul>
 			</div>
 		{/if}
+
+		<!-- Isolation warning -->
+		<Alert variant="warning" data-caveat>
+			<strong>Local subprocess is not isolation</strong> — The
+			<code>local-subprocess</code> provider runs commands as your user with no network or filesystem
+			sandboxing. It is a local subprocess — not a microVM — so treat the approval gate as the real safety
+			boundary. Swappable for an isolated provider before exposing the app.
+		</Alert>
 	{/if}
 </section>
 
 <style>
 	.sandbox-inspector {
 		display: grid;
-		gap: 1rem;
-	}
-
-	h2 {
-		margin: 0 0 0.25rem;
-	}
-
-	h3 {
-		margin: 0 0 0.5rem;
-		font-size: 0.85rem;
-		font-weight: 700;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		color: var(--cinder-text-subtle);
-	}
-
-	.sandbox-meta {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
-		gap: 0.6rem;
-		margin: 0;
-	}
-
-	.sandbox-meta dt {
-		color: var(--cinder-text-subtle);
-		font-size: 0.72rem;
-		font-weight: 700;
-		text-transform: uppercase;
-	}
-
-	.sandbox-meta dd {
-		margin: 0.15rem 0 0;
-		font-size: 0.9rem;
-	}
-
-	code,
-	.workspace-path {
-		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-		font-size: 0.82rem;
-		overflow-wrap: anywhere;
-	}
-
-	.status-pill {
-		display: inline-block;
-		padding: 0.1rem 0.45rem;
-		border-radius: 999px;
-		font-size: 0.72rem;
-		font-weight: 700;
-		text-transform: capitalize;
-		background: var(--cinder-surface-raised);
-	}
-
-	.status-pill[data-status='active'] {
-		background: var(--cinder-color-success-bg);
-		color: var(--cinder-color-success-fg);
-	}
-
-	.status-pill[data-status='terminated'] {
-		background: var(--cinder-color-danger-bg);
-		color: var(--cinder-color-danger-fg);
-	}
-
-	.status-pill.success {
-		background: var(--cinder-color-success-bg);
-		color: var(--cinder-color-success-fg);
-	}
-
-	.status-pill.failure {
-		background: var(--cinder-color-danger-bg);
-		color: var(--cinder-color-danger-fg);
-	}
-
-	.panel-section {
-		border-top: 1px solid var(--cinder-border-muted);
-		padding-top: 0.75rem;
-	}
-
-	.item-list {
-		display: grid;
-		gap: 0.35rem;
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-
-	.command-item {
-		border: 1px solid var(--cinder-border-muted);
-		border-radius: 5px;
+		gap: 16px;
 		background: var(--cinder-bg);
+		padding: 20px 22px;
+	}
+
+	.visually-hidden {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
+
+	/* ── Header ── */
+	.sandbox-header {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+
+	.header-icon {
+		color: var(--cinder-accent-text);
+		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+	}
+
+	.header-info {
+		min-width: 0;
+	}
+
+	.header-title {
+		font:
+			600 13.5px system-ui,
+			sans-serif;
+	}
+
+	.header-sub {
+		font-size: 11px;
+		margin-top: 2px;
+		color: var(--cinder-text-subtle);
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	}
+
+	.spacer {
+		flex: 1;
+	}
+
+	.status-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+		border: 1px solid var(--cinder-color-neutral-border, var(--cinder-border));
+		border-radius: 20px;
+		padding: 4px 11px;
+		font:
+			600 11px system-ui,
+			sans-serif;
+		flex-shrink: 0;
+	}
+
+	.status-chip[data-status='active'] {
+		border-color: var(--cinder-color-success-border);
+		background: var(--cinder-color-success-bg);
+		color: var(--cinder-color-success-fg);
+	}
+
+	.status-chip[data-status='suspended'] {
+		border-color: var(--cinder-color-warning-border, var(--cinder-border));
+		background: var(--cinder-color-warning-bg, var(--cinder-surface-raised));
+		color: var(--cinder-color-warning-fg, var(--cinder-text));
+	}
+
+	.status-chip[data-status='terminated'] {
+		border-color: var(--cinder-color-danger-border);
+		background: var(--cinder-color-danger-bg);
+		color: var(--cinder-color-danger-fg);
+	}
+
+	.status-dot {
+		display: inline-block;
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		background: currentColor;
+		flex-shrink: 0;
+	}
+
+	/* ── Stat grid ── */
+	.stat-grid {
+		display: grid;
+		grid-template-columns: repeat(4, 1fr);
+		gap: 12px;
+	}
+
+	.stat-cell {
+		border: 1px solid var(--cinder-border);
+		border-radius: 10px;
+		background: var(--cinder-surface);
+		padding: 12px;
+	}
+
+	.stat-label {
+		font:
+			600 9.5px system-ui,
+			sans-serif;
+		letter-spacing: 0.07em;
+		text-transform: uppercase;
+		color: var(--cinder-text-subtle);
+	}
+
+	.stat-value {
+		font:
+			600 14px system-ui,
+			sans-serif;
+		margin-top: 5px;
+	}
+
+	.stat-value.mono {
+		font:
+			600 11.5px ui-monospace,
+			SFMono-Regular,
+			Menlo,
+			Monaco,
+			Consolas,
+			monospace;
+		word-break: break-all;
+	}
+
+	/* ── Commands table ── */
+	.commands-panel {
+		border: 1px solid var(--cinder-border);
+		border-radius: 11px;
+		background: var(--cinder-surface);
 		overflow: hidden;
 	}
 
-	.command-item .item-row {
-		border: none;
-		border-radius: 0;
+	.commands-header {
+		display: flex;
+		padding: 11px 16px;
+		border-bottom: 1px solid var(--cinder-border-muted);
+		font:
+			600 11px system-ui,
+			sans-serif;
+		letter-spacing: 0.05em;
+		text-transform: uppercase;
+		color: var(--cinder-text-subtle);
 	}
 
+	.command-row {
+		display: flex;
+		align-items: center;
+		padding: 10px 16px;
+		border-bottom: 1px solid var(--cinder-border-muted);
+		font:
+			500 12px ui-monospace,
+			SFMono-Regular,
+			Menlo,
+			Monaco,
+			Consolas,
+			monospace;
+	}
+
+	.command-row:last-of-type {
+		border-bottom: none;
+	}
+
+	.col-cmd {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.col-exit {
+		width: 90px;
+		flex-shrink: 0;
+	}
+
+	.col-dur {
+		width: 80px;
+		text-align: right;
+		flex-shrink: 0;
+	}
+
+	.col-step {
+		width: 130px;
+		text-align: right;
+		flex-shrink: 0;
+	}
+
+	.cmd-text {
+		font-family: inherit;
+		font-size: inherit;
+	}
+
+	.exit-cell {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+	}
+
+	.duration {
+		color: var(--cinder-text-muted);
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-size: 12px;
+	}
+
+	.subtle {
+		color: var(--cinder-text-subtle);
+	}
+
+	/* ── Command output ── */
 	.command-output {
-		border-top: 1px solid var(--cinder-surface-raised);
+		border-top: 1px solid var(--cinder-border-muted);
 	}
 
 	.output-summary {
@@ -294,6 +473,29 @@
 		background: var(--cinder-color-danger-bg);
 	}
 
+	/* ── Snapshots ── */
+	.panel-section {
+		border-top: 1px solid var(--cinder-border-muted);
+		padding-top: 0.75rem;
+	}
+
+	h3 {
+		margin: 0 0 0.5rem;
+		font-size: 0.85rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--cinder-text-subtle);
+	}
+
+	.item-list {
+		display: grid;
+		gap: 0.35rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
 	.item-row {
 		display: flex;
 		flex-wrap: wrap;
@@ -306,21 +508,9 @@
 		font-size: 0.85rem;
 	}
 
-	.cmd-text {
-		flex: 1;
-		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.exit-code {
-		font-family: ui-monospace, monospace;
-		font-size: 0.75rem;
-		color: var(--cinder-text-subtle);
-	}
-
 	.sha {
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-size: 0.82rem;
 		background: var(--cinder-surface-inset);
 		padding: 0.1rem 0.4rem;
 		border-radius: 3px;

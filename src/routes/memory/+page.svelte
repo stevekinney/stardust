@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import Button from '@lostgradient/cinder/button';
+	import PageHeader from '$lib/components/page-header.svelte';
 
 	type MemoryLayer = 'session' | 'durable' | 'action_sensitive';
 
@@ -36,7 +37,7 @@
 		const parts: string[] = [];
 		if (notes.length > 0) parts.push(`${notes.length} remembered`);
 		if (candidates.length > 0) parts.push(`${candidates.length} awaiting review`);
-		return parts.join(' · ') || 'No memory entries';
+		return parts.join(' · ') || undefined;
 	});
 
 	function shortSessionId(id: string): string {
@@ -103,10 +104,7 @@
 </svelte:head>
 
 <div class="page">
-	<div class="page-header">
-		<h1 class="page-title">Memory</h1>
-		<span class="page-meta">{headerMeta}</span>
-	</div>
+	<PageHeader title="Memory" meta={headerMeta} />
 
 	{#if loading}
 		<div class="page-center"><span class="page-meta">Loading…</span></div>
@@ -320,21 +318,6 @@
 		display: flex;
 		flex-direction: column;
 		height: 100%;
-	}
-
-	.page-header {
-		flex: none;
-		padding: 18px 22px 14px;
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		border-bottom: 1px solid var(--cinder-border);
-	}
-
-	.page-title {
-		font: 650 20px system-ui;
-		margin: 0;
-		color: var(--cinder-text);
 	}
 
 	.page-meta {

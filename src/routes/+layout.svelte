@@ -4,9 +4,9 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { resolve } from '$app/paths';
-	import Button from '@lostgradient/cinder/button';
+	import Badge from '@lostgradient/cinder/badge';
+	import StatusDot from '@lostgradient/cinder/status-dot';
 	import Toggle from '@lostgradient/cinder/toggle';
-	import Settings from '$lib/components/settings.svelte';
 	import { viewMode } from '$lib/view-mode.svelte';
 	import type { SessionRow } from '$lib/components/session-list.svelte';
 	import favicon from '$lib/assets/favicon.svg';
@@ -16,7 +16,6 @@
 	let sessions = $state<SessionRow[]>([]);
 	let sessionsLoading = $state(false);
 	let sessionsError = $state<string | null>(null);
-	let settingsOpen = $state(false);
 	let railOpen = $state(false);
 
 	const currentSessionKey = $derived($page.params.sessionKey ?? null);
@@ -75,21 +74,20 @@
 	function statusDotClass(status: string): string {
 		switch (status) {
 			case 'complete':
+			case 'recovered':
 				return 'dot-success';
 			case 'failed':
 				return 'dot-danger';
 			case 'cancelled':
-				return 'dot-warning';
+				return 'dot-muted';
 			case 'running':
+				return 'dot-accent dot-pulse';
 			case 'streaming':
 			case 'loading':
-				return 'dot-accent dot-pulse';
+				return 'dot-info dot-pulse';
 			case 'waiting_approval':
-				return 'dot-warning dot-pulse';
-			case 'recovered':
-				return 'dot-info';
 			case 'disconnected':
-				return 'dot-danger dot-pulse';
+				return 'dot-warning dot-pulse';
 			case 'active':
 				return 'dot-success dot-pulse';
 			default:
@@ -146,8 +144,6 @@
 			<span class="brand-name">STARDUST</span>
 		</a>
 
-		<span class="vr" aria-hidden="true"></span>
-
 		{#if currentSessionKey}
 			<span class="session-chip">
 				<span class="chip-dot"></span>
@@ -157,33 +153,18 @@
 
 		<div class="top-spacer"></div>
 
-		<div class="worker-status">
-			<span class="worker-dot"></span>
-			<b class="worker-label">Worker · live</b>
-		</div>
+		<StatusDot connectionState="connected" label="Worker" size="sm" />
 
-		<div class="uth">
-			<div class="uth-label">
-				<b>Under the hood</b>
-				<span>Show Temporal internals</span>
-			</div>
-			<Toggle
-				id="view-mode-toggle"
-				label="Under the hood"
-				hideLabel
-				checked={viewMode.mode === 'engineer'}
-				onValueChange={(next) => {
-					viewMode.set(next ? 'engineer' : 'operator');
-				}}
-			/>
-		</div>
+		<Toggle
+			id="view-mode-toggle"
+			label="Under the hood"
+			checked={viewMode.mode === 'engineer'}
+			onValueChange={(next) => {
+				viewMode.set(next ? 'engineer' : 'operator');
+			}}
+		/>
 
-		<button
-			type="button"
-			class="icon-button"
-			aria-label="Settings"
-			onclick={() => (settingsOpen = true)}
-		>
+		<a href={resolve('/settings')} class="icon-button" aria-label="Settings">
 			<svg
 				width="18"
 				height="18"
@@ -199,7 +180,7 @@
 				/>
 				<circle cx="12" cy="12" r="3" />
 			</svg>
-		</button>
+		</a>
 	</header>
 
 	<div class="body">
@@ -211,19 +192,32 @@
 
 		<!-- Left rail -->
 		<nav class="rail" class:rail-open={railOpen} aria-label="Session navigation">
-			<div class="rail-top">
-				<Button
-					label="New Session"
-					variant="primary"
-					size="sm"
-					onclick={handleCreateSession}
-					class="new-session-button"
-				/>
-			</div>
-
 			<div class="rail-scroll">
 				<div class="rail-heading">
-					Sessions <span class="rail-count">{activeSessions.length}</span>
+					Sessions
+					{#if activeSessions.length > 0}
+						<Badge variant="neutral" size="xs" mono>{activeSessions.length}</Badge>
+					{/if}
+					<span class="heading-spacer"></span>
+					<button
+						type="button"
+						class="icon-button icon-button-sm"
+						aria-label="New session"
+						onclick={handleCreateSession}
+					>
+						<svg
+							width="14"
+							height="14"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2.5"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						>
+							<path d="M5 12h14" /><path d="M12 5v14" />
+						</svg>
+					</button>
 				</div>
 
 				{#if sessionsError}
@@ -359,11 +353,8 @@
 			</div>
 
 			<div class="rail-footer">
-				<span class="temporal-dot"></span>
-				<div class="temporal-info">
-					<span class="temporal-name">Temporal dev server</span>
-					<span class="temporal-detail">localhost:7776 · default namespace</span>
-				</div>
+				<StatusDot status="success" label="Temporal Server" size="sm" />
+				<span class="temporal-detail">Namespace: default</span>
 			</div>
 		</nav>
 
@@ -373,8 +364,6 @@
 		</main>
 	</div>
 </div>
-
-<Settings bind:open={settingsOpen} />
 
 <style>
 	:global(html) {
@@ -423,13 +412,6 @@
 		color: var(--cinder-text);
 	}
 
-	.vr {
-		width: 1px;
-		height: 20px;
-		background: var(--cinder-border);
-		flex-shrink: 0;
-	}
-
 	.session-chip {
 		display: flex;
 		align-items: center;
@@ -460,55 +442,6 @@
 
 	.top-spacer {
 		flex: 1;
-	}
-
-	.worker-status {
-		display: flex;
-		align-items: center;
-		gap: 7px;
-		padding: 4px 10px;
-		border: 1px solid var(--cinder-border);
-		border-radius: var(--cinder-radius-full);
-		background: var(--cinder-surface-raised);
-		font-size: 11px;
-		white-space: nowrap;
-	}
-
-	.worker-dot {
-		width: 7px;
-		height: 7px;
-		border-radius: 50%;
-		background: var(--cinder-success);
-		flex-shrink: 0;
-	}
-
-	.worker-label {
-		font-weight: 600;
-		color: var(--cinder-text);
-	}
-
-	.uth {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-	}
-
-	.uth-label {
-		display: flex;
-		flex-direction: column;
-		text-align: right;
-		line-height: 1.2;
-	}
-
-	.uth-label b {
-		font-size: 11.5px;
-		font-weight: 600;
-		color: var(--cinder-text);
-	}
-
-	.uth-label span {
-		font-size: 10px;
-		color: var(--cinder-text-subtle);
 	}
 
 	.icon-button {
@@ -547,17 +480,6 @@
 		overflow: hidden;
 	}
 
-	.rail-top {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-		padding: 12px;
-	}
-
-	:global(.new-session-button) {
-		width: 100%;
-	}
-
 	.rail-scroll {
 		flex: 1;
 		overflow-y: auto;
@@ -573,12 +495,18 @@
 		color: var(--cinder-text-subtle);
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
+		display: flex;
+		align-items: center;
+		gap: 6px;
 	}
 
-	.rail-count {
-		font-family: var(--cinder-font-mono);
-		font-size: 9px;
-		color: var(--cinder-text-disabled);
+	.heading-spacer {
+		flex: 1;
+	}
+
+	.icon-button-sm {
+		width: 22px;
+		height: 22px;
 	}
 
 	.session-card {
@@ -703,34 +631,15 @@
 		border-top: 1px solid var(--cinder-border-muted);
 		padding: 10px 12px;
 		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
-
-	.temporal-dot {
-		width: 6px;
-		height: 6px;
-		border-radius: 50%;
-		background: var(--cinder-success);
-		flex-shrink: 0;
-	}
-
-	.temporal-info {
-		display: flex;
 		flex-direction: column;
-		line-height: 1.3;
-	}
-
-	.temporal-name {
-		font-size: 11px;
-		font-weight: 600;
-		color: var(--cinder-text);
+		gap: 4px;
 	}
 
 	.temporal-detail {
 		font-size: 9.5px;
 		font-family: var(--cinder-font-mono);
 		color: var(--cinder-text-subtle);
+		padding-left: 16px;
 	}
 
 	/* ── Main content ────────────────────────────────────────── */
@@ -768,10 +677,6 @@
 			overflow: hidden;
 		}
 
-		.rail-top {
-			display: none;
-		}
-
 		.rail-scroll {
 			padding: 4px;
 		}
@@ -780,7 +685,7 @@
 		.rail-message,
 		.card-content,
 		.rail-nav-item span,
-		.temporal-info {
+		.temporal-detail {
 			display: none;
 		}
 
@@ -807,23 +712,7 @@
 			display: none;
 		}
 
-		.vr {
-			display: none;
-		}
-
 		.session-chip {
-			display: none;
-		}
-
-		.worker-status {
-			padding: 4px 7px;
-		}
-
-		.worker-label {
-			display: none;
-		}
-
-		.uth-label {
 			display: none;
 		}
 
@@ -858,15 +747,11 @@
 		}
 
 		/* Restore full rail content when open on phone */
-		.rail.rail-open .rail-top {
-			display: flex;
-		}
-
 		.rail.rail-open .rail-heading,
 		.rail.rail-open .rail-message,
 		.rail.rail-open .card-content,
 		.rail.rail-open .rail-nav-item span,
-		.rail.rail-open .temporal-info {
+		.rail.rail-open .temporal-detail {
 			display: revert;
 		}
 
@@ -882,10 +767,6 @@
 		.rail.rail-open .rail-nav-item {
 			justify-content: flex-start;
 			padding: 8px 10px;
-		}
-
-		.rail.rail-open .rail-top {
-			padding: 12px;
 		}
 
 		.rail.rail-open .rail-scroll {

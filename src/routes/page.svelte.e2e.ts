@@ -10,11 +10,9 @@ function sseBody(frames: Array<{ id: number; kind: string; data: object }>): str
 		.join('');
 }
 
-test('home page shows welcome screen when there are no sessions', async ({ page }) => {
-	// Intercept the sessions list so the test does not need a running database.
-	await page.route('/api/sessions', (route) => {
+function mockSessionRoutes(page: import('@playwright/test').Page) {
+	return page.route('/api/sessions', (route) => {
 		if (route.request().method() === 'POST') {
-			// Server-minted session key endpoint.
 			void route.fulfill({
 				status: 201,
 				contentType: 'application/json',
@@ -28,21 +26,23 @@ test('home page shows welcome screen when there are no sessions', async ({ page 
 			});
 		}
 	});
+}
+
+test('home page shows welcome screen when there are no sessions', async ({ page }) => {
+	await mockSessionRoutes(page);
 
 	await page.goto('/');
 
-	await expect(page.getByRole('heading', { name: 'What can I help you with?' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'What should the agent work on?' })).toBeVisible();
 	await expect(page.getByLabel('Session navigation')).toBeVisible();
-	await expect(page.getByLabel('Message composer')).toBeVisible();
+	await expect(page.getByLabel('Describe a task')).toBeVisible();
 });
 
 test('create → submit → stream: navigates to a conversation and renders the stream', async ({
 	page
 }) => {
-	// Return empty sessions for the list; mint a deterministic key for session creation.
 	await page.route('/api/sessions', (route) => {
 		if (route.request().method() === 'POST') {
-			// POST /api/sessions → server-minted session key.
 			void route.fulfill({
 				status: 201,
 				contentType: 'application/json',
@@ -57,7 +57,6 @@ test('create → submit → stream: navigates to a conversation and renders the 
 		}
 	});
 
-	// Intercept the turn endpoint for any session key.
 	await page.route(/\/api\/sessions\/[^/]+\/turn$/, (route) => {
 		const urlParts = new URL(route.request().url()).pathname.split('/');
 		const sessionKey = urlParts[3];
@@ -72,7 +71,6 @@ test('create → submit → stream: navigates to a conversation and renders the 
 		});
 	});
 
-	// Mock the SSE stream endpoint with deterministic events.
 	await page.route(/\/api\/sessions\/[^/]+\/stream\/run-001$/, (route) => {
 		void route.fulfill({
 			status: 200,
@@ -95,29 +93,27 @@ test('create → submit → stream: navigates to a conversation and renders the 
 
 	await page.goto('/');
 
-	// Type a message in the home page composer (use role=textbox to disambiguate).
-	const messageInput = page.getByRole('textbox', { name: 'Message' });
+	const messageInput = page.getByLabel('Describe a task');
 	await messageInput.fill('Summarize climate change');
-	await page.getByRole('button', { name: 'Send message' }).click();
+	await page.getByRole('button', { name: 'Start session' }).click();
 
-	// Should navigate to a session conversation view.
 	await page.waitForURL(/\/sessions\//);
-	await expect(page.getByLabel('Message stream')).toBeVisible();
+	// Scope content assertions to the chat region: the responsive phone-monitor
+	// surface (display:none at desktop width) carries the same session text in the DOM,
+	// so an unscoped getByText matches two elements under Playwright strict mode.
+	const chat = page.getByLabel('Chat conversation');
+	await expect(chat).toBeVisible();
 
-	// The user's message should appear.
-	await expect(page.getByLabel('User message')).toContainText('Summarize climate change');
+	await expect(chat.getByText('Summarize climate change')).toBeVisible({ timeout: 5_000 });
 
-	// The assistant response should render from the SSE stream.
-	await expect(page.getByLabel('Assistant message')).toContainText(
-		'Climate change is a long-term shift in global temperatures.',
-		{ timeout: 10_000 }
-	);
+	await expect(
+		chat.getByText('Climate change is a long-term shift in global temperatures.')
+	).toBeVisible({ timeout: 10_000 });
 
-	// The lifecycle complete marker should appear.
-	await expect(page.getByLabel('Run complete')).toBeVisible({ timeout: 10_000 });
+	await expect(chat.getByLabel('Run complete')).toBeVisible({ timeout: 10_000 });
 });
 
-test('home page redirects to the most recent session when sessions exist', async ({ page }) => {
+test('home page shows the session list when sessions exist', async ({ page }) => {
 	await page.route('/api/sessions', (route) => {
 		void route.fulfill({
 			status: 200,
@@ -127,6 +123,7 @@ test('home page redirects to the most recent session when sessions exist', async
 					{
 						id: 'sess-001',
 						sessionKey: 'my-test-session',
+						name: 'Refactor auth guards',
 						status: 'idle',
 						workflowId: 'agent-session:my-test-session',
 						createdAt: new Date().toISOString(),
@@ -137,27 +134,18 @@ test('home page redirects to the most recent session when sessions exist', async
 		});
 	});
 
-	// Provide a minimal transcript so the redirect destination renders correctly.
-	await page.route('/api/sessions/my-test-session/transcript', (route) => {
-		void route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify({ events: [] })
-		});
-	});
-
 	await page.goto('/');
 
-	// Should auto-redirect to the most recent session.
-	await page.waitForURL('/sessions/my-test-session');
-	await expect(page.getByLabel('Message stream')).toBeVisible();
-	await expect(page.getByLabel('Message composer')).toBeVisible();
+	// Scope to <main>: the same session also appears in the left rail, so an unscoped
+	// getByText matches both the rail card and the main session card.
+	const main = page.getByRole('main');
+	await expect(main.getByText('Refactor auth guards')).toBeVisible();
+	await expect(main.getByRole('searchbox')).toBeVisible();
 });
 
 test('resume: navigating to an existing session rehydrates the conversation from transcript', async ({
 	page
 }) => {
-	// Serve the session in the list so the page doesn't redirect away.
 	await page.route('/api/sessions', (route) => {
 		void route.fulfill({
 			status: 200,
@@ -177,12 +165,6 @@ test('resume: navigating to an existing session rehydrates the conversation from
 		});
 	});
 
-	// Mock the transcript with real payload shapes matching what the server writes:
-	// - user_message: { text } (observability.activities.ts → recordRunStarted)
-	// - tool_call:    { calls: [{id, name, input}] } (model-runner.ts → appendTranscriptEvent)
-	// - tool_result:  { callId, content, isError } (stream/index.ts → persistToolResult)
-	// - assistant_message: { text } (observability.activities.ts → recordRunCompleted)
-	// - lifecycle:    { status } (observability.activities.ts → recordRunStarted/recordRunCompleted)
 	await page.route('/api/sessions/resume-session/transcript', (route) => {
 		void route.fulfill({
 			status: 200,
@@ -232,22 +214,30 @@ test('resume: navigating to an existing session rehydrates the conversation from
 		});
 	});
 
+	// Mock the runs endpoint.
+	await page.route('/api/sessions/resume-session/runs', (route) => {
+		void route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ runs: [] })
+		});
+	});
+
 	await page.goto('/sessions/resume-session');
 
-	// The user message should appear as the conversation header.
-	await expect(page.getByLabel('User message')).toContainText('What is the capital of France?', {
+	// Scope to the chat region (see note above): the responsive phone-monitor surface
+	// mirrors the session/step text in the DOM, tripping strict-mode on bare getByText.
+	const chat = page.getByLabel('Chat conversation');
+
+	await expect(chat.getByText('What is the capital of France?')).toBeVisible({
 		timeout: 5_000
 	});
 
-	// The tool card from the transcript should render.
-	await expect(page.getByLabel('Tool: search_web')).toBeVisible({ timeout: 5_000 });
+	await expect(chat.getByText('search_web')).toBeVisible({ timeout: 5_000 });
 
-	// The assistant response from the transcript should render.
-	await expect(page.getByLabel('Assistant message')).toContainText(
-		'The capital of France is Paris.',
-		{ timeout: 5_000 }
-	);
+	await expect(chat.getByText('The capital of France is Paris.')).toBeVisible({
+		timeout: 5_000
+	});
 
-	// The lifecycle completion marker should render.
-	await expect(page.getByLabel('Run complete')).toBeVisible({ timeout: 5_000 });
+	await expect(chat.getByLabel('Run complete')).toBeVisible({ timeout: 5_000 });
 });

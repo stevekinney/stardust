@@ -1,0 +1,1565 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/styles.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/components/chat/chat.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/components/operational/faceted-filter-bar.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/components/operational/approval-card.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/components/operational/event-stream-viewer.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/components/operational/payload-inspector.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/components/operational/run-step-timeline.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/components/operational/date-range-field.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/components/operational/secret-value-field.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/components/operational/invocation-rule-builder.css">
+  <script src="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/_ds_bundle.js"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script>
+    (function(){
+      var scheduled=false;
+      function draw(){
+        if(scheduled) return; scheduled=true;
+        requestAnimationFrame(function(){
+          scheduled=false;
+          if(window.lucide&&window.lucide.createIcons){ try{ window.lucide.createIcons(); }catch(e){} }
+          else { setTimeout(draw,80); }
+        });
+      }
+      // React-safe icon host: <lucide-icon> owns its own <svg> child, so lucide
+      // never mutates a node React is reconciling (avoids removeChild crashes).
+      class LucideIcon extends HTMLElement{
+        static get observedAttributes(){ return ['name','class','style']; }
+        connectedCallback(){ this._build(); }
+        attributeChangedCallback(){ if(this.isConnected) this._build(); }
+        _build(){
+          var name=this.getAttribute('name');
+          if(!name||name.indexOf('{{')>=0) return;
+          var i=this.firstElementChild;
+          if(!i||i.tagName!=='I'||i.getAttribute('data-lucide')!==name){
+            this.textContent='';
+            i=document.createElement('i');
+            i.setAttribute('data-lucide',name);
+            this.appendChild(i);
+          }
+          var cls=this.getAttribute('class'); if(cls) i.setAttribute('class',cls);
+          var st=this.getAttribute('style'); if(st) i.setAttribute('style',st);
+          draw();
+        }
+      }
+      if(!customElements.get('lucide-icon')) customElements.define('lucide-icon',LucideIcon);
+    })();
+  </script>
+  <style>
+    *{box-sizing:border-box}
+    html{color-scheme:dark}
+    body{margin:0;color-scheme:dark;background:var(--cinder-bg);color:var(--cinder-text);font-family:system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+    .gal{max-width:1480px;margin:0 auto;padding:60px 40px 140px}
+    .ghd-eyebrow{font:600 12px ui-monospace,monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--cinder-accent-text)}
+    .ghd-title{font:650 38px/1.08 system-ui;letter-spacing:-.02em;margin:14px 0 0;max-width:18ch;text-wrap:balance}
+    .ghd-sub{font:400 16px/1.6 system-ui;color:var(--cinder-text-muted);max-width:64ch;margin:18px 0 0;text-wrap:pretty}
+    .ghd-meta{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:24px;font:500 12.5px ui-monospace,monospace;color:var(--cinder-text-subtle)}
+    .ghd-meta span{display:inline-flex;align-items:center;gap:7px}
+    .dot{width:7px;height:7px;border-radius:50%;flex:none}
+    .princ{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:40px}
+    .pcard{background:var(--cinder-surface);border:1px solid var(--cinder-border);border-radius:12px;padding:18px}
+    .pcard h4{font:600 14px system-ui;margin:12px 0 7px}
+    .pcard p{font:400 12.5px/1.55 system-ui;color:var(--cinder-text-subtle);margin:0;text-wrap:pretty}
+    .pcard .pic{width:30px;height:30px;border-radius:8px;background:var(--cinder-surface-inset);border:1px solid var(--cinder-border-muted);display:flex;align-items:center;justify-content:center;color:var(--cinder-accent-text)}
+    .secthd{display:flex;align-items:baseline;gap:12px;margin:96px 0 0;padding-bottom:14px;border-bottom:1px solid var(--cinder-border)}
+    .secthd .n{font:700 13px ui-monospace,monospace;color:var(--cinder-accent-text)}
+    .secthd .t{font:600 21px system-ui;letter-spacing:-.01em}
+    .secthd .c{font:400 13px system-ui;color:var(--cinder-text-subtle);margin-left:auto;max-width:46ch;text-align:right;text-wrap:pretty}
+
+    .scr{margin-top:34px}
+    .scrlab{display:flex;align-items:baseline;gap:10px;margin-bottom:9px}
+    .scrnum{font:700 11px ui-monospace,monospace;color:var(--cinder-accent-contrast);background:var(--cinder-accent);padding:3px 7px;border-radius:5px}
+    .scrname{font:600 14.5px system-ui}
+    .scrcap{font:400 13px/1.5 system-ui;color:var(--cinder-text-muted);max-width:78ch;margin:-3px 0 14px;text-wrap:pretty}
+    .scrcap b{color:var(--cinder-text);font-weight:600}
+    .frame{border:1px solid var(--cinder-border);border-radius:14px;overflow:hidden;background:var(--cinder-bg);box-shadow:0 24px 60px -30px rgba(0,0,0,.8)}
+    .framerow{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-start}
+
+    /* ---- app shell ---- */
+    .app{display:flex;flex-direction:column;height:782px;background:var(--cinder-bg);font-size:14px}
+    .top{height:52px;flex:none;display:flex;align-items:center;gap:14px;padding:0 14px;border-bottom:1px solid var(--cinder-border);background:var(--cinder-surface)}
+    .mark{font:700 12.5px system-ui;letter-spacing:.2em;color:var(--cinder-text)}
+    .vr{width:1px;height:22px;background:var(--cinder-border)}
+    .sesschip{display:flex;flex-direction:column;line-height:1.25;min-width:0}
+    .sesschip b{font:600 12.5px system-ui;color:var(--cinder-text)}
+    .sesschip span{font:400 10.5px ui-monospace,monospace;color:var(--cinder-text-subtle)}
+    .spacer{flex:1}
+    .wk{display:flex;align-items:center;gap:8px;padding:5px 9px;border:1px solid var(--cinder-border);border-radius:8px;background:var(--cinder-surface-raised)}
+    .wk b{font:600 11.5px system-ui;color:var(--cinder-text)}
+    .wk span{font:500 10px ui-monospace,monospace;color:var(--cinder-text-subtle)}
+    .uth{display:flex;align-items:center;gap:9px}
+    .uth-l{display:flex;flex-direction:column;align-items:flex-end;line-height:1.2}
+    .uth-l b{font:600 11.5px system-ui}
+    .uth-l span{font:400 9.5px system-ui;color:var(--cinder-text-subtle)}
+    .swt{width:34px;height:19px;border-radius:20px;position:relative;flex:none;transition:background .15s;background:var(--cinder-accent)}
+    .swt.off{background:var(--cinder-border-strong)}
+    .swt i{position:absolute;top:2px;width:15px;height:15px;border-radius:50%;background:#fff;transition:left .15s;left:17px;box-shadow:0 1px 2px rgba(0,0,0,.4)}
+    .swt.off i{left:2px}
+    .iconbtn{width:32px;height:32px;border-radius:8px;border:1px solid transparent;background:transparent;display:flex;align-items:center;justify-content:center;color:var(--cinder-text-muted);cursor:pointer}
+    .iconbtn:hover{background:var(--cinder-surface-hover);color:var(--cinder-text)}
+    .avatar{width:28px;height:28px;border-radius:50%;background:var(--cinder-accent);color:var(--cinder-accent-contrast);display:flex;align-items:center;justify-content:center;font:600 11px system-ui}
+
+    .body{flex:1;display:flex;min-height:0}
+    .rail{width:236px;flex:none;border-right:1px solid var(--cinder-border);background:var(--cinder-surface);display:flex;flex-direction:column;min-height:0}
+    .railtop{padding:12px 12px 0}
+    .railscroll{flex:1;overflow:auto;padding:6px 12px 12px}
+    .railhd{font:600 9.5px system-ui;letter-spacing:.1em;text-transform:uppercase;color:var(--cinder-text-subtle);padding:0 6px;margin:16px 0 7px;display:flex;align-items:center;justify-content:space-between}
+    .sess{display:flex;gap:9px;padding:9px;border-radius:9px;cursor:pointer;border:1px solid transparent;align-items:flex-start}
+    .sess:hover{background:var(--cinder-surface-hover)}
+    .sess.active{background:var(--cinder-surface-inset);border-color:var(--cinder-border)}
+    .sess .sd{margin-top:5px}
+    .sess-t{font:600 12.5px system-ui;color:var(--cinder-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .sess-m{font:400 10.5px ui-monospace,monospace;color:var(--cinder-text-subtle);margin-top:2px}
+    .nav{display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:8px;font:500 13px system-ui;color:var(--cinder-text-muted);cursor:pointer;border:1px solid transparent}
+    .nav:hover{background:var(--cinder-surface-hover);color:var(--cinder-text)}
+    .nav.active{background:var(--cinder-surface-inset);color:var(--cinder-text);border-color:var(--cinder-border)}
+    .nav .ic{width:17px;height:17px;flex:none;color:var(--cinder-text-subtle)}
+    .nav.active .ic{color:var(--cinder-accent-text)}
+    .nav .ct{margin-left:auto;font:600 10px ui-monospace,monospace;background:var(--cinder-color-warning-bg);color:var(--cinder-color-warning-fg);padding:1px 6px;border-radius:10px;border:1px solid var(--cinder-color-warning-border)}
+    .railfoot{flex:none;border-top:1px solid var(--cinder-border);padding:10px 14px;display:flex;align-items:center;gap:9px}
+
+    .main{flex:1;display:flex;flex-direction:column;min-width:0}
+    .pane{flex:1;display:flex;flex-direction:column;min-width:0}
+    .panehd{height:44px;flex:none;display:flex;align-items:center;gap:9px;padding:0 14px;border-bottom:1px solid var(--cinder-border)}
+    .panehd-t{font:600 10.5px system-ui;letter-spacing:.08em;text-transform:uppercase;color:var(--cinder-text-subtle)}
+    .ic{width:16px;height:16px}
+    lucide-icon{display:inline-flex;align-items:center;justify-content:center;line-height:0}
+
+    .lns{font:600 10.5px ui-monospace,monospace;color:var(--cinder-accent-text);background:var(--cinder-surface-inset);border:1px solid var(--cinder-border-muted);padding:2px 7px;border-radius:5px;display:inline-flex;gap:5px;align-items:center;white-space:nowrap}
+    .lnsrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+
+    .ribbon{display:flex;flex:none;border-bottom:1px solid var(--cinder-border);background:linear-gradient(180deg,var(--cinder-surface-raised),var(--cinder-surface))}
+    .rib{flex:1;padding:10px 14px;border-right:1px solid var(--cinder-border-muted);display:flex;flex-direction:column;gap:2px}
+    .rib:last-child{border-right:none}
+    .rib-n{font:700 17px/1 system-ui;font-variant-numeric:tabular-nums}
+    .rib-l{font:500 10.5px system-ui;color:var(--cinder-text-subtle)}
+
+    h1.title{font:650 18px system-ui;letter-spacing:-.01em;margin:0}
+    .muted{color:var(--cinder-text-muted)}
+    .subtle{color:var(--cinder-text-subtle)}
+    .mono{font-family:ui-monospace,SFMono-Regular,monospace}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .spin{width:16px;height:16px;border:2px solid var(--cinder-border-strong);border-top-color:var(--cinder-accent-text);border-radius:50%;animation:spin .8s linear infinite;flex:none}
+    @keyframes shim{to{background-position:-200% 0}}
+    .shim{background:linear-gradient(90deg,var(--cinder-surface-inset) 25%,var(--cinder-surface-hover) 37%,var(--cinder-surface-inset) 63%);background-size:200% 100%;animation:shim 1.4s ease infinite;border-radius:6px}
+    .smat{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+    .scard{border:1px solid var(--cinder-border);border-radius:12px;background:var(--cinder-surface);overflow:hidden;display:flex;flex-direction:column}
+    .scard-hd{display:flex;align-items:center;gap:9px;padding:12px 14px;border-bottom:1px solid var(--cinder-border-muted)}
+    .scard-nm{font:600 12.5px system-ui}
+    .scard-bd{padding:13px 14px;flex:1;display:flex;flex-direction:column;gap:9px}
+    .scard-ds{font:400 12px/1.5 system-ui;color:var(--cinder-text-subtle)}
+    .phone{width:300px;flex:none;border:9px solid #05060a;border-radius:38px;overflow:hidden;background:var(--cinder-bg);box-shadow:0 24px 60px -28px rgba(0,0,0,.85)}
+    .phone-sb{height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;font:600 11px system-ui;color:var(--cinder-text)}
+    .pnotch{position:absolute;left:50%;transform:translateX(-50%);top:7px;width:96px;height:20px;background:#05060a;border-radius:0 0 12px 12px}
+  </style>
+</helmet>
+
+<div class="gal" data-theme="dark">
+
+  <div class="ghd-eyebrow">Stardust · console redesign</div>
+  <h1 class="ghd-title">A calm operations console for a durable agent.</h1>
+  <p class="ghd-sub">Stardust runs an AI agent on your laptop on a Temporal-native runtime. This redesign has two jobs that pull apart — let an operator <em>get work done</em>, and make the durable machinery <em>visible and trustworthy</em> — and resolves them so neither wins at the other's expense. Designed from first principles on the Cinder design system. Dark, desktop-first, engineer lens on. A static review gallery: nine surfaces, the durability layer, every run state, and responsive frames.</p>
+  <div class="ghd-meta">
+    <span><i class="dot" style="background:var(--cinder-success)"></i>Cinder design system · dark</span>
+    <span><i class="dot" style="background:var(--cinder-accent)"></i>Split working surface · 1a</span>
+    <span><i class="dot" style="background:var(--cinder-info)"></i>Under-the-hood lens · in place</span>
+    <span><i class="dot" style="background:var(--cinder-warning)"></i>Durability as co-headline</span>
+  </div>
+
+  <div class="princ">
+    <div class="pcard"><div class="pic"><lucide-icon name="gauge" class="ic"></lucide-icon></div><h4>Calm by default, dense on demand</h4><p>The operator's working surface stays quiet. Depth is always one switch — never a different product — away, and it layers in place.</p></div>
+    <div class="pcard"><div class="pic"><lucide-icon name="shield-check" class="ic"></lucide-icon></div><h4>Safety reads as clarity</h4><p>Risky actions are never hidden or rushed. The approver sees the exact command, file impact, and edited arguments before anything runs. Secrets show names only.</p></div>
+    <div class="pcard"><div class="pic"><lucide-icon name="life-buoy" class="ic"></lucide-icon></div><h4>Durability is a co-headline</h4><p>Retries, approval waits, and crash recovery are stated proudly in plain language. The lens swaps that for raw Temporal vocabulary to verify.</p></div>
+    <div class="pcard"><div class="pic"><lucide-icon name="database" class="ic"></lucide-icon></div><h4>Live is a view over durable truth</h4><p>Streaming is a fast preview; SQLite transcript is the truth. Every status claim is drillable, and a refresh re-renders identically.</p></div>
+  </div>
+
+  <!-- ===== INFORMATION ARCHITECTURE ===== -->
+  <div class="secthd"><span class="n">IA</span><span class="t">Information architecture</span><span class="c">One global rail, one split working surface per session, inspectors as slide-overs, and a durability layer that spans everything.</span></div>
+  <div style="margin-top:30px;background:var(--cinder-surface);border:1px solid var(--cinder-border);border-radius:14px;padding:26px;display:flex;gap:22px;align-items:stretch;overflow:auto">
+    <div style="flex:none;width:188px;border:1px solid var(--cinder-border);border-radius:11px;background:var(--cinder-surface-inset);padding:15px">
+      <div style="font:600 10px system-ui;letter-spacing:.09em;text-transform:uppercase;color:var(--cinder-text-subtle);margin-bottom:11px">Global rail</div>
+      <div style="display:flex;flex-direction:column;gap:7px;font:500 12.5px system-ui;color:var(--cinder-text-muted)">
+        <span style="display:flex;align-items:center;gap:8px"><lucide-icon name="messages-square" class="ic" style="width:15px;height:15px;color:var(--cinder-accent-text)"></lucide-icon>Sessions</span>
+        <span style="display:flex;align-items:center;gap:8px"><lucide-icon name="shield-alert" class="ic" style="width:15px;height:15px;color:var(--cinder-accent-text)"></lucide-icon>Approvals</span>
+        <span style="display:flex;align-items:center;gap:8px"><lucide-icon name="calendar-clock" class="ic" style="width:15px;height:15px;color:var(--cinder-accent-text)"></lucide-icon>Schedules</span>
+        <span style="display:flex;align-items:center;gap:8px"><lucide-icon name="brain" class="ic" style="width:15px;height:15px;color:var(--cinder-accent-text)"></lucide-icon>Memory</span>
+        <span style="display:flex;align-items:center;gap:8px"><lucide-icon name="settings" class="ic" style="width:15px;height:15px;color:var(--cinder-accent-text)"></lucide-icon>Settings</span>
+      </div>
+    </div>
+    <div style="flex:none;align-self:center;color:var(--cinder-text-subtle)"><lucide-icon name="chevron-right" class="ic" style="width:22px;height:22px"></lucide-icon></div>
+    <div style="flex:1;min-width:340px;border:1px solid var(--cinder-accent);border-radius:11px;background:var(--cinder-surface-raised);padding:15px">
+      <div style="font:600 10px system-ui;letter-spacing:.09em;text-transform:uppercase;color:var(--cinder-accent-text);margin-bottom:11px">Session workspace · the split working surface</div>
+      <div style="display:flex;gap:12px">
+        <div style="flex:1;border:1px dashed var(--cinder-border-strong);border-radius:9px;padding:13px"><div style="font:600 12.5px system-ui">Conversation</div><div style="font:400 11px system-ui;color:var(--cinder-text-subtle);margin-top:4px">task input · streaming output · tool cards · steer · interrupt</div></div>
+        <div style="flex:none;align-self:center;color:var(--cinder-text-subtle);font:600 13px system-ui">⇋</div>
+        <div style="flex:1;border:1px dashed var(--cinder-border-strong);border-radius:9px;padding:13px"><div style="font:600 12.5px system-ui">Run inspector</div><div style="font:400 11px system-ui;color:var(--cinder-text-subtle);margin-top:4px">live step timeline · subagents · retries · recovery</div></div>
+      </div>
+      <div style="margin-top:11px;border-top:1px dashed var(--cinder-border-muted);padding-top:11px;font:400 11px system-ui;color:var(--cinder-text-subtle)">Slide-over inspectors: <b style="color:var(--cinder-text-muted);font-weight:600">Approval · Memory · Workspace · Sandbox</b> — open over the timeline without moving the working surface.</div>
+    </div>
+    <div style="flex:none;align-self:center;color:var(--cinder-text-subtle)"><lucide-icon name="chevron-right" class="ic" style="width:22px;height:22px"></lucide-icon></div>
+    <div style="flex:none;width:182px;border:1px solid var(--cinder-color-info-border);border-radius:11px;background:var(--cinder-color-info-bg);padding:15px">
+      <div style="font:600 10px system-ui;letter-spacing:.09em;text-transform:uppercase;color:var(--cinder-color-info-fg);margin-bottom:11px">Durability layer</div>
+      <div style="display:flex;flex-direction:column;gap:7px;font:500 12px system-ui;color:var(--cinder-color-info-fg)">
+        <span>Durability ribbon</span><span>Crash recovery beat</span><span>Transcript provenance</span><span>Worker health</span>
+      </div>
+      <div style="margin-top:10px;font:400 10.5px system-ui;color:var(--cinder-color-info-fg);opacity:.85">spans every surface</div>
+    </div>
+  </div>
+
+  <!-- ===== 01 SESSIONS ===== -->
+  <div class="secthd"><span class="n">01</span><span class="t">Home · Sessions</span><span class="c">The first screen answers one question: what do you want the agent to work on — or pick up where you left off.</span></div>
+
+  <div class="scr">
+    <div class="scrlab"><span class="scrnum">01a</span><span class="scrname">Sessions — populated</span></div>
+    <p class="scrcap">Resumable threads, each with a real title and short id. Status is text + dot, never color alone. A session waiting on you surfaces its pending approval right in the list and in the global rail — attention without a modal.</p>
+    <div class="frame" style="width:1360px">
+      <div class="app">
+        <div class="top">
+          <span class="mark">STARDUST</span>
+          <span class="spacer"></span>
+          <div class="wk"><i class="dot" style="background:var(--cinder-success)"></i><b>Worker · live</b><span>2 workers · agent-main</span></div>
+          <div class="uth"><div class="uth-l"><b>Under the hood</b><span>Show Temporal internals</span></div><div class="swt"><i></i></div></div>
+          <div class="iconbtn"><lucide-icon name="settings" class="ic"></lucide-icon></div>
+          
+        </div>
+        <div class="body">
+          <div class="rail">
+            <div class="railtop">
+              <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="primary" size="sm" full-width="true" hint-size="100%,34px"><span style="display:inline-flex;align-items:center;gap:7px"><lucide-icon name="plus" class="ic" style="width:15px;height:15px"></lucide-icon>New session</span></x-import>
+            </div>
+            <div class="railscroll">
+              <div class="railhd">Sessions <span class="subtle mono" style="font-size:9px">3</span></div>
+              <sc-for list="{{ sessions }}" as="s" hint-placeholder-count="3">
+                <div class="sess">
+                  <span class="sd dot" style="background:{{ s.color }}"></span>
+                  <div style="min-width:0;flex:1">
+                    <div class="sess-t">{{ s.name }}</div>
+                    <div class="sess-m">{{ s.meta }}</div>
+                  </div>
+                </div>
+              </sc-for>
+              <div class="railhd" style="margin-top:18px">Global</div>
+              <div class="nav"><lucide-icon name="shield-alert" class="ic"></lucide-icon>Approvals<span class="ct">1</span></div>
+              <div class="nav"><lucide-icon name="calendar-clock" class="ic"></lucide-icon>Schedules</div>
+              <div class="nav"><lucide-icon name="brain" class="ic"></lucide-icon>Memory</div>
+              <div class="nav"><lucide-icon name="settings" class="ic"></lucide-icon>Settings</div>
+            </div>
+            <div class="railfoot">
+              <i class="dot" style="background:var(--cinder-success)"></i>
+              <div style="line-height:1.3"><div style="font:600 11px system-ui">Temporal dev server</div><div class="subtle mono" style="font-size:9.5px">localhost:7776 · default namespace</div></div>
+            </div>
+          </div>
+
+          <div class="main">
+            <div style="flex:none;padding:20px 24px 0;display:flex;align-items:center;gap:14px">
+              <h1 class="title" style="font-size:21px">Sessions</h1>
+              <span class="subtle" style="font:500 12px system-ui">3 active · 1 waiting on you</span>
+              <span class="spacer"></span>
+              <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="primary" size="sm" hint-size="auto,34px"><span style="display:inline-flex;align-items:center;gap:7px"><lucide-icon name="plus" class="ic" style="width:15px;height:15px"></lucide-icon>New session</span></x-import>
+            </div>
+            <div style="flex:none;padding:16px 24px 4px">
+              <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.FacetedFilterBar" aria-label="Filter sessions" search-placeholder="Search sessions…" dc-props="{{ sessionFacets }}" hint-size="100%,44px"></x-import>
+            </div>
+            <div style="flex:1;overflow:auto;padding:12px 24px 24px;display:flex;flex-direction:column;gap:12px">
+              <sc-for list="{{ sessionCards }}" as="c" hint-placeholder-count="4">
+                <div style="border:1px solid {{ c.border }};border-radius:12px;background:var(--cinder-surface);padding:16px 18px;display:flex;align-items:center;gap:18px">
+                  <span class="dot" style="background:{{ c.color }};width:9px;height:9px"></span>
+                  <div style="min-width:0;flex:1">
+                    <div style="display:flex;align-items:center;gap:10px"><span style="font:600 14.5px system-ui">{{ c.name }}</span><span class="subtle mono" style="font-size:11px">{{ c.id }}</span></div>
+                    <div class="muted" style="font:400 12.5px system-ui;margin-top:4px">{{ c.summary }}</div>
+                  </div>
+                  <div class="lnsrow" style="flex:none">{{ c.engChips }}</div>
+                  <div style="flex:none;text-align:right;min-width:120px">
+                    <div>{{ c.statusBadge }}</div>
+                    <div class="subtle mono" style="font-size:10.5px;margin-top:5px">{{ c.ago }}</div>
+                  </div>
+                  <div style="flex:none">{{ c.resumeBtn }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="scr">
+    <div class="scrlab"><span class="scrnum" id="01b">01b</span><span class="scrname">Sessions — empty (first run)</span></div>
+    <p class="scrcap">No sessions yet, so the first screen <b>is</b> the task box — not an empty list. One calm prompt, a few concrete starting points, and a quiet promise that the work is durable: close the tab and come back.</p>
+    <div class="frame" style="width:1360px">
+      <div class="app">
+        <div class="top">
+          <span class="mark">STARDUST</span>
+          <span class="spacer"></span>
+          <div class="wk"><i class="dot" style="background:var(--cinder-success)"></i><b>Worker · live</b><span>2 workers · agent-main</span></div>
+          <div class="uth"><div class="uth-l"><b>Under the hood</b><span>Show Temporal internals</span></div><div class="swt"><i></i></div></div>
+          <div class="iconbtn"><lucide-icon name="settings" class="ic"></lucide-icon></div>
+          
+        </div>
+        <div class="body">
+          <div class="rail">
+            <div class="railtop">
+              <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="primary" size="sm" full-width="true" hint-size="100%,34px"><span style="display:inline-flex;align-items:center;gap:7px"><lucide-icon name="plus" class="ic" style="width:15px;height:15px"></lucide-icon>New session</span></x-import>
+            </div>
+            <div class="railscroll">
+              <div class="railhd">Sessions <span class="subtle mono" style="font-size:9px">0</span></div>
+              <div style="border:1px dashed var(--cinder-border);border-radius:9px;padding:14px;text-align:center;font:400 11.5px/1.5 system-ui;color:var(--cinder-text-subtle)">No sessions yet</div>
+              <div class="railhd" style="margin-top:18px">Global</div>
+              <div class="nav"><lucide-icon name="shield-alert" class="ic"></lucide-icon>Approvals</div>
+              <div class="nav"><lucide-icon name="calendar-clock" class="ic"></lucide-icon>Schedules</div>
+              <div class="nav"><lucide-icon name="brain" class="ic"></lucide-icon>Memory</div>
+              <div class="nav"><lucide-icon name="settings" class="ic"></lucide-icon>Settings</div>
+            </div>
+            <div class="railfoot">
+              <i class="dot" style="background:var(--cinder-success)"></i>
+              <div style="line-height:1.3"><div style="font:600 11px system-ui">Temporal dev server</div><div class="subtle mono" style="font-size:9.5px">localhost:7776 · default namespace</div></div>
+            </div>
+          </div>
+          <div class="main" style="align-items:center;justify-content:center;padding:40px">
+            <div style="width:560px;max-width:100%;text-align:center">
+              <div style="width:48px;height:48px;border-radius:12px;background:var(--cinder-surface-inset);border:1px solid var(--cinder-border);display:flex;align-items:center;justify-content:center;margin:0 auto;color:var(--cinder-accent-text)"><lucide-icon name="sparkles" class="ic" style="width:23px;height:23px"></lucide-icon></div>
+              <h2 style="font:650 24px/1.2 system-ui;letter-spacing:-.01em;margin:18px 0 0">What should the agent work on?</h2>
+              <p class="muted" style="font:400 14px/1.6 system-ui;margin:10px 0 0">Describe a task. Stardust opens a session, streams its work, and pauses for your approval before anything risky. It runs on a durable runtime — close this tab and pick the run back up exactly where it was.</p>
+              <div style="margin-top:22px;text-align:left">
+                <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Textarea" placeholder="e.g. Refactor the auth guards in src/lib/server and run the test suite" rows="3" hint-size="100%,92px"></x-import>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;margin-top:14px">
+                <span class="spacer"></span>
+                <span class="subtle" style="font:500 11px system-ui"><span class="mono">Enter</span> to start</span>
+                <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="primary" size="md" hint-size="auto,40px"><span style="display:inline-flex;align-items:center;gap:7px">Start session<lucide-icon name="arrow-up" class="ic" style="width:15px;height:15px"></lucide-icon></span></x-import>
+              </div>
+              <div style="margin-top:26px;display:flex;flex-direction:column;gap:8px">
+                <div class="subtle" style="font:600 10px system-ui;letter-spacing:.09em;text-transform:uppercase;text-align:left">Or start from</div>
+                <sc-for list="{{ examplePrompts }}" as="p" hint-placeholder-count="3">
+                  <div style="display:flex;align-items:center;gap:11px;border:1px solid var(--cinder-border);border-radius:10px;background:var(--cinder-surface);padding:12px 14px;cursor:pointer">
+                    <lucide-icon name="{{ p.icon }}" class="ic" style="width:16px;height:16px;color:var(--cinder-accent-text);flex:none"></lucide-icon>
+                    <span style="font:500 13px system-ui">{{ p.text }}</span>
+                    <span class="spacer"></span>
+                    <lucide-icon name="arrow-up-right" class="ic" style="width:15px;height:15px;color:var(--cinder-text-subtle)"></lucide-icon>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 02 CONVERSATION / SPLIT WORKING SURFACE ===== -->
+  <div class="secthd"><span class="n">02</span><span class="t">Conversation · the split working surface</span><span class="c">Two equals: what the agent says on the left, what it is actually doing on the right.</span></div>
+
+  <div class="scr">
+    <div class="scrlab"><span class="scrnum" id="02">02</span><span class="scrname">Session workspace — streaming</span></div>
+    <p class="scrcap">The agent is mid-run on <b>Refactor auth guards</b>. The left pane streams reasoning and tool-call cards; the right pane is the live run timeline with the durability ribbon on top. The composer stays live while it runs — <b>steer or interrupt without stopping the world</b>.</p>
+    <div class="frame" style="width:1360px">
+      <div class="app">
+        <div class="top">
+          <span class="mark">STARDUST</span>
+          <span class="vr"></span>
+          <div class="sesschip"><b>Refactor auth guards</b><span>ses_7af3 · running</span></div>
+          <span class="spacer"></span>
+          <div class="wk"><i class="dot" style="background:var(--cinder-success)"></i><b>Worker · live</b><span>2 workers · agent-main</span></div>
+          <div class="uth"><div class="uth-l"><b>Under the hood</b><span>Show Temporal internals</span></div><div class="swt"><i></i></div></div>
+          <div class="iconbtn"><lucide-icon name="settings" class="ic"></lucide-icon></div>
+          
+        </div>
+        <div class="body">
+          <div class="rail">
+            <div class="railtop">
+              <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="primary" size="sm" full-width="true" hint-size="100%,34px"><span style="display:inline-flex;align-items:center;gap:7px"><lucide-icon name="plus" class="ic" style="width:15px;height:15px"></lucide-icon>New session</span></x-import>
+            </div>
+            <div class="railscroll">
+              <div class="railhd">Sessions <span class="subtle mono" style="font-size:9px">3</span></div>
+              <div class="sess active"><span class="sd dot" style="background:var(--cinder-success)"></span><div style="min-width:0;flex:1"><div class="sess-t">Refactor auth guards</div><div class="sess-m">ses_7af3 · running · 2m</div></div></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-warning)"></span><div style="min-width:0;flex:1"><div class="sess-t">Migrate billing tables</div><div class="sess-m">ses_b0d4 · approval · 4m</div></div></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-text-disabled)"></span><div style="min-width:0;flex:1"><div class="sess-t">Nightly eval sweep</div><div class="sess-m">ses_2c91 · idle · 1h</div></div></div>
+              <div class="railhd" style="margin-top:18px">Global</div>
+              <div class="nav"><lucide-icon name="shield-alert" class="ic"></lucide-icon>Approvals<span class="ct">1</span></div>
+              <div class="nav"><lucide-icon name="calendar-clock" class="ic"></lucide-icon>Schedules</div>
+              <div class="nav"><lucide-icon name="brain" class="ic"></lucide-icon>Memory</div>
+              <div class="nav"><lucide-icon name="settings" class="ic"></lucide-icon>Settings</div>
+            </div>
+            <div class="railfoot">
+              <i class="dot" style="background:var(--cinder-success)"></i>
+              <div style="line-height:1.3"><div style="font:600 11px system-ui">Temporal dev server</div><div class="subtle mono" style="font-size:9.5px" data-comment-anchor="716ddf4470-div">localhost:7776 · default namespace</div></div>
+            </div>
+          </div>
+
+          <div class="main">
+            <div style="flex:1;display:flex;min-height:0">
+              <div class="pane" style="border-right:1px solid var(--cinder-border)">
+                <div class="panehd"><lucide-icon name="messages-square" class="ic" style="color:var(--cinder-text-subtle)"></lucide-icon><span class="panehd-t">Conversation</span><span class="spacer"></span><span class="lns">turn 1 · 3 tool calls</span></div>
+                <div style="flex:1;min-height:0">
+                  <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Chat" dc-props="{{ convo }}" hint-size="100%,100%"></x-import>
+                </div>
+              </div>
+              <div class="pane" style="flex:none;width:556px">
+                <div class="panehd"><lucide-icon name="activity" class="ic" style="color:var(--cinder-text-subtle)"></lucide-icon><span class="panehd-t">Run inspector</span><span class="spacer"></span><span class="lns">wf_7af3</span><div class="iconbtn"><lucide-icon name="maximize-2" class="ic" style="width:15px;height:15px"></lucide-icon></div></div>
+                <div class="ribbon">
+                  <div class="rib"><span class="rib-n">0</span><span class="rib-l">events lost</span></div>
+                  <div class="rib"><span class="rib-n" style="color:var(--cinder-success)">1</span><span class="rib-l">auto-retry · no action</span></div>
+                  <div class="rib"><span class="rib-n">0</span><span class="rib-l">worker crashes</span></div>
+                  <div class="rib"><span class="rib-n" style="color:var(--cinder-accent-text)">#244</span><span class="rib-l">last durable event</span></div>
+                </div>
+                <div style="flex:none;padding:8px 14px;border-bottom:1px solid var(--cinder-border-muted);display:flex;gap:6px;flex-wrap:wrap">
+                  <span class="lns">activity runTests</span><span class="lns">queue agent-main</span><span class="lns">attempt 1</span><span class="lns">worker-1</span>
+                </div>
+                <div style="flex:1;overflow:auto;padding:16px 14px">
+                  <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.RunStepTimeline" dc-props="{{ refactorSteps }}" hint-size="100%,400px"></x-import>
+                </div>
+                <div style="flex:none;border-top:1px solid var(--cinder-border);padding:10px 14px;display:flex;gap:10px;align-items:center">
+                  <i class="dot" style="background:var(--cinder-info)"></i><span class="subtle" style="font:500 11.5px system-ui">Streaming live · steer or interrupt anytime</span><span class="spacer"></span>
+                  <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="soft-danger" size="sm" hint-size="auto,32px"><span style="display:inline-flex;align-items:center;gap:6px"><lucide-icon name="square" class="ic" style="width:13px;height:13px"></lucide-icon>Interrupt</span></x-import>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 03 RUN INSPECTOR (HERO) ===== -->
+  <div class="secthd"><span class="n">03</span><span class="t">Run inspector · the hero surface</span><span class="c">Maximize the run pane and the timeline becomes the whole stage: every step drillable to its durable truth.</span></div>
+
+  <div class="scr">
+    <div class="scrlab"><span class="scrnum" id="03a">03a</span><span class="scrname">Run inspector — timeline + step detail</span></div>
+    <p class="scrcap">An ordered execution rail of steps, durations, retries, and nested subagent lanes. Selecting a step opens its <b>durable input and result</b> on the right — the live view is just a preview of what SQLite already holds. A retry that healed itself is shown as a fact, not an alarm.</p>
+    <div class="frame" style="width:1360px">
+      <div class="app">
+        <div class="top">
+          <span class="mark">STARDUST</span>
+          <span class="vr"></span>
+          <div class="sesschip"><b>Refactor auth guards</b><span>ses_7af3 · running</span></div>
+          <span class="spacer"></span>
+          <div class="wk"><i class="dot" style="background:var(--cinder-success)"></i><b>Worker · live</b><span>2 workers · agent-main</span></div>
+          <div class="uth"><div class="uth-l"><b>Under the hood</b><span>Show Temporal internals</span></div><div class="swt"><i></i></div></div>
+          <div class="iconbtn"><lucide-icon name="settings" class="ic"></lucide-icon></div>
+          
+        </div>
+        <div class="body">
+          <div class="rail">
+            <div class="railtop">
+              <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="primary" size="sm" full-width="true" hint-size="100%,34px"><span style="display:inline-flex;align-items:center;gap:7px"><lucide-icon name="plus" class="ic" style="width:15px;height:15px"></lucide-icon>New session</span></x-import>
+            </div>
+            <div class="railscroll">
+              <div class="railhd">Sessions <span class="subtle mono" style="font-size:9px">3</span></div>
+              <div class="sess active"><span class="sd dot" style="background:var(--cinder-success)"></span><div style="min-width:0;flex:1"><div class="sess-t">Refactor auth guards</div><div class="sess-m">ses_7af3 · running · 2m</div></div></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-warning)"></span><div style="min-width:0;flex:1"><div class="sess-t">Migrate billing tables</div><div class="sess-m">ses_b0d4 · approval · 4m</div></div></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-text-disabled)"></span><div style="min-width:0;flex:1"><div class="sess-t">Nightly eval sweep</div><div class="sess-m">ses_2c91 · idle · 1h</div></div></div>
+              <div class="railhd" style="margin-top:18px">Global</div>
+              <div class="nav"><lucide-icon name="shield-alert" class="ic"></lucide-icon>Approvals<span class="ct">1</span></div>
+              <div class="nav"><lucide-icon name="calendar-clock" class="ic"></lucide-icon>Schedules</div>
+              <div class="nav"><lucide-icon name="brain" class="ic"></lucide-icon>Memory</div>
+              <div class="nav"><lucide-icon name="settings" class="ic"></lucide-icon>Settings</div>
+            </div>
+            <div class="railfoot">
+              <i class="dot" style="background:var(--cinder-success)"></i>
+              <div style="line-height:1.3"><div style="font:600 11px system-ui">Temporal dev server</div><div class="subtle mono" style="font-size:9.5px">localhost:7776 · default namespace</div></div>
+            </div>
+          </div>
+
+          <div class="main">
+            <div style="flex:none;padding:15px 20px;display:flex;align-items:center;gap:16px;border-bottom:1px solid var(--cinder-border)">
+              <div style="min-width:0">
+                <div style="display:flex;align-items:center;gap:10px"><h1 class="title">Run inspector</h1><span class="cinder-badge" data-cinder-variant="info" data-cinder-size="md">Running</span></div>
+                <div class="subtle mono" style="font-size:11px;margin-top:4px">Refactor auth guards · started 14:02:01 · 44s elapsed</div>
+              </div>
+              <div class="lnsrow" style="margin-left:4px"><span class="lns">workflow agentSession</span><span class="lns">run wf_7af3</span><span class="lns">queue agent-main</span></div>
+              <span class="spacer"></span>
+              <div style="min-width:172px">
+                <div style="display:flex;justify-content:space-between;font:600 10.5px system-ui"><span class="subtle">Budget</span><span class="mono">$0.42 / $2.00</span></div>
+                <div style="height:6px;border-radius:3px;background:var(--cinder-surface-inset);margin-top:5px;overflow:hidden"><div style="width:21%;height:100%;background:var(--cinder-accent)"></div></div>
+                <div class="subtle mono" style="font-size:9.5px;margin-top:4px">48k / 200k tokens · 6 model calls</div>
+              </div>
+              <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="secondary" size="sm" hint-size="auto,34px"><span style="display:inline-flex;align-items:center;gap:7px"><lucide-icon name="external-link" class="ic" style="width:14px;height:14px"></lucide-icon>Open in Temporal Web</span></x-import>
+            </div>
+
+            <div class="ribbon">
+              <div class="rib"><span class="rib-n">0</span><span class="rib-l">events lost</span></div>
+              <div class="rib"><span class="rib-n" style="color:var(--cinder-success)">1</span><span class="rib-l">auto-retry · no action needed</span></div>
+              <div class="rib"><span class="rib-n">0</span><span class="rib-l">worker crashes</span></div>
+              <div class="rib"><span class="rib-n">0</span><span class="rib-l">stream reconnects</span></div>
+              <div class="rib"><span class="rib-n" style="color:var(--cinder-accent-text)">#247</span><span class="rib-l">last durable event</span></div>
+            </div>
+
+            <div style="flex:1;display:flex;min-height:0">
+              <div style="flex:1;min-width:0;overflow:auto;padding:20px 22px">
+                <div class="subtle" style="font:600 10px system-ui;letter-spacing:.09em;text-transform:uppercase;margin-bottom:14px">Execution timeline · 6 steps</div>
+                <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.RunStepTimeline" dc-props="{{ inspectorSteps }}" hint-size="100%,440px"></x-import>
+              </div>
+              <div style="width:496px;flex:none;border-left:1px solid var(--cinder-border);display:flex;flex-direction:column;min-height:0;background:var(--cinder-surface)">
+                <div class="panehd"><lucide-icon name="crosshair" class="ic" style="color:var(--cinder-accent-text)"></lucide-icon><span class="panehd-t">Selected step</span><span class="spacer"></span><span class="lns">activity runTests</span></div>
+                <div style="overflow:auto;padding:16px;display:flex;flex-direction:column;gap:16px">
+                  <div>
+                    <div style="display:flex;align-items:center;gap:9px"><span style="font:600 15px system-ui">Run test suite</span><span class="cinder-badge" data-cinder-variant="success" data-cinder-size="sm">Succeeded</span><span class="cinder-badge" data-cinder-variant="neutral" data-cinder-size="sm" style="font-family:ui-monospace,monospace">attempt 2 / 2</span></div>
+                    <div class="subtle mono" style="font-size:11px;margin-top:6px">18.2s · worker-1 · runTests@agent-main</div>
+                  </div>
+                  <div style="border:1px solid var(--cinder-color-warning-border);background:var(--cinder-color-warning-bg);border-radius:9px;padding:11px 13px">
+                    <div style="display:flex;align-items:center;gap:7px;font:600 11.5px system-ui;color:var(--cinder-color-warning-fg)"><lucide-icon name="rotate-cw" class="ic" style="width:14px;height:14px"></lucide-icon>Recovered without your help</div>
+                    <div style="font:400 11.5px/1.5 system-ui;color:var(--cinder-color-warning-fg);opacity:.92;margin-top:5px">Attempt 1 failed — timeout reaching the test DB. Temporal applied a 5s backoff and retried on the same worker. Attempt 2 passed. No state was lost.</div>
+                  </div>
+                  <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.PayloadInspector" dc-props="{{ stepInput }}" hint-size="100%,150px"></x-import>
+                  <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.PayloadInspector" dc-props="{{ stepOutput }}" hint-size="100%,150px"></x-import>
+                  <div>
+                    <div class="subtle" style="font:600 10px system-ui;letter-spacing:.09em;text-transform:uppercase;margin-bottom:8px">Timers</div>
+                    <div style="display:flex;flex-direction:column;gap:6px;font:500 11.5px ui-monospace,monospace;color:var(--cinder-text-muted)">
+                      <div style="display:flex;justify-content:space-between"><span>heartbeat timeout</span><span class="subtle">30s</span></div>
+                      <div style="display:flex;justify-content:space-between"><span>schedule-to-close</span><span class="subtle">5m</span></div>
+                      <div style="display:flex;justify-content:space-between"><span>retry backoff (used)</span><span class="subtle">5s · 1×</span></div>
+                    </div>
+                  </div>
+                  <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="ghost" size="sm" full-width="true" hint-size="100%,34px"><span style="display:inline-flex;align-items:center;gap:7px"><lucide-icon name="external-link" class="ic" style="width:14px;height:14px"></lucide-icon>View this activity in Temporal Web</span></x-import>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="scr">
+    <div class="scrlab"><span class="scrnum">03b</span><span class="scrname">Engineer lens — workflow event history</span></div>
+    <p class="scrcap">With <b>Under the hood</b> on, the inspector exposes the raw Temporal event history beneath the steps: scheduled / completed / failed activities, the retry, a reconnect-replay boundary that proves no events were dropped, and an advisory sequence-gap marker. Same surface, deeper truth — never a second product.</p>
+    <div class="frame" style="width:1100px">
+      <div style="background:var(--cinder-bg);padding:18px 20px;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <lucide-icon name="list-tree" class="ic" style="width:18px;height:18px;color:var(--cinder-accent-text)"></lucide-icon>
+          <div><div style="font:600 13.5px system-ui">Workflow event history</div><div class="subtle mono" style="font-size:11px;margin-top:2px">agentSession · wf_7af3 · namespace default</div></div>
+          <span class="spacer"></span>
+          <span class="lns">canonical · from SQLite + Temporal</span>
+        </div>
+        <div style="height:392px;display:flex">
+          <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.EventStreamViewer" dc-props="{{ eventHistory }}" hint-size="100%,100%" style="flex:1;min-width:0"></x-import>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 04 APPROVAL CENTER ===== -->
+  <div class="secthd"><span class="n">04</span><span class="t">Approval · the durable human gate</span><span class="c">A risky tool call pauses on a durable wait. The human sees exactly what will run — and what they changed — before it does.</span></div>
+
+  <div class="scr">
+    <div class="scrlab"><span class="scrnum" id="04a">04a</span><span class="scrname">In-session — a pending approval, without a scary modal</span></div>
+    <p class="scrcap">The run reaches a durable approval gate and pauses. Instead of a blocking modal, an amber attention bar appears and the approval <b>slides in over the run pane</b> — the rest of the console stays visible and usable. The timeline marks the step <span class="mono">waiting&nbsp;approval</span>; the wait survives a refresh.</p>
+    <div class="frame" style="width:1360px">
+      <div class="app">
+        <div class="top">
+          <span class="mark">STARDUST</span>
+          <span class="vr"></span>
+          <div class="sesschip"><b>Migrate billing tables</b><span>ses_b0d4 · waiting approval</span></div>
+          <span class="spacer"></span>
+          <div class="wk"><i class="dot" style="background:var(--cinder-success)"></i><b>Worker · live</b><span>2 workers · agent-main</span></div>
+          <div class="uth"><div class="uth-l"><b>Under the hood</b><span>Show Temporal internals</span></div><div class="swt"><i></i></div></div>
+          <div class="iconbtn"><lucide-icon name="settings" class="ic"></lucide-icon></div>
+          
+        </div>
+        <div class="body">
+          <div class="rail">
+            <div class="railtop">
+              <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="primary" size="sm" full-width="true" hint-size="100%,34px"><span style="display:inline-flex;align-items:center;gap:7px"><lucide-icon name="plus" class="ic" style="width:15px;height:15px"></lucide-icon>New session</span></x-import>
+            </div>
+            <div class="railscroll">
+              <div class="railhd">Sessions <span class="subtle mono" style="font-size:9px">3</span></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-success)"></span><div style="min-width:0;flex:1"><div class="sess-t">Refactor auth guards</div><div class="sess-m">ses_7af3 · running · 2m</div></div></div>
+              <div class="sess active"><span class="sd dot" style="background:var(--cinder-warning)"></span><div style="min-width:0;flex:1"><div class="sess-t">Migrate billing tables</div><div class="sess-m">ses_b0d4 · approval · 4m</div></div></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-text-disabled)"></span><div style="min-width:0;flex:1"><div class="sess-t">Nightly eval sweep</div><div class="sess-m">ses_2c91 · idle · 1h</div></div></div>
+              <div class="railhd" style="margin-top:18px">Global</div>
+              <div class="nav"><lucide-icon name="shield-alert" class="ic"></lucide-icon>Approvals<span class="ct">1</span></div>
+              <div class="nav"><lucide-icon name="calendar-clock" class="ic"></lucide-icon>Schedules</div>
+              <div class="nav"><lucide-icon name="brain" class="ic"></lucide-icon>Memory</div>
+              <div class="nav"><lucide-icon name="settings" class="ic"></lucide-icon>Settings</div>
+            </div>
+            <div class="railfoot">
+              <i class="dot" style="background:var(--cinder-success)"></i>
+              <div style="line-height:1.3"><div style="font:600 11px system-ui">Temporal dev server</div><div class="subtle mono" style="font-size:9.5px">localhost:7776 · default namespace</div></div>
+            </div>
+          </div>
+
+          <div class="main">
+            <div style="flex:none;display:flex;align-items:center;gap:12px;padding:11px 18px;background:var(--cinder-color-warning-bg);border-bottom:1px solid var(--cinder-color-warning-border)">
+              <lucide-icon name="shield-alert" class="ic" style="width:18px;height:18px;color:var(--cinder-color-warning-fg)"></lucide-icon>
+              <div style="line-height:1.35"><div style="font:600 12.5px system-ui;color:var(--cinder-color-warning-fg)">The agent is waiting for your approval to continue</div><div style="font:400 11px system-ui;color:var(--cinder-color-warning-fg);opacity:.9">High-risk command on session ses_b0d4 · the run is paused on a durable wait, nothing has executed</div></div>
+              <span class="spacer"></span>
+              <span class="lns">signal: human_approval · idem_9f3a21</span>
+            </div>
+            <div style="flex:1;display:flex;min-height:0;position:relative">
+              <div style="flex:1;min-width:0;overflow:hidden;padding:20px 22px;filter:saturate(.7);opacity:.55">
+                <div class="subtle" style="font:600 10px system-ui;letter-spacing:.09em;text-transform:uppercase;margin-bottom:14px">Execution timeline · paused</div>
+                <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.RunStepTimeline" dc-props="{{ approvalSteps }}" hint-size="100%,300px"></x-import>
+              </div>
+              <div style="position:absolute;inset:0;background:var(--cinder-overlay-backdrop)"></div>
+              <div style="position:absolute;top:0;right:0;bottom:0;width:512px;background:var(--cinder-surface);border-left:1px solid var(--cinder-border);box-shadow:-12px 0 40px -16px rgba(0,0,0,.7);display:flex;flex-direction:column">
+                <div class="panehd" style="background:var(--cinder-surface-raised)"><lucide-icon name="shield-alert" class="ic" style="color:var(--cinder-color-warning-fg)"></lucide-icon><span class="panehd-t">Approval required</span><span class="spacer"></span><div class="iconbtn"><lucide-icon name="x" class="ic" style="width:15px;height:15px"></lucide-icon></div></div>
+                <div style="flex:1;overflow:auto;padding:16px">
+                  <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.ApprovalCard" dc-props="{{ billingApproval }}" hint-size="100%,560px"></x-import>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="scr">
+    <div class="scrlab"><span class="scrnum">04b</span><span class="scrname">Approval center — and what "Approve with edits" actually runs</span></div>
+    <p class="scrcap">The global queue of everything waiting on you. The card carries the full durable context: policy version, idempotency key, snapshot, sandbox, working directory, expiry countdown, and environment <b>names only — never values</b>. Choosing <b>Approve with edits</b> makes the executed command unmistakable: the agent runs your edited version verbatim, and both are written to the audit log.</p>
+    <div class="frame" style="width:1360px">
+      <div class="app">
+        <div class="top">
+          <span class="mark">STARDUST</span>
+          <span class="vr"></span>
+          <span class="subtle" style="font:500 12px system-ui">Approvals</span>
+          <span class="spacer"></span>
+          <div class="wk"><i class="dot" style="background:var(--cinder-success)"></i><b>Worker · live</b><span>2 workers · agent-main</span></div>
+          <div class="uth"><div class="uth-l"><b>Under the hood</b><span data-comment-anchor="faaabdfed9-span">Show Temporal internals</span></div><div class="swt"><i></i></div></div>
+          <div class="iconbtn"><lucide-icon name="settings" class="ic"></lucide-icon></div>
+          
+        </div>
+        <div class="body">
+          <div class="rail">
+            <div class="railtop">
+              <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="primary" size="sm" full-width="true" hint-size="100%,34px"><span style="display:inline-flex;align-items:center;gap:7px"><lucide-icon name="plus" class="ic" style="width:15px;height:15px"></lucide-icon>New session</span></x-import>
+            </div>
+            <div class="railscroll">
+              <div class="railhd">Sessions <span class="subtle mono" style="font-size:9px">3</span></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-success)"></span><div style="min-width:0;flex:1"><div class="sess-t">Refactor auth guards</div><div class="sess-m">ses_7af3 · running · 2m</div></div></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-warning)"></span><div style="min-width:0;flex:1"><div class="sess-t">Migrate billing tables</div><div class="sess-m">ses_b0d4 · approval · 4m</div></div></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-text-disabled)"></span><div style="min-width:0;flex:1"><div class="sess-t">Nightly eval sweep</div><div class="sess-m">ses_2c91 · idle · 1h</div></div></div>
+              <div class="railhd" style="margin-top:18px">Global</div>
+              <div class="nav active"><lucide-icon name="shield-alert" class="ic"></lucide-icon>Approvals<span class="ct">1</span></div>
+              <div class="nav"><lucide-icon name="calendar-clock" class="ic"></lucide-icon>Schedules</div>
+              <div class="nav"><lucide-icon name="brain" class="ic"></lucide-icon>Memory</div>
+              <div class="nav"><lucide-icon name="settings" class="ic"></lucide-icon>Settings</div>
+            </div>
+            <div class="railfoot">
+              <i class="dot" style="background:var(--cinder-success)"></i>
+              <div style="line-height:1.3"><div style="font:600 11px system-ui">Temporal dev server</div><div class="subtle mono" style="font-size:9.5px">localhost:7776 · default namespace</div></div>
+            </div>
+          </div>
+
+          <div class="main">
+            <div style="flex:none;padding:18px 22px 14px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--cinder-border)">
+              <h1 class="title" style="font-size:20px">Approvals</h1>
+              <span class="subtle" style="font:500 12px system-ui">1 pending · 2 resolved today</span>
+            </div>
+            <div style="flex:1;display:flex;min-height:0">
+              <div style="width:288px;flex:none;border-right:1px solid var(--cinder-border);overflow:auto;padding:12px;display:flex;flex-direction:column;gap:8px">
+                <div style="border:1.5px solid var(--cinder-accent);background:var(--cinder-surface-inset);border-radius:10px;padding:11px 12px">
+                  <div style="display:flex;align-items:center;gap:7px"><span class="cinder-badge" data-cinder-variant="danger" data-cinder-size="sm">High risk</span><span class="subtle mono" style="font-size:10px;margin-left:auto">8m left</span></div>
+                  <div style="font:600 12.5px system-ui;margin-top:8px">shell.exec · run migration</div>
+                  <div class="subtle mono" style="font-size:10.5px;margin-top:3px">ses_b0d4 · Migrate billing</div>
+                </div>
+                <div style="border:1px solid var(--cinder-border);border-radius:10px;padding:11px 12px;opacity:.7">
+                  <div style="display:flex;align-items:center;gap:7px"><span class="cinder-badge" data-cinder-variant="success" data-cinder-size="sm">Approved</span><span class="subtle mono" style="font-size:10px;margin-left:auto">12m ago</span></div>
+                  <div style="font:600 12.5px system-ui;margin-top:8px">apply_patch · guards/shared.ts</div>
+                  <div class="subtle mono" style="font-size:10.5px;margin-top:3px">ses_7af3 · approved with edits</div>
+                </div>
+                <div style="border:1px solid var(--cinder-border);border-radius:10px;padding:11px 12px;opacity:.7">
+                  <div style="display:flex;align-items:center;gap:7px"><span class="cinder-badge" data-cinder-variant="neutral" data-cinder-size="sm">Denied</span><span class="subtle mono" style="font-size:10px;margin-left:auto">1h ago</span></div>
+                  <div style="font:600 12.5px system-ui;margin-top:8px">shell.exec · rm -rf node_modules</div>
+                  <div class="subtle mono" style="font-size:10.5px;margin-top:3px">ses_2c91 · remembered as deny</div>
+                </div>
+              </div>
+              <div style="flex:1;min-width:0;overflow:auto;padding:20px 24px;display:flex;flex-direction:column;gap:18px;align-items:center">
+                <div style="width:100%;max-width:660px">
+                  <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.ApprovalCard" dc-props="{{ billingApprovalEditable }}" hint-size="100%,600px"></x-import>
+                </div>
+                <div style="width:100%;max-width:660px;border:1px solid var(--cinder-accent);border-radius:12px;background:var(--cinder-surface);overflow:hidden">
+                  <div style="display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--cinder-border-muted)"><lucide-icon name="file-pen-line" class="ic" style="width:16px;height:16px;color:var(--cinder-accent-text)"></lucide-icon><span style="font:600 12.5px system-ui">If you Approve with edits, this is what runs</span><span class="spacer"></span><span class="lns">recorded in audit log</span></div>
+                  <div style="padding:14px 16px;display:flex;flex-direction:column;gap:8px;font:500 12px ui-monospace,monospace">
+                    <div style="display:flex;gap:9px;align-items:flex-start;padding:8px 10px;border-radius:7px;background:var(--cinder-color-danger-bg);color:var(--cinder-color-danger-fg)"><span style="opacity:.8">−</span><span style="word-break:break-all">psql $DATABASE_URL -f migrations/003_billing.sql</span></div>
+                    <div style="display:flex;gap:9px;align-items:flex-start;padding:8px 10px;border-radius:7px;background:var(--cinder-color-success-bg);color:var(--cinder-color-success-fg)"><span style="opacity:.8">+</span><span style="word-break:break-all">psql $DATABASE_URL <b style="background:var(--cinder-accent);color:var(--cinder-accent-contrast);padding:1px 4px;border-radius:3px">--single-transaction</b> -f migrations/003_billing.sql</span></div>
+                  </div>
+                  <div style="padding:0 16px 14px;font:400 11.5px/1.5 system-ui;color:var(--cinder-text-subtle)">The agent executes the <b style="color:var(--cinder-text-muted)">edited</b> command verbatim — never the original. Both versions, your identity, and the timestamp are written to the durable audit record under the same idempotency key.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 05 MEMORY ===== -->
+  <div class="secthd"><span class="n">05</span><span class="t">Memory · proposed, never presumed</span><span class="c">Three layers of what the agent knows — and a review queue so nothing is remembered without your say-so.</span></div>
+
+  <div class="scr">
+    <div class="scrlab"><span class="scrnum">05</span><span class="scrname">Memory — three layers + candidate review</span></div>
+    <p class="scrcap">Session, durable, and action-sensitive memory, each labeled with <b>where it came from</b>. New memories arrive as <b>candidates you review</b> — the agent proposes, you decide, and nothing is saved until you accept. That openness is what keeps memory from feeling like hidden surveillance.</p>
+    <div class="frame" style="width:1360px">
+      <div class="app">
+        <div class="top">
+          <span class="mark">STARDUST</span><span class="vr"></span><span class="subtle" style="font:500 12px system-ui">Memory</span>
+          <span class="spacer"></span>
+          <div class="wk"><i class="dot" style="background:var(--cinder-success)"></i><b>Worker · live</b><span>2 workers · agent-main</span></div>
+          <div class="uth"><div class="uth-l"><b>Under the hood</b><span>Show Temporal internals</span></div><div class="swt"><i></i></div></div>
+          <div class="iconbtn"><lucide-icon name="settings" class="ic"></lucide-icon></div>
+        </div>
+        <div class="body">
+          <div class="rail">
+            <div class="railtop"><x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="primary" size="sm" full-width="true" hint-size="100%,34px"><span style="display:inline-flex;align-items:center;gap:7px"><lucide-icon name="plus" class="ic" style="width:15px;height:15px"></lucide-icon>New session</span></x-import></div>
+            <div class="railscroll">
+              <div class="railhd">Sessions <span class="subtle mono" style="font-size:9px">3</span></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-success)"></span><div style="min-width:0;flex:1"><div class="sess-t">Refactor auth guards</div><div class="sess-m">ses_7af3 · running · 2m</div></div></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-warning)"></span><div style="min-width:0;flex:1"><div class="sess-t">Migrate billing tables</div><div class="sess-m">ses_b0d4 · approval · 4m</div></div></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-text-disabled)"></span><div style="min-width:0;flex:1"><div class="sess-t">Nightly eval sweep</div><div class="sess-m">ses_2c91 · idle · 1h</div></div></div>
+              <div class="railhd" style="margin-top:18px">Global</div>
+              <div class="nav"><lucide-icon name="shield-alert" class="ic"></lucide-icon>Approvals<span class="ct">1</span></div>
+              <div class="nav"><lucide-icon name="calendar-clock" class="ic"></lucide-icon>Schedules</div>
+              <div class="nav active"><lucide-icon name="brain" class="ic"></lucide-icon>Memory</div>
+              <div class="nav"><lucide-icon name="settings" class="ic"></lucide-icon>Settings</div>
+            </div>
+            <div class="railfoot"><i class="dot" style="background:var(--cinder-success)"></i><div style="line-height:1.3"><div style="font:600 11px system-ui">Temporal dev server</div><div class="subtle mono" style="font-size:9.5px">localhost:7776 · default namespace</div></div></div>
+          </div>
+          <div class="main">
+            <div style="flex:none;padding:18px 22px 14px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--cinder-border)">
+              <h1 class="title" style="font-size:20px">Memory</h1><span class="subtle" style="font:500 12px system-ui">8 remembered · 2 awaiting review</span>
+            </div>
+            <div style="flex:1;display:flex;min-height:0">
+              <div style="flex:1;min-width:0;overflow:auto;padding:20px 22px;display:flex;flex-direction:column;gap:14px">
+                <!-- session memory -->
+                <div style="border:1px solid var(--cinder-border);border-radius:12px;background:var(--cinder-surface);overflow:hidden">
+                  <div style="display:flex;align-items:center;gap:9px;padding:13px 16px;border-bottom:1px solid var(--cinder-border-muted)"><lucide-icon name="history" class="ic" style="width:16px;height:16px;color:var(--cinder-info)"></lucide-icon><span style="font:600 13px system-ui">Session memory</span><span class="subtle" style="font:400 11.5px system-ui">— lives only for this session, cleared when it ends</span><span class="spacer"></span><span class="cinder-badge" data-cinder-variant="info" data-cinder-size="sm">3</span></div>
+                  <div style="padding:6px 16px 12px">
+                    <div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--cinder-border-muted)"><span style="font:400 13px system-ui;flex:1">Refactoring auth guards to share one policy check</span><span class="lns">from turn 1 · ses_7af3</span></div>
+                    <div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--cinder-border-muted)"><span style="font:400 13px system-ui;flex:1">Test DB times out intermittently — expect retries</span><span class="lns">observed step 5</span></div>
+                    <div style="display:flex;align-items:center;gap:10px;padding:9px 0"><span style="font:400 13px system-ui;flex:1">Keep diffs minimal</span><span class="lns">from your message</span></div>
+                  </div>
+                </div>
+                <!-- durable memory -->
+                <div style="border:1px solid var(--cinder-border);border-radius:12px;background:var(--cinder-surface);overflow:hidden">
+                  <div style="display:flex;align-items:center;gap:9px;padding:13px 16px;border-bottom:1px solid var(--cinder-border-muted)"><lucide-icon name="database" class="ic" style="width:16px;height:16px;color:var(--cinder-accent-text)"></lucide-icon><span style="font:600 13px system-ui">Durable memory</span><span class="subtle" style="font:400 11.5px system-ui">— persists across sessions, every entry was approved by you</span><span class="spacer"></span><span class="cinder-badge" data-cinder-variant="accent" data-cinder-size="sm">3</span></div>
+                  <div style="padding:6px 16px 12px">
+                    <div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--cinder-border-muted)"><span style="font:400 13px system-ui;flex:1">Prefers <span class="mono">bun</span> over <span class="mono">npm</span></span><span class="lns">approved 3d ago · used 11×</span></div>
+                    <div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--cinder-border-muted)"><span style="font:400 13px system-ui;flex:1">Never edit public routes without asking</span><span class="lns">approved 1w ago</span></div>
+                    <div style="display:flex;align-items:center;gap:10px;padding:9px 0"><span style="font:400 13px system-ui;flex:1">Default test command: <span class="mono">bun run test:unit</span></span><span class="lns">retrieved in run wf_7af3</span></div>
+                  </div>
+                </div>
+                <!-- action-sensitive memory -->
+                <div style="border:1px solid var(--cinder-color-warning-border);border-radius:12px;background:var(--cinder-surface);overflow:hidden">
+                  <div style="display:flex;align-items:center;gap:9px;padding:13px 16px;border-bottom:1px solid var(--cinder-border-muted)"><lucide-icon name="shield" class="ic" style="width:16px;height:16px;color:var(--cinder-color-warning-fg)"></lucide-icon><span style="font:600 13px system-ui">Action-sensitive memory</span><span class="subtle" style="font:400 11.5px system-ui">— these change what needs approval, so they're always shown</span><span class="spacer"></span><span class="cinder-badge" data-cinder-variant="warning" data-cinder-size="sm">2</span></div>
+                  <div style="padding:6px 16px 12px">
+                    <div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--cinder-border-muted)"><lucide-icon name="ban" class="ic" style="width:14px;height:14px;color:var(--cinder-danger);flex:none"></lucide-icon><span style="font:400 13px system-ui;flex:1">Deny <span class="mono">rm -rf</span> on <span class="mono">node_modules</span></span><span class="lns">remembered from a denial · 1h ago</span></div>
+                    <div style="display:flex;align-items:center;gap:10px;padding:9px 0"><lucide-icon name="shield-alert" class="ic" style="width:14px;height:14px;color:var(--cinder-warning);flex:none"></lucide-icon><span style="font:400 13px system-ui;flex:1">Require approval for <span class="mono">psql</span> against <span class="mono">billing_*</span></span><span class="lns">policy-linked</span></div>
+                  </div>
+                </div>
+              </div>
+              <div style="width:372px;flex:none;border-left:1px solid var(--cinder-border);overflow:auto;padding:18px 18px;background:var(--cinder-surface)">
+                <div style="display:flex;align-items:center;gap:8px"><lucide-icon name="inbox" class="ic" style="width:16px;height:16px;color:var(--cinder-accent-text)"></lucide-icon><span style="font:600 13px system-ui">Awaiting your review</span><span class="cinder-badge" data-cinder-variant="warning" data-cinder-size="sm" style="margin-left:auto">2</span></div>
+                <p class="subtle" style="font:400 11.5px/1.5 system-ui;margin:8px 0 16px">The agent proposes; you decide. Nothing here is saved to durable memory until you accept it.</p>
+                <div style="display:flex;flex-direction:column;gap:12px">
+                  <div style="border:1px solid var(--cinder-border);border-radius:11px;background:var(--cinder-surface-raised);padding:13px">
+                    <div style="font:500 13px/1.45 system-ui">Billing migrations should run with <span class="mono">--single-transaction</span></div>
+                    <div class="lns" style="margin-top:9px">from your edit · ses_b0d4 · just now</div>
+                    <div style="display:flex;gap:7px;margin-top:12px"><button class="cinder-button" data-cinder-variant="primary" data-cinder-size="sm"><span>Remember</span></button><button class="cinder-button" data-cinder-variant="ghost" data-cinder-size="sm"><span>Edit</span></button><button class="cinder-button" data-cinder-variant="ghost" data-cinder-size="sm"><span>Dismiss</span></button></div>
+                  </div>
+                  <div style="border:1px solid var(--cinder-border);border-radius:11px;background:var(--cinder-surface-raised);padding:13px">
+                    <div style="font:500 13px/1.45 system-ui">User dislikes verbose release notes</div>
+                    <div class="lns" style="margin-top:9px">inferred · ses_4e10 · yesterday</div>
+                    <div style="display:flex;gap:7px;margin-top:12px"><button class="cinder-button" data-cinder-variant="primary" data-cinder-size="sm"><span>Remember</span></button><button class="cinder-button" data-cinder-variant="ghost" data-cinder-size="sm"><span>Edit</span></button><button class="cinder-button" data-cinder-variant="ghost" data-cinder-size="sm"><span>Dismiss</span></button></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 06 WORKSPACE + SANDBOX ===== -->
+  <div class="secthd"><span class="n">06</span><span class="t">Workspace &amp; sandbox</span><span class="c">The files the agent touched, the commands it ran — every artifact linked back to the step that made it.</span></div>
+
+  <div class="scr">
+    <div class="scrlab"><span class="scrnum">06a</span><span class="scrname">Workspace — files, diffs, output, snapshots, artifacts</span></div>
+    <p class="scrcap">The per-session workspace. A changed-file tree, the unified diff, the command output, point-in-time snapshots, and downloadable artifacts — and each one carries a <b>link back to the run step that produced it</b>, so the file state and the timeline are never out of sync.</p>
+    <div class="frame" style="width:1360px">
+      <div class="app">
+        <div class="top">
+          <span class="mark">STARDUST</span><span class="vr"></span><div class="sesschip"><b>Refactor auth guards</b><span>ses_7af3 · running</span></div>
+          <span class="spacer"></span>
+          <div class="wk"><i class="dot" style="background:var(--cinder-success)"></i><b>Worker · live</b><span>2 workers · agent-main</span></div>
+          <div class="uth"><div class="uth-l"><b>Under the hood</b><span>Show Temporal internals</span></div><div class="swt"><i></i></div></div>
+          <div class="iconbtn"><lucide-icon name="settings" class="ic"></lucide-icon></div>
+        </div>
+        <div class="body">
+          <div class="rail">
+            <div class="railtop"><x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="primary" size="sm" full-width="true" hint-size="100%,34px"><span style="display:inline-flex;align-items:center;gap:7px"><lucide-icon name="plus" class="ic" style="width:15px;height:15px"></lucide-icon>New session</span></x-import></div>
+            <div class="railscroll">
+              <div class="railhd">Sessions <span class="subtle mono" style="font-size:9px">3</span></div>
+              <div class="sess active"><span class="sd dot" style="background:var(--cinder-success)"></span><div style="min-width:0;flex:1"><div class="sess-t">Refactor auth guards</div><div class="sess-m">ses_7af3 · running · 2m</div></div></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-warning)"></span><div style="min-width:0;flex:1"><div class="sess-t">Migrate billing tables</div><div class="sess-m">ses_b0d4 · approval · 4m</div></div></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-text-disabled)"></span><div style="min-width:0;flex:1"><div class="sess-t">Nightly eval sweep</div><div class="sess-m">ses_2c91 · idle · 1h</div></div></div>
+              <div class="railhd" style="margin-top:18px">Global</div>
+              <div class="nav"><lucide-icon name="shield-alert" class="ic"></lucide-icon>Approvals<span class="ct">1</span></div>
+              <div class="nav"><lucide-icon name="calendar-clock" class="ic"></lucide-icon>Schedules</div>
+              <div class="nav"><lucide-icon name="brain" class="ic"></lucide-icon>Memory</div>
+              <div class="nav"><lucide-icon name="settings" class="ic"></lucide-icon>Settings</div>
+            </div>
+            <div class="railfoot"><i class="dot" style="background:var(--cinder-success)"></i><div style="line-height:1.3"><div style="font:600 11px system-ui">Temporal dev server</div><div class="subtle mono" style="font-size:9.5px">localhost:7776 · default namespace</div></div></div>
+          </div>
+          <div class="main">
+            <div style="flex:none;padding:14px 20px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--cinder-border)">
+              <lucide-icon name="folder-git-2" class="ic" style="width:17px;height:17px;color:var(--cinder-text-subtle)"></lucide-icon>
+              <h1 class="title" style="font-size:16px">Workspace</h1>
+              <span class="subtle mono" style="font-size:11px">~/.stardust/ws/ses_7af3</span>
+              <span class="spacer"></span>
+              <span class="lns">4 files changed · +24 −18</span>
+            </div>
+            <div style="flex:1;display:flex;min-height:0">
+              <div style="width:236px;flex:none;border-right:1px solid var(--cinder-border);overflow:auto;padding:12px;font:500 12px ui-monospace,monospace">
+                <div class="subtle" style="font:600 9.5px system-ui;letter-spacing:.09em;text-transform:uppercase;margin:0 0 9px">Changed files</div>
+                <div style="color:var(--cinder-text-subtle);padding:3px 0">src/lib/server/guards/</div>
+                <div style="display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;background:var(--cinder-surface-inset);margin-left:8px"><span style="color:var(--cinder-success)">+</span>shared.ts<span class="spacer"></span><span class="subtle" style="font-size:9.5px">new</span></div>
+                <div style="display:flex;align-items:center;gap:7px;padding:5px 8px;margin-left:8px"><span style="color:var(--cinder-warning)">~</span>session.ts</div>
+                <div style="display:flex;align-items:center;gap:7px;padding:5px 8px;margin-left:8px"><span style="color:var(--cinder-warning)">~</span>admin.ts</div>
+                <div style="display:flex;align-items:center;gap:7px;padding:5px 8px;margin-left:8px"><span style="color:var(--cinder-warning)">~</span>api.ts</div>
+              </div>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--cinder-border)">
+                <div style="flex:none;display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--cinder-border-muted)">
+                  <span class="mono" style="font:600 12px ui-monospace,monospace">guards/shared.ts</span>
+                  <span class="cinder-badge" data-cinder-variant="success" data-cinder-size="sm">new file</span>
+                  <span class="spacer"></span>
+                  <a href="#03a" style="text-decoration:none"><span class="lns"><lucide-icon name="corner-up-left" class="ic" style="width:12px;height:12px"></lucide-icon>produced by step 3 · Apply patch</span></a>
+                </div>
+                <div style="flex:1;overflow:auto;padding:14px 16px;font:500 12px/1.7 ui-monospace,monospace;background:var(--cinder-surface-inset)">
+                  <div style="color:var(--cinder-text-subtle)">@@ guards/shared.ts (new)</div>
+                  <div style="background:var(--cinder-color-success-bg);color:var(--cinder-color-success-fg);padding:0 6px">+ import type { RequestEvent } from '@sveltejs/kit';</div>
+                  <div style="background:var(--cinder-color-success-bg);color:var(--cinder-color-success-fg);padding:0 6px">+ import { redirect } from '@sveltejs/kit';</div>
+                  <div style="background:var(--cinder-color-success-bg);color:var(--cinder-color-success-fg);padding:0 6px">+</div>
+                  <div style="background:var(--cinder-color-success-bg);color:var(--cinder-color-success-fg);padding:0 6px">+ export function requireSession(event: RequestEvent) {</div>
+                  <div style="background:var(--cinder-color-success-bg);color:var(--cinder-color-success-fg);padding:0 6px">+&nbsp;&nbsp;const s = event.locals.session;</div>
+                  <div style="background:var(--cinder-color-success-bg);color:var(--cinder-color-success-fg);padding:0 6px">+&nbsp;&nbsp;if (!s) throw redirect(303, '/login');</div>
+                  <div style="background:var(--cinder-color-success-bg);color:var(--cinder-color-success-fg);padding:0 6px">+&nbsp;&nbsp;return s;</div>
+                  <div style="background:var(--cinder-color-success-bg);color:var(--cinder-color-success-fg);padding:0 6px">+ }</div>
+                  <div style="color:var(--cinder-text-subtle);margin-top:10px">@@ guards/session.ts</div>
+                  <div style="background:var(--cinder-color-danger-bg);color:var(--cinder-color-danger-fg);padding:0 6px">- const s = event.locals.session;</div>
+                  <div style="background:var(--cinder-color-danger-bg);color:var(--cinder-color-danger-fg);padding:0 6px">- if (!s) throw redirect(303, '/login');</div>
+                  <div style="background:var(--cinder-color-success-bg);color:var(--cinder-color-success-fg);padding:0 6px">+ const s = requireSession(event);</div>
+                </div>
+              </div>
+              <div style="width:316px;flex:none;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:16px;background:var(--cinder-surface)">
+                <div>
+                  <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px"><lucide-icon name="terminal" class="ic" style="width:14px;height:14px;color:var(--cinder-text-subtle)"></lucide-icon><span style="font:600 11px system-ui;letter-spacing:.04em;text-transform:uppercase;color:var(--cinder-text-subtle)">Command output</span><a href="#03a" style="margin-left:auto;text-decoration:none"><span class="lns">step 5</span></a></div>
+                  <div style="background:var(--cinder-surface-inset);border:1px solid var(--cinder-border-muted);border-radius:8px;padding:10px;font:500 10.5px/1.6 ui-monospace,monospace;color:var(--cinder-text-muted)"><div style="color:var(--cinder-accent-text)">$ bun run test:unit</div><div>bun test v1.3.0</div><div>63 files · 412 tests</div><div style="color:var(--cinder-success)">✓ 412 pass · 0 fail · 18.2s</div><div class="subtle">exit 0</div></div>
+                </div>
+                <div>
+                  <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px"><lucide-icon name="camera" class="ic" style="width:14px;height:14px;color:var(--cinder-text-subtle)"></lucide-icon><span style="font:600 11px system-ui;letter-spacing:.04em;text-transform:uppercase;color:var(--cinder-text-subtle)">Snapshots</span></div>
+                  <div style="display:flex;flex-direction:column;gap:7px">
+                    <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--cinder-border-muted);border-radius:8px;padding:8px 10px"><span class="mono" style="font-size:11px">snap_7af3_01</span><span class="subtle" style="font:400 10px system-ui">pre-patch</span><span class="spacer"></span><button class="cinder-button" data-cinder-variant="ghost" data-cinder-size="xs"><span>Restore</span></button></div>
+                    <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--cinder-border-muted);border-radius:8px;padding:8px 10px"><span class="mono" style="font-size:11px">snap_7af3_02</span><span class="subtle" style="font:400 10px system-ui">post-patch</span><span class="spacer"></span><button class="cinder-button" data-cinder-variant="ghost" data-cinder-size="xs"><span>Restore</span></button></div>
+                  </div>
+                </div>
+                <div>
+                  <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px"><lucide-icon name="package" class="ic" style="width:14px;height:14px;color:var(--cinder-text-subtle)"></lucide-icon><span style="font:600 11px system-ui;letter-spacing:.04em;text-transform:uppercase;color:var(--cinder-text-subtle)">Artifacts</span></div>
+                  <div style="display:flex;flex-direction:column;gap:7px">
+                    <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--cinder-border-muted);border-radius:8px;padding:8px 10px"><lucide-icon name="file-json" class="ic" style="width:14px;height:14px;color:var(--cinder-accent-text)"></lucide-icon><span class="mono" style="font-size:11px">test-report.json</span><span class="spacer"></span><span class="subtle" style="font:400 10px system-ui">12 KB</span><lucide-icon name="download" class="ic" style="width:14px;height:14px;color:var(--cinder-text-subtle)"></lucide-icon></div>
+                    <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--cinder-border-muted);border-radius:8px;padding:8px 10px"><lucide-icon name="file" class="ic" style="width:14px;height:14px;color:var(--cinder-accent-text)"></lucide-icon><span class="mono" style="font-size:11px">coverage.lcov</span><span class="spacer"></span><span class="subtle" style="font:400 10px system-ui">48 KB</span><lucide-icon name="download" class="ic" style="width:14px;height:14px;color:var(--cinder-text-subtle)"></lucide-icon></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="scr">
+    <div class="scrlab"><span class="scrnum">06b</span><span class="scrname">Sandbox inspector</span></div>
+    <p class="scrcap">Where commands actually run. Provider, lifecycle, recent commands with exit codes, snapshots — and the <b>caveat stated plainly</b>: the local subprocess sandbox isn't isolation, so approvals are the real safety boundary. Honesty here is part of the trust model.</p>
+    <div class="frame" style="width:1100px">
+      <div style="background:var(--cinder-bg);padding:20px 22px;display:flex;flex-direction:column;gap:16px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <lucide-icon name="box" class="ic" style="width:18px;height:18px;color:var(--cinder-accent-text)"></lucide-icon>
+          <div><div style="font:600 13.5px system-ui">Sandbox · ses_7af3</div><div class="subtle mono" style="font-size:11px;margin-top:2px">local-subprocess · created 4m ago</div></div>
+          <span class="spacer"></span>
+          <span style="display:inline-flex;align-items:center;gap:7px;border:1px solid var(--cinder-color-success-border);background:var(--cinder-color-success-bg);border-radius:20px;padding:4px 11px"><i class="dot" style="background:var(--cinder-success)"></i><span style="font:600 11px system-ui;color:var(--cinder-color-success-fg)">Running</span></span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+          <div style="border:1px solid var(--cinder-border);border-radius:10px;background:var(--cinder-surface);padding:12px"><div class="subtle" style="font:600 9.5px system-ui;letter-spacing:.07em;text-transform:uppercase">Provider</div><div class="mono" style="font:600 12.5px ui-monospace,monospace;margin-top:5px">local-subprocess</div></div>
+          <div style="border:1px solid var(--cinder-border);border-radius:10px;background:var(--cinder-surface);padding:12px"><div class="subtle" style="font:600 9.5px system-ui;letter-spacing:.07em;text-transform:uppercase">Working dir</div><div class="mono" style="font:600 11.5px ui-monospace,monospace;margin-top:5px;word-break:break-all">~/.stardust/ws/ses_7af3</div></div>
+          <div style="border:1px solid var(--cinder-border);border-radius:10px;background:var(--cinder-surface);padding:12px"><div class="subtle" style="font:600 9.5px system-ui;letter-spacing:.07em;text-transform:uppercase">Commands run</div><div style="font:600 14px system-ui;margin-top:5px">7</div></div>
+          <div style="border:1px solid var(--cinder-border);border-radius:10px;background:var(--cinder-surface);padding:12px"><div class="subtle" style="font:600 9.5px system-ui;letter-spacing:.07em;text-transform:uppercase">Snapshots</div><div style="font:600 14px system-ui;margin-top:5px">2</div></div>
+        </div>
+        <div style="border:1px solid var(--cinder-border);border-radius:11px;background:var(--cinder-surface);overflow:hidden">
+          <div style="padding:11px 16px;border-bottom:1px solid var(--cinder-border-muted);font:600 11px system-ui;letter-spacing:.05em;text-transform:uppercase;color:var(--cinder-text-subtle);display:flex"><span style="flex:1">Recent commands</span><span style="width:90px">Exit</span><span style="width:80px;text-align:right">Duration</span><span style="width:130px;text-align:right">Step</span></div>
+          <div style="font:500 12px ui-monospace,monospace">
+            <div style="display:flex;align-items:center;padding:10px 16px;border-bottom:1px solid var(--cinder-border-muted)"><span style="flex:1">bun run test:unit</span><span style="width:90px"><span class="cinder-badge" data-cinder-variant="success" data-cinder-size="sm">0</span></span><span style="width:80px;text-align:right;color:var(--cinder-text-muted)">18.2s</span><span style="width:130px;text-align:right"><a href="#03a" class="lns" style="text-decoration:none">step 5</a></span></div>
+            <div style="display:flex;align-items:center;padding:10px 16px;border-bottom:1px solid var(--cinder-border-muted)"><span style="flex:1">git status --porcelain</span><span style="width:90px"><span class="cinder-badge" data-cinder-variant="success" data-cinder-size="sm">0</span></span><span style="width:80px;text-align:right;color:var(--cinder-text-muted)">0.1s</span><span style="width:130px;text-align:right"><span class="subtle">step 6</span></span></div>
+            <div style="display:flex;align-items:center;padding:10px 16px"><span style="flex:1;color:var(--cinder-text-subtle)">psql $DATABASE_URL -f …</span><span style="width:90px"><span class="cinder-badge" data-cinder-variant="warning" data-cinder-size="sm">waiting</span></span><span style="width:80px;text-align:right;color:var(--cinder-text-subtle)">—</span><span style="width:130px;text-align:right"><span class="subtle">ses_b0d4</span></span></div>
+          </div>
+        </div>
+        <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Alert" variant="warning" title="Local subprocess is not isolation" hint-size="100%,72px">The <span class="mono">local-subprocess</span> provider runs commands as your user with no network or filesystem sandboxing. Treat the approval gate — not the sandbox — as the real safety boundary. Swappable for an isolated provider before exposing the app.</x-import>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 07 CRASH RECOVERY ===== -->
+  <div class="secthd"><span class="n">07</span><span class="t">Crash recovery · the headline proof</span><span class="c">A worker dies mid-run. The work doesn't. This is the moment the whole architecture exists for — so the UI celebrates it.</span></div>
+
+  <div class="scr">
+    <div class="scrlab"><span class="scrnum" id="07">07</span><span class="scrname">Recovered — a run that outlived its worker</span></div>
+    <p class="scrcap">Mid-migration, <span class="mono">worker-1</span> is killed. Temporal re-dispatches the in-flight activity to <span class="mono">worker-2</span>, which resumes from durable history with <b>no replay gap</b>. The operator saw a 6-second pause; the run finished. Reproduce it yourself with <span class="mono">bun run chaos</span>.</p>
+    <div class="frame" style="width:1360px">
+      <div class="app">
+        <div class="top">
+          <span class="mark">STARDUST</span><span class="vr"></span><div class="sesschip"><b>Migrate billing tables</b><span>ses_b0d4 · running</span></div>
+          <span class="spacer"></span>
+          <div class="wk"><i class="dot" style="background:var(--cinder-success)"></i><b>Worker · live</b><span>worker-2 · agent-main</span></div>
+          <div class="uth"><div class="uth-l"><b>Under the hood</b><span>Show Temporal internals</span></div><div class="swt"><i></i></div></div>
+          <div class="iconbtn"><lucide-icon name="settings" class="ic"></lucide-icon></div>
+        </div>
+        <div class="body">
+          <div class="rail">
+            <div class="railtop"><x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="primary" size="sm" full-width="true" hint-size="100%,34px"><span style="display:inline-flex;align-items:center;gap:7px"><lucide-icon name="plus" class="ic" style="width:15px;height:15px"></lucide-icon>New session</span></x-import></div>
+            <div class="railscroll">
+              <div class="railhd">Sessions <span class="subtle mono" style="font-size:9px">3</span></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-success)"></span><div style="min-width:0;flex:1"><div class="sess-t">Refactor auth guards</div><div class="sess-m">ses_7af3 · running · 2m</div></div></div>
+              <div class="sess active"><span class="sd dot" style="background:var(--cinder-success)"></span><div style="min-width:0;flex:1"><div class="sess-t">Migrate billing tables</div><div class="sess-m">ses_b0d4 · recovered · now</div></div></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-text-disabled)"></span><div style="min-width:0;flex:1"><div class="sess-t">Nightly eval sweep</div><div class="sess-m">ses_2c91 · idle · 1h</div></div></div>
+              <div class="railhd" style="margin-top:18px">Global</div>
+              <div class="nav"><lucide-icon name="shield-alert" class="ic"></lucide-icon>Approvals</div>
+              <div class="nav"><lucide-icon name="calendar-clock" class="ic"></lucide-icon>Schedules</div>
+              <div class="nav"><lucide-icon name="brain" class="ic"></lucide-icon>Memory</div>
+              <div class="nav"><lucide-icon name="settings" class="ic"></lucide-icon>Settings</div>
+            </div>
+            <div class="railfoot"><i class="dot" style="background:var(--cinder-success)"></i><div style="line-height:1.3"><div style="font:600 11px system-ui">Temporal dev server</div><div class="subtle mono" style="font-size:9.5px">localhost:7776 · default namespace</div></div></div>
+          </div>
+          <div class="main">
+            <div style="flex:none;padding:18px 22px;border-bottom:1px solid var(--cinder-border)">
+              <div style="display:flex;gap:14px;align-items:flex-start;border:1px solid var(--cinder-color-success-border);background:var(--cinder-color-success-bg);border-radius:12px;padding:15px 17px">
+                <lucide-icon name="life-buoy" class="ic" style="width:22px;height:22px;color:var(--cinder-color-success-fg);flex:none;margin-top:1px"></lucide-icon>
+                <div style="flex:1">
+                  <div style="font:650 16px system-ui;color:var(--cinder-color-success-fg)">Recovered — no state lost</div>
+                  <div style="font:400 13px/1.55 system-ui;color:var(--cinder-color-success-fg);opacity:.92;margin-top:4px;max-width:80ch">A worker process running this migration was killed mid-activity. Temporal re-dispatched the in-flight work to a second worker, which resumed from durable history. No transcript events were dropped and nothing ran twice.</div>
+                  <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:11px">
+                    <span class="lns" style="color:var(--cinder-color-success-fg);background:transparent;border-color:var(--cinder-color-success-border)">resumed from event #243</span>
+                    <span class="lns" style="color:var(--cinder-color-success-fg);background:transparent;border-color:var(--cinder-color-success-border)">same run wf_b0d4</span>
+                    <span class="lns" style="color:var(--cinder-color-success-fg);background:transparent;border-color:var(--cinder-color-success-border)">no replay gap</span>
+                    <span class="lns" style="color:var(--cinder-color-success-fg);background:transparent;border-color:var(--cinder-color-success-border)">operator saw a 6s pause</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="ribbon">
+              <div class="rib"><span class="rib-n">0</span><span class="rib-l">events lost</span></div>
+              <div class="rib"><span class="rib-n">0</span><span class="rib-l">duplicate executions</span></div>
+              <div class="rib"><span class="rib-n" style="color:var(--cinder-warning)">1</span><span class="rib-l">worker crash survived</span></div>
+              <div class="rib"><span class="rib-n" style="color:var(--cinder-accent-text)">#243</span><span class="rib-l">resumed from event</span></div>
+              <div class="rib"><span class="rib-n">6s</span><span class="rib-l">operator-visible pause</span></div>
+            </div>
+            <div style="flex:1;display:flex;min-height:0">
+              <div style="flex:1;min-width:0;overflow:auto;padding:22px 24px">
+                <div class="subtle" style="font:600 10px system-ui;letter-spacing:.09em;text-transform:uppercase;margin-bottom:16px">Recovery timeline</div>
+                <div style="position:relative;padding-left:26px">
+                  <div style="position:absolute;left:6px;top:6px;bottom:6px;width:2px;background:var(--cinder-border)"></div>
+                  <div style="position:relative;margin-bottom:18px"><span style="position:absolute;left:-26px;width:13px;height:13px;border-radius:50%;background:var(--cinder-success);top:1px"></span><div style="font:600 13px system-ui">Generate SQL patch · approved by you</div><div class="subtle mono" style="font-size:10.5px;margin-top:2px">worker-1 · 14:02:04</div></div>
+                  <div style="position:relative;margin-bottom:18px"><span style="position:absolute;left:-26px;width:13px;height:13px;border-radius:50%;background:var(--cinder-info);top:1px"></span><div style="font:600 13px system-ui">Run migration started</div><div class="subtle mono" style="font-size:10.5px;margin-top:2px">worker-1 · 14:02:06 · activity runMigration</div></div>
+                  <div style="position:relative;margin-bottom:18px"><span style="position:absolute;left:-27px;width:15px;height:15px;border-radius:50%;background:var(--cinder-danger);top:1px;display:flex;align-items:center;justify-content:center"><lucide-icon name="x" style="width:10px;height:10px;color:#fff"></lucide-icon></span><div style="font:600 13px system-ui;color:var(--cinder-danger)">worker-1 process killed mid-activity</div><div class="subtle mono" style="font-size:10.5px;margin-top:2px">14:02:09 · SIGKILL · heartbeat stopped</div></div>
+                  <div style="position:relative;margin-bottom:18px"><span style="position:absolute;left:-28px;width:17px;height:17px;border-radius:50%;background:var(--cinder-accent);top:0;display:flex;align-items:center;justify-content:center"><lucide-icon name="life-buoy" style="width:11px;height:11px;color:var(--cinder-accent-contrast)"></lucide-icon></span>
+                    <div style="border:1px solid var(--cinder-accent);background:var(--cinder-surface-inset);border-radius:10px;padding:12px 14px;margin-top:-3px">
+                      <div style="font:600 13px system-ui;color:var(--cinder-accent-text)">Temporal re-dispatched the in-flight activity</div>
+                      <div class="subtle" style="font:400 12px/1.5 system-ui;margin-top:4px">After the heartbeat timeout, the orchestrator handed the same activity to a healthy worker. State came from durable history — not from the dead worker's memory.</div>
+                      <div class="lns" style="margin-top:9px">resumed at event #243 · no replay gap</div>
+                    </div>
+                  </div>
+                  <div style="position:relative;margin-bottom:18px"><span style="position:absolute;left:-26px;width:13px;height:13px;border-radius:50%;background:var(--cinder-info);top:1px"></span><div style="font:600 13px system-ui">Run migration resumed</div><div class="subtle mono" style="font-size:10.5px;margin-top:2px">worker-2 · 14:02:11</div></div>
+                  <div style="position:relative"><span style="position:absolute;left:-26px;width:13px;height:13px;border-radius:50%;background:var(--cinder-success);top:1px"></span><div style="font:600 13px system-ui">Run migration completed · verified row counts</div><div class="subtle mono" style="font-size:10.5px;margin-top:2px">worker-2 · 14:02:25 · exit 0</div></div>
+                </div>
+              </div>
+              <div style="width:332px;flex:none;border-left:1px solid var(--cinder-border);overflow:auto;padding:18px;display:flex;flex-direction:column;gap:16px;background:var(--cinder-surface)">
+                <div>
+                  <div class="subtle" style="font:600 10px system-ui;letter-spacing:.08em;text-transform:uppercase;margin-bottom:9px">Workers</div>
+                  <div style="display:flex;flex-direction:column;gap:8px">
+                    <div style="border:1px solid var(--cinder-color-danger-border);background:var(--cinder-color-danger-bg);border-radius:9px;padding:10px 11px"><div style="display:flex;align-items:center;gap:8px"><i class="dot" style="background:var(--cinder-danger)"></i><span style="font:600 11.5px system-ui;color:var(--cinder-color-danger-fg)">worker-1</span><span class="spacer"></span><span style="font:600 10px ui-monospace,monospace;color:var(--cinder-color-danger-fg)">exited</span></div><div style="font:400 10px ui-monospace,monospace;color:var(--cinder-color-danger-fg);opacity:.85;margin-top:4px">pid 48213 · SIGKILL 14:02:09</div></div>
+                    <div style="border:1px solid var(--cinder-color-success-border);background:var(--cinder-color-success-bg);border-radius:9px;padding:10px 11px"><div style="display:flex;align-items:center;gap:8px"><i class="dot" style="background:var(--cinder-success)"></i><span style="font:600 11.5px system-ui;color:var(--cinder-color-success-fg)">worker-2</span><span class="spacer"></span><span style="font:600 10px ui-monospace,monospace;color:var(--cinder-color-success-fg)">took over</span></div><div style="font:400 10px ui-monospace,monospace;color:var(--cinder-color-success-fg);opacity:.85;margin-top:4px">pid 48217 · running · 2 activities</div></div>
+                  </div>
+                </div>
+                <div style="border:1px solid var(--cinder-border);border-radius:10px;background:var(--cinder-surface-raised);padding:13px">
+                  <div style="display:flex;align-items:center;gap:7px"><lucide-icon name="flask-conical" class="ic" style="width:15px;height:15px;color:var(--cinder-accent-text)"></lucide-icon><span style="font:600 12px system-ui">Prove it yourself</span></div>
+                  <div class="mono" style="font:600 11.5px ui-monospace,monospace;background:var(--cinder-surface-inset);border:1px solid var(--cinder-border-muted);border-radius:7px;padding:8px 10px;margin-top:9px;color:var(--cinder-accent-text)">$ bun run chaos</div>
+                  <div class="subtle" style="font:400 11px/1.5 system-ui;margin-top:8px">Starts two workers, drives a run to an approval gate, kills one worker mid-run, and verifies the run completes on the survivor.</div>
+                  <div style="margin-top:11px"><x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="secondary" size="sm" full-width="true" hint-size="100%,32px"><span style="display:inline-flex;align-items:center;gap:7px"><lucide-icon name="external-link" class="ic" style="width:14px;height:14px"></lucide-icon>Open this run in Temporal Web</span></x-import></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 08 SCHEDULES ===== -->
+  <div class="secthd"><span class="n">08</span><span class="t">Schedules · recurring agent work</span><span class="c">Not a cron form. Each schedule is a standing task the agent will pick up — with the runs it has already produced.</span></div>
+
+  <div class="scr">
+    <div class="scrlab"><span class="scrnum">08</span><span class="scrname">Schedules — standing tasks &amp; the runs they produce</span></div>
+    <p class="scrcap">Real Temporal Schedules, framed as recurring <b>work</b> rather than cron syntax: the human cadence and the task prompt it submits sit up front; the produced runs are listed beneath. Trigger now, pause, resume, or edit — the lens reveals the underlying <span class="mono">@every</span> / cron spec for engineers who want it.</p>
+    <div class="frame" style="width:1360px">
+      <div class="app">
+        <div class="top">
+          <span class="mark">STARDUST</span><span class="vr"></span><span class="subtle" style="font:500 12px system-ui">Schedules</span>
+          <span class="spacer"></span>
+          <div class="wk"><i class="dot" style="background:var(--cinder-success)"></i><b>Worker · live</b><span>2 workers · agent-main</span></div>
+          <div class="uth"><div class="uth-l"><b>Under the hood</b><span>Show Temporal internals</span></div><div class="swt"><i></i></div></div>
+          <div class="iconbtn"><lucide-icon name="settings" class="ic"></lucide-icon></div>
+        </div>
+        <div class="body">
+          <div class="rail">
+            <div class="railtop"><x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="primary" size="sm" full-width="true" hint-size="100%,34px"><span style="display:inline-flex;align-items:center;gap:7px"><lucide-icon name="plus" class="ic" style="width:15px;height:15px"></lucide-icon>New session</span></x-import></div>
+            <div class="railscroll">
+              <div class="railhd">Sessions <span class="subtle mono" style="font-size:9px">3</span></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-success)"></span><div style="min-width:0;flex:1"><div class="sess-t">Refactor auth guards</div><div class="sess-m">ses_7af3 · running · 2m</div></div></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-warning)"></span><div style="min-width:0;flex:1"><div class="sess-t">Migrate billing tables</div><div class="sess-m">ses_b0d4 · approval · 4m</div></div></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-text-disabled)"></span><div style="min-width:0;flex:1"><div class="sess-t">Nightly eval sweep</div><div class="sess-m">ses_2c91 · idle · 1h</div></div></div>
+              <div class="railhd" style="margin-top:18px">Global</div>
+              <div class="nav"><lucide-icon name="shield-alert" class="ic"></lucide-icon>Approvals<span class="ct">1</span></div>
+              <div class="nav active"><lucide-icon name="calendar-clock" class="ic"></lucide-icon>Schedules</div>
+              <div class="nav"><lucide-icon name="brain" class="ic"></lucide-icon>Memory</div>
+              <div class="nav"><lucide-icon name="settings" class="ic"></lucide-icon>Settings</div>
+            </div>
+            <div class="railfoot"><i class="dot" style="background:var(--cinder-success)"></i><div style="line-height:1.3"><div style="font:600 11px system-ui">Temporal dev server</div><div class="subtle mono" style="font-size:9.5px">localhost:7776 · default namespace</div></div></div>
+          </div>
+          <div class="main">
+            <div style="flex:none;padding:18px 22px 14px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--cinder-border)">
+              <h1 class="title" style="font-size:20px">Schedules</h1><span class="subtle" style="font:500 12px system-ui">2 schedules · 1 active</span>
+              <span class="spacer"></span>
+              <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="primary" size="sm" hint-size="auto,34px"><span style="display:inline-flex;align-items:center;gap:7px"><lucide-icon name="plus" class="ic" style="width:15px;height:15px"></lucide-icon>New schedule</span></x-import>
+            </div>
+            <div style="flex:1;display:flex;min-height:0">
+              <div style="width:340px;flex:none;border-right:1px solid var(--cinder-border);overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px">
+                <div style="border:1.5px solid var(--cinder-accent);background:var(--cinder-surface-inset);border-radius:11px;padding:13px">
+                  <div style="display:flex;align-items:center;gap:8px"><lucide-icon name="calendar-clock" class="ic" style="width:15px;height:15px;color:var(--cinder-accent-text)"></lucide-icon><span style="font:600 13px system-ui">Nightly eval sweep</span><span class="spacer"></span><span style="display:inline-flex;align-items:center;gap:5px;font:600 10px system-ui;color:var(--cinder-color-success-fg)"><i class="dot" style="background:var(--cinder-success)"></i>Active</span></div>
+                  <div class="subtle" style="font:500 11.5px system-ui;margin-top:7px">Every day at 02:00</div>
+                  <div class="lns" style="margin-top:8px">cron 0 2 * * *</div>
+                </div>
+                <div style="border:1px solid var(--cinder-border);border-radius:11px;padding:13px;opacity:.78">
+                  <div style="display:flex;align-items:center;gap:8px"><lucide-icon name="calendar-clock" class="ic" style="width:15px;height:15px;color:var(--cinder-text-subtle)"></lucide-icon><span style="font:600 13px system-ui">Weekly dependency check</span><span class="spacer"></span><span style="display:inline-flex;align-items:center;gap:5px;font:600 10px system-ui;color:var(--cinder-text-subtle)"><i class="dot" style="background:var(--cinder-text-disabled)"></i>Paused</span></div>
+                  <div class="subtle" style="font:500 11.5px system-ui;margin-top:7px">Mondays at 09:00</div>
+                  <div class="lns" style="margin-top:8px">cron 0 9 * * 1</div>
+                </div>
+              </div>
+              <div style="flex:1;min-width:0;overflow:auto;padding:22px 24px">
+                <div style="display:flex;align-items:flex-start;gap:14px">
+                  <div style="flex:1">
+                    <div style="display:flex;align-items:center;gap:10px"><h2 style="font:650 19px system-ui;margin:0">Nightly eval sweep</h2><span style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--cinder-color-success-border);background:var(--cinder-color-success-bg);border-radius:20px;padding:3px 10px;font:600 10.5px system-ui;color:var(--cinder-color-success-fg)"><i class="dot" style="background:var(--cinder-success)"></i>Active</span></div>
+                    <div class="subtle" style="font:400 12.5px system-ui;margin-top:5px">Runs every day at 02:00 · next run in 6h 12m · submits into session <span class="mono">nightly-eval</span></div>
+                  </div>
+                  <div style="display:flex;gap:8px">
+                    <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="primary" size="sm" hint-size="auto,32px"><span style="display:inline-flex;align-items:center;gap:6px"><lucide-icon name="play" class="ic" style="width:13px;height:13px"></lucide-icon>Trigger now</span></x-import>
+                    <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="secondary" size="sm" hint-size="auto,32px"><span style="display:inline-flex;align-items:center;gap:6px"><lucide-icon name="pause" class="ic" style="width:13px;height:13px"></lucide-icon>Pause</span></x-import>
+                    <button class="cinder-button" data-cinder-variant="ghost" data-cinder-size="sm"><span>Edit</span></button>
+                  </div>
+                </div>
+                <div style="border:1px solid var(--cinder-border);border-radius:11px;background:var(--cinder-surface);padding:15px 16px;margin-top:18px">
+                  <div class="subtle" style="font:600 10px system-ui;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px">The task it submits each run</div>
+                  <div style="font:400 13.5px/1.55 system-ui">"Run the full eval suite against <span class="mono">main</span>, summarize any regressions versus yesterday, and remember anything that recurs."</div>
+                  <div style="display:flex;gap:18px;margin-top:13px;padding-top:12px;border-top:1px solid var(--cinder-border-muted)">
+                    <div><div class="subtle" style="font:500 10px system-ui;text-transform:uppercase;letter-spacing:.06em">Cadence</div><div style="font:500 12.5px system-ui;margin-top:3px">Every day · 02:00 local</div></div>
+                    <div><div class="subtle" style="font:500 10px system-ui;text-transform:uppercase;letter-spacing:.06em">Overlap</div><div style="font:500 12.5px system-ui;margin-top:3px">Skip if still running</div></div>
+                    <div><div class="subtle" style="font:500 10px system-ui;text-transform:uppercase;letter-spacing:.06em">Spec</div><div style="margin-top:3px"><span class="lns">Temporal Schedule · sched_9a2</span></div></div>
+                  </div>
+                </div>
+                <div style="margin-top:20px">
+                  <div class="subtle" style="font:600 10px system-ui;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px">Runs it produced</div>
+                  <div style="display:flex;flex-direction:column;gap:8px">
+                    <div style="display:flex;align-items:center;gap:11px;border:1px solid var(--cinder-border);border-radius:9px;padding:11px 13px"><i class="dot" style="background:var(--cinder-success)"></i><span style="font:600 12.5px system-ui">Last night · 02:00</span><span class="subtle" style="font:400 12px system-ui">142 cases · 3 retries auto-recovered · 0 regressions</span><span class="spacer"></span><span class="cinder-badge" data-cinder-variant="success" data-cinder-size="sm">Complete</span><a href="#03a" class="lns" style="text-decoration:none">wf_2c91</a></div>
+                    <div style="display:flex;align-items:center;gap:11px;border:1px solid var(--cinder-border);border-radius:9px;padding:11px 13px"><i class="dot" style="background:var(--cinder-success)"></i><span style="font:600 12.5px system-ui">2 days ago · 02:00</span><span class="subtle" style="font:400 12px system-ui">142 cases · 1 regression flagged &amp; remembered</span><span class="spacer"></span><span class="cinder-badge" data-cinder-variant="success" data-cinder-size="sm">Complete</span><a href="#03a" class="lns" style="text-decoration:none">wf_2b80</a></div>
+                    <div style="display:flex;align-items:center;gap:11px;border:1px solid var(--cinder-border);border-radius:9px;padding:11px 13px"><i class="dot" style="background:var(--cinder-warning)"></i><span style="font:600 12.5px system-ui">3 days ago · 02:00</span><span class="subtle" style="font:400 12px system-ui">Model provider rate-limited · retried, then completed</span><span class="spacer"></span><span class="cinder-badge" data-cinder-variant="success" data-cinder-size="sm">Complete</span><a href="#03a" class="lns" style="text-decoration:none">wf_2a71</a></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 09 SETTINGS ===== -->
+  <div class="secthd"><span class="n">09</span><span class="t">Settings</span><span class="c">Model, budgets, appearance, and the local data this proof-of-concept owns — kept plain and honest.</span></div>
+
+  <div class="scr">
+    <div class="scrlab"><span class="scrnum">09</span><span class="scrname">Settings — model, budgets, appearance, local data</span></div>
+    <p class="scrcap">Everything is local and single-user. The API key is shown masked, values never leave the field. Budgets cap each run; the default view and the under-the-hood lens default are set here; and the data this POC owns is listed plainly with a reset that says exactly what it deletes.</p>
+    <div class="frame" style="width:1360px">
+      <div class="app">
+        <div class="top">
+          <span class="mark">STARDUST</span><span class="vr"></span><span class="subtle" style="font:500 12px system-ui">Settings</span>
+          <span class="spacer"></span>
+          <div class="wk"><i class="dot" style="background:var(--cinder-success)"></i><b>Worker · live</b><span>2 workers · agent-main</span></div>
+          <div class="uth"><div class="uth-l"><b>Under the hood</b><span>Show Temporal internals</span></div><div class="swt"><i></i></div></div>
+          <div class="iconbtn"><lucide-icon name="settings" class="ic"></lucide-icon></div>
+        </div>
+        <div class="body">
+          <div class="rail">
+            <div class="railtop"><x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="primary" size="sm" full-width="true" hint-size="100%,34px"><span style="display:inline-flex;align-items:center;gap:7px"><lucide-icon name="plus" class="ic" style="width:15px;height:15px"></lucide-icon>New session</span></x-import></div>
+            <div class="railscroll">
+              <div class="railhd">Sessions <span class="subtle mono" style="font-size:9px">3</span></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-success)"></span><div style="min-width:0;flex:1"><div class="sess-t">Refactor auth guards</div><div class="sess-m">ses_7af3 · running · 2m</div></div></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-warning)"></span><div style="min-width:0;flex:1"><div class="sess-t">Migrate billing tables</div><div class="sess-m">ses_b0d4 · approval · 4m</div></div></div>
+              <div class="sess"><span class="sd dot" style="background:var(--cinder-text-disabled)"></span><div style="min-width:0;flex:1"><div class="sess-t">Nightly eval sweep</div><div class="sess-m">ses_2c91 · idle · 1h</div></div></div>
+              <div class="railhd" style="margin-top:18px">Global</div>
+              <div class="nav"><lucide-icon name="shield-alert" class="ic"></lucide-icon>Approvals<span class="ct">1</span></div>
+              <div class="nav"><lucide-icon name="calendar-clock" class="ic"></lucide-icon>Schedules</div>
+              <div class="nav"><lucide-icon name="brain" class="ic"></lucide-icon>Memory</div>
+              <div class="nav active"><lucide-icon name="settings" class="ic"></lucide-icon>Settings</div>
+            </div>
+            <div class="railfoot"><i class="dot" style="background:var(--cinder-success)"></i><div style="line-height:1.3"><div style="font:600 11px system-ui">Temporal dev server</div><div class="subtle mono" style="font-size:9.5px">localhost:7776 · default namespace</div></div></div>
+          </div>
+          <div class="main">
+            <div style="flex:none;padding:18px 22px 14px;border-bottom:1px solid var(--cinder-border)"><h1 class="title" style="font-size:20px">Settings</h1></div>
+            <div style="flex:1;overflow:auto;padding:24px">
+              <div style="max-width:680px;margin:0 auto;display:flex;flex-direction:column;gap:26px">
+                <div>
+                  <div style="font:600 13px system-ui;margin-bottom:4px">Model &amp; provider</div>
+                  <div class="subtle" style="font:400 12px system-ui;margin-bottom:14px">The one unavoidable external call. Everything else runs locally.</div>
+                  <div style="display:flex;flex-direction:column;gap:16px">
+                    <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Select" label="Model" default-value="sonnet" dc-props="{{ modelSelect }}" hint-size="100%,64px"></x-import>
+                    <div>
+                      <div style="font:500 12.5px system-ui;margin-bottom:6px">Anthropic API key <span class="mono" style="color:var(--cinder-text-subtle)">MODEL_API_KEY</span></div>
+                      <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.SecretValueField" value="sk-ant-api03-9f3a21c7b0d4e10a" prefix="sk-ant-" suffix="…10a" label="Anthropic API key" allow-reveal="true" hint-size="100%,48px"></x-import>
+                    </div>
+                  </div>
+                </div>
+                <div style="height:1px;background:var(--cinder-border)"></div>
+                <div>
+                  <div style="font:600 13px system-ui;margin-bottom:4px">Budgets</div>
+                  <div class="subtle" style="font:400 12px system-ui;margin-bottom:14px">Hard caps per run. A run that would exceed its budget pauses for your approval to continue.</div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                    <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Input" label="Tokens per run" type="number" default-value="200000" description="Soft-stop &amp; ask to continue" hint-size="100%,76px"></x-import>
+                    <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Input" label="Spend per run (USD)" type="number" default-value="2.00" description="Estimated from token usage" hint-size="100%,76px"></x-import>
+                  </div>
+                </div>
+                <div style="height:1px;background:var(--cinder-border)"></div>
+                <div>
+                  <div style="font:600 13px system-ui;margin-bottom:14px">Appearance &amp; defaults</div>
+                  <div style="display:flex;flex-direction:column;gap:16px">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                      <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Select" label="Theme" default-value="dark" dc-props="{{ themeSelect }}" hint-size="100%,64px"></x-import>
+                      <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Select" label="Default view" default-value="split" dc-props="{{ viewSelect }}" hint-size="100%,64px"></x-import>
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;border:1px solid var(--cinder-border);border-radius:10px;padding:13px 15px;background:var(--cinder-surface)">
+                      <div><div style="font:600 12.5px system-ui">Under-the-hood lens on by default</div><div class="subtle" style="font:400 11.5px system-ui;margin-top:2px">Show Temporal workflow &amp; activity detail in place. You can flip it per-session anytime.</div></div>
+                      <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Switch" default-checked="true" label="" hint-size="auto,24px"></x-import>
+                    </div>
+                  </div>
+                </div>
+                <div style="height:1px;background:var(--cinder-border)"></div>
+                <div>
+                  <div style="font:600 13px system-ui;margin-bottom:4px">Local data</div>
+                  <div class="subtle" style="font:400 12px system-ui;margin-bottom:14px">Everything Stardust stores lives under <span class="mono">~/.stardust/</span>. Nothing is sent anywhere but the model provider.</div>
+                  <div style="display:flex;flex-direction:column;gap:8px;font:500 12px ui-monospace,monospace">
+                    <div style="display:flex;justify-content:space-between;border:1px solid var(--cinder-border-muted);border-radius:8px;padding:10px 12px"><span class="subtle">Database</span><span>~/.stardust/stardust.db</span></div>
+                    <div style="display:flex;justify-content:space-between;border:1px solid var(--cinder-border-muted);border-radius:8px;padding:10px 12px"><span class="subtle">Artifacts</span><span>~/.stardust/artifacts</span></div>
+                    <div style="display:flex;justify-content:space-between;border:1px solid var(--cinder-border-muted);border-radius:8px;padding:10px 12px"><span class="subtle">Workspaces</span><span>~/.stardust/ws</span></div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:10px;margin-top:14px;border:1px solid var(--cinder-color-danger-border);background:var(--cinder-color-danger-bg);border-radius:10px;padding:13px 15px">
+                    <lucide-icon name="trash-2" class="ic" style="width:17px;height:17px;color:var(--cinder-color-danger-fg)"></lucide-icon>
+                    <div style="flex:1"><div style="font:600 12.5px system-ui;color:var(--cinder-color-danger-fg)">Reset all local state</div><div style="font:400 11px system-ui;color:var(--cinder-color-danger-fg);opacity:.9">Deletes the database, artifacts, workspaces, and model cache. Sessions, transcripts, memory, and schedules are gone. This cannot be undone.</div></div>
+                    <button class="cinder-button" data-cinder-variant="soft-danger" data-cinder-size="sm"><span>Reset…</span></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 10 STATES ===== -->
+  <div class="secthd"><span class="n">10</span><span class="t">Run states · a consistent vocabulary</span><span class="c">Every state reads the same way — a dot, a word, and a true next step. Disconnected is never an error: it falls back to durable truth.</span></div>
+
+  <div class="scr">
+    <div class="scrlab"><span class="scrnum">10</span><span class="scrname">The nine states a run can be in</span></div>
+    <p class="scrcap">Status is always <b>text + dot</b>, never color alone. The hero states (streaming, waiting approval, recovered) have full screens above; this matrix is the shared system. Note <b>disconnected</b> and <b>loading</b>: because live is a view over durable truth, losing the stream shows the last durable transcript with a calm reconnect — not a stale or scary screen.</p>
+    <div class="frame" style="width:1100px;padding:22px;background:var(--cinder-bg)">
+      <div class="smat">
+        <div class="scard"><div class="scard-hd"><span class="dot" style="background:var(--cinder-text-disabled)"></span><span class="scard-nm">Empty</span><span class="cinder-badge" data-cinder-variant="neutral" data-cinder-size="sm" style="margin-left:auto">first run</span></div><div class="scard-bd"><div class="scard-ds">No sessions yet — the first screen is the task box, not a blank list.</div><a href="#01b" class="lns" style="text-decoration:none;align-self:flex-start"><lucide-icon name="arrow-up-right" style="width:12px;height:12px"></lucide-icon>see 01b</a></div></div>
+        <div class="scard"><div class="scard-hd"><span class="spin"></span><span class="scard-nm">Loading</span><span class="cinder-badge" data-cinder-variant="info" data-cinder-size="sm" style="margin-left:auto">reconnecting</span></div><div class="scard-bd"><div class="scard-ds">Re-attaching to a running session. Skeletons until the durable transcript arrives.</div><div style="display:flex;flex-direction:column;gap:6px"><div class="shim" style="height:8px;width:90%"></div><div class="shim" style="height:8px;width:70%"></div></div></div></div>
+        <div class="scard"><div class="scard-hd"><span class="dot" style="background:var(--cinder-info)"></span><span class="scard-nm">Streaming</span><span class="cinder-badge" data-cinder-variant="info" data-cinder-size="sm" style="margin-left:auto">live</span></div><div class="scard-bd"><div class="scard-ds">Assistant is writing; tokens arrive live over the durable stream.</div><div style="font:400 12px system-ui;border:1px solid var(--cinder-border-muted);border-radius:7px;padding:7px 9px">Running tests<span style="display:inline-block;width:2px;height:13px;background:var(--cinder-accent-text);margin-left:2px;vertical-align:-2px"></span></div></div></div>
+        <div class="scard"><div class="scard-hd"><span class="dot" style="background:var(--cinder-warning)"></span><span class="scard-nm">Waiting approval</span><span class="cinder-badge" data-cinder-variant="warning" data-cinder-size="sm" style="margin-left:auto">paused</span></div><div class="scard-bd"><div class="scard-ds">Paused on a durable human gate. Survives a refresh; nothing has run.</div><a href="#04a" class="lns" style="text-decoration:none;align-self:flex-start"><lucide-icon name="arrow-up-right" style="width:12px;height:12px"></lucide-icon>see 04a</a></div></div>
+        <div class="scard"><div class="scard-hd"><span class="dot" style="background:var(--cinder-warning)"></span><span class="scard-nm">Disconnected</span><span class="cinder-badge" data-cinder-variant="warning" data-cinder-size="sm" style="margin-left:auto">live paused</span></div><div class="scard-bd"><div class="scard-ds">Live updates paused — reconnecting. You're viewing the last durable transcript, not stale guesses.</div><div style="display:flex;align-items:center;gap:8px;border:1px solid var(--cinder-color-warning-border);background:var(--cinder-color-warning-bg);border-radius:7px;padding:7px 9px"><span class="spin" style="width:13px;height:13px"></span><span style="font:500 11px system-ui;color:var(--cinder-color-warning-fg)">Reconnecting · showing event #244</span></div></div></div>
+        <div class="scard"><div class="scard-hd"><span class="dot" style="background:var(--cinder-success)"></span><span class="scard-nm">Recovered</span><span class="cinder-badge" data-cinder-variant="success" data-cinder-size="sm" style="margin-left:auto">no loss</span></div><div class="scard-bd"><div class="scard-ds">A worker crashed mid-run; resumed from durable history with nothing lost.</div><a href="#07" class="lns" style="text-decoration:none;align-self:flex-start"><lucide-icon name="arrow-up-right" style="width:12px;height:12px"></lucide-icon>see 07</a></div></div>
+        <div class="scard"><div class="scard-hd"><span class="dot" style="background:var(--cinder-danger)"></span><span class="scard-nm">Failed</span><span class="cinder-badge" data-cinder-variant="danger" data-cinder-size="sm" style="margin-left:auto">error</span></div><div class="scard-bd"><div class="scard-ds">Exhausted retries. The last error is shown; retry from the last good step where it's safe.</div><div style="display:flex;align-items:center;gap:8px"><div class="mono" style="flex:1;font:500 10.5px ui-monospace,monospace;color:var(--cinder-color-danger-fg);background:var(--cinder-color-danger-bg);border-radius:6px;padding:5px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">ENOENT migrations/003…</div><button class="cinder-button" data-cinder-variant="soft" data-cinder-size="xs"><span>Retry</span></button></div></div></div>
+        <div class="scard"><div class="scard-hd"><span class="dot" style="background:var(--cinder-text-disabled)"></span><span class="scard-nm">Cancelled</span><span class="cinder-badge" data-cinder-variant="neutral" data-cinder-size="sm" style="margin-left:auto">by you</span></div><div class="scard-bd"><div class="scard-ds">You stopped the run. The transcript is preserved — resume or branch from it later.</div></div></div>
+        <div class="scard"><div class="scard-hd"><span class="dot" style="background:var(--cinder-success)"></span><span class="scard-nm">Complete</span><span class="cinder-badge" data-cinder-variant="success" data-cinder-size="sm" style="margin-left:auto">done</span></div><div class="scard-bd"><div class="scard-ds">Finished. Durability ribbon reads 0 lost; result and artifacts are ready.</div><div style="display:flex;gap:6px"><span class="lns" style="color:var(--cinder-color-success-fg);border-color:var(--cinder-color-success-border)">0 events lost</span><span class="lns">2 artifacts</span></div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 11 RESPONSIVE ===== -->
+  <div class="secthd"><span class="n">11</span><span class="t">Responsive</span><span class="c">Desktop is the operator's home. Tablet keeps the split as a toggle; phone is for watching and approving — nothing risky composed on a small screen.</span></div>
+
+  <div class="scr">
+    <div class="scrlab"><span class="scrnum">11a</span><span class="scrname">Tablet — split collapses to a toggle</span></div>
+    <p class="scrcap">At tablet width the two panes can't sit side by side, so the rail collapses to icons and the working surface becomes one column with a <b>Conversation / Run</b> toggle. The durability ribbon stays pinned — it's never the thing that gets cut.</p>
+    <div class="framerow">
+      <div class="frame" style="width:824px">
+        <div class="app" style="height:600px">
+          <div class="top" style="padding:0 12px"><span class="mark" style="font-size:11px">STARDUST</span><span class="vr"></span><div class="sesschip"><b style="font-size:12px">Refactor auth guards</b><span>ses_7af3</span></div><span class="spacer"></span><div class="wk" style="padding:4px 7px"><i class="dot" style="background:var(--cinder-success)"></i><b style="font-size:10.5px">live</b></div><div class="uth"><div class="swt"><i></i></div></div></div>
+          <div class="body">
+            <div style="width:56px;flex:none;border-right:1px solid var(--cinder-border);background:var(--cinder-surface);display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 0">
+              <div class="iconbtn" style="background:var(--cinder-accent);color:var(--cinder-accent-contrast)"><lucide-icon name="plus" class="ic" style="width:16px;height:16px"></lucide-icon></div>
+              <div class="iconbtn" style="color:var(--cinder-accent-text)"><lucide-icon name="messages-square" class="ic"></lucide-icon></div>
+              <div class="iconbtn" style="position:relative"><lucide-icon name="shield-alert" class="ic"></lucide-icon><span style="position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;background:var(--cinder-warning)"></span></div>
+              <div class="iconbtn"><lucide-icon name="calendar-clock" class="ic"></lucide-icon></div>
+              <div class="iconbtn"><lucide-icon name="brain" class="ic"></lucide-icon></div>
+              <span class="spacer"></span>
+              <div class="iconbtn"><lucide-icon name="settings" class="ic"></lucide-icon></div>
+            </div>
+            <div class="main">
+              <div style="flex:none;display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--cinder-border)">
+                <div style="display:inline-flex;border:1px solid var(--cinder-border);border-radius:8px;overflow:hidden;font:600 12px system-ui">
+                  <span style="padding:6px 14px;background:var(--cinder-accent);color:var(--cinder-accent-contrast)">Conversation</span>
+                  <span style="padding:6px 14px;color:var(--cinder-text-muted);border-left:1px solid var(--cinder-border)">Run · 6 steps</span>
+                </div>
+                <span class="spacer"></span>
+                <span class="lns">wf_7af3</span>
+              </div>
+              <div class="ribbon"><div class="rib"><span class="rib-n" style="font-size:14px">0</span><span class="rib-l">lost</span></div><div class="rib"><span class="rib-n" style="font-size:14px;color:var(--cinder-success)">1</span><span class="rib-l">auto-retry</span></div><div class="rib"><span class="rib-n" style="font-size:14px">0</span><span class="rib-l">crashes</span></div><div class="rib"><span class="rib-n" style="font-size:14px;color:var(--cinder-accent-text)">#244</span><span class="rib-l">durable event</span></div></div>
+              <div style="flex:1;overflow:auto;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+                <div style="align-self:flex-end;max-width:78%;background:var(--cinder-surface-inset);border:1px solid var(--cinder-border);border-radius:11px;padding:10px 12px;font:400 12.5px/1.5 system-ui">Refactor the auth guards to share one policy check, then run tests.</div>
+                <div style="max-width:88%;background:var(--cinder-surface-raised);border:1px solid var(--cinder-border);border-radius:11px;padding:10px 12px;box-shadow:var(--cinder-shadow-sm)"><div style="font:600 10px system-ui;color:var(--cinder-text-subtle);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">Assistant</div><div style="font:400 12.5px/1.55 system-ui">Extracted <span class="mono">requireSession</span> into a shared module and updated all three guards. Running the suite now<span style="display:inline-block;width:2px;height:12px;background:var(--cinder-accent-text);margin-left:2px;vertical-align:-2px"></span></div></div>
+                <div style="max-width:88%;border:1px solid var(--cinder-border-muted);border-radius:10px;padding:9px 11px;display:flex;align-items:center;gap:8px"><lucide-icon name="wrench" class="ic" style="width:14px;height:14px;color:var(--cinder-warning)"></lucide-icon><span style="font:600 12px ui-monospace,monospace">shell.exec</span><span style="font:400 11px system-ui;color:var(--cinder-text-subtle)">bun run test:unit</span><span class="spacer"></span><span class="cinder-badge" data-cinder-variant="info" data-cinder-size="sm">Running</span></div>
+              </div>
+              <div style="flex:none;border-top:1px solid var(--cinder-border);padding:10px 14px;display:flex;align-items:center;gap:10px"><div style="flex:1;border:1px solid var(--cinder-border-strong);border-radius:9px;padding:9px 11px;font:400 12px system-ui;color:var(--cinder-text-subtle)">Steer the agent…</div><div class="iconbtn" style="background:var(--cinder-accent);color:var(--cinder-accent-contrast)"><lucide-icon name="arrow-up" class="ic"></lucide-icon></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="scr">
+    <div class="scrlab"><span class="scrnum">11b</span><span class="scrname">Phone — monitoring &amp; approval only</span></div>
+    <p class="scrcap">On a phone you watch and you decide — you don't compose risky work. Two surfaces: a live <b>monitor</b> (status, durability ribbon, steps) and a full-context <b>approval</b> with thumb-sized Approve / Deny. Anything heavier nudges you to the desktop.</p>
+    <div class="framerow">
+      <!-- phone: monitor -->
+      <div class="phone" style="position:relative">
+        <div class="pnotch"></div>
+        <div class="phone-sb"><span>9:41</span><span style="display:inline-flex;gap:5px;align-items:center"><lucide-icon name="signal" style="width:14px;height:14px"></lucide-icon><lucide-icon name="battery-full" style="width:16px;height:16px"></lucide-icon></span></div>
+        <div style="padding:6px 16px 10px;border-bottom:1px solid var(--cinder-border)">
+          <div style="display:flex;align-items:center;gap:8px"><span class="mark" style="font-size:10px">STARDUST</span><span class="spacer"></span><span style="display:inline-flex;align-items:center;gap:5px;font:600 10px system-ui;color:var(--cinder-color-success-fg)"><i class="dot" style="background:var(--cinder-success)"></i>worker live</span></div>
+          <div style="font:650 16px system-ui;margin-top:10px">Refactor auth guards</div>
+          <div class="subtle mono" style="font-size:10.5px;margin-top:2px">ses_7af3 · running · step 5 / 6</div>
+        </div>
+        <div style="display:flex;border-bottom:1px solid var(--cinder-border)"><div style="flex:1;padding:10px;text-align:center;border-right:1px solid var(--cinder-border-muted)"><div style="font:700 16px system-ui">0</div><div class="rib-l">lost</div></div><div style="flex:1;padding:10px;text-align:center;border-right:1px solid var(--cinder-border-muted)"><div style="font:700 16px system-ui;color:var(--cinder-success)">1</div><div class="rib-l">auto-retry</div></div><div style="flex:1;padding:10px;text-align:center"><div style="font:700 16px system-ui;color:var(--cinder-accent-text)">#244</div><div class="rib-l">durable</div></div></div>
+        <div style="padding:14px 16px;display:flex;flex-direction:column;gap:13px">
+          <div style="display:flex;gap:9px;align-items:center"><span class="dot" style="background:var(--cinder-success)"></span><span style="font:500 12.5px system-ui;flex:1">Apply patch · shared.ts</span><span class="subtle mono" style="font-size:10px">1.2s</span></div>
+          <div style="display:flex;gap:9px;align-items:center"><span class="dot" style="background:var(--cinder-success)"></span><span style="font:500 12.5px system-ui;flex:1">Review patch safety</span><span class="subtle mono" style="font-size:10px">3.4s</span></div>
+          <div style="display:flex;gap:9px;align-items:center"><span class="dot" style="background:var(--cinder-info)"></span><span style="font:600 12.5px system-ui;flex:1">Run test suite</span><span class="lns" style="font-size:9px">65%</span></div>
+          <div style="display:flex;gap:9px;align-items:center;opacity:.55"><span class="dot" style="background:var(--cinder-text-disabled)"></span><span style="font:500 12.5px system-ui;flex:1">Summarize &amp; finish</span></div>
+        </div>
+        <div style="margin:0 16px 16px;border:1px dashed var(--cinder-border);border-radius:10px;padding:11px;text-align:center;font:400 11px/1.5 system-ui;color:var(--cinder-text-subtle)"><lucide-icon name="monitor" style="width:14px;height:14px;vertical-align:-2px"></lucide-icon> Open on desktop to steer or interrupt</div>
+      </div>
+
+      <!-- phone: approval -->
+      <div class="phone" style="position:relative">
+        <div class="pnotch"></div>
+        <div class="phone-sb"><span>9:41</span><span style="display:inline-flex;gap:5px;align-items:center"><lucide-icon name="signal" style="width:14px;height:14px"></lucide-icon><lucide-icon name="battery-full" style="width:16px;height:16px"></lucide-icon></span></div>
+        <div style="padding:6px 16px 12px;border-bottom:1px solid var(--cinder-color-warning-border);background:var(--cinder-color-warning-bg)">
+          <div style="display:flex;align-items:center;gap:7px"><lucide-icon name="shield-alert" style="width:16px;height:16px;color:var(--cinder-color-warning-fg)"></lucide-icon><span style="font:600 11.5px system-ui;color:var(--cinder-color-warning-fg)">Approval required</span><span class="spacer"></span><span class="cinder-badge" data-cinder-variant="danger" data-cinder-size="sm">High risk</span></div>
+          <div style="font:650 15px system-ui;margin-top:9px">shell.exec · run migration</div>
+          <div style="font:500 10.5px ui-monospace,monospace;color:var(--cinder-color-warning-fg);margin-top:3px">expires in 8m 12s · ses_b0d4</div>
+        </div>
+        <div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+          <div><div class="subtle" style="font:600 9.5px system-ui;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Command</div><div class="mono" style="font:500 11px/1.5 ui-monospace,monospace;background:var(--cinder-surface-inset);border:1px solid var(--cinder-border-muted);border-radius:7px;padding:9px;word-break:break-all">psql $DATABASE_URL -f migrations/003_billing.sql</div></div>
+          <div style="display:flex;gap:10px"><div style="flex:1"><div class="subtle" style="font:600 9.5px system-ui;text-transform:uppercase">Files</div><div style="font:500 11px system-ui;margin-top:3px">1 touched</div></div><div style="flex:1"><div class="subtle" style="font:600 9.5px system-ui;text-transform:uppercase">Sandbox</div><div class="mono" style="font:500 10px system-ui;margin-top:3px">ses_b0d4</div></div></div>
+          <div><div class="subtle" style="font:600 9.5px system-ui;text-transform:uppercase;margin-bottom:4px">Environment · names only</div><div style="display:flex;gap:5px;flex-wrap:wrap"><span class="lns" style="font-size:9px">DATABASE_URL</span><span class="lns" style="font-size:9px">PGUSER</span><span class="lns" style="font-size:9px">NODE_ENV</span></div></div>
+        </div>
+        <div style="padding:0 16px 16px;display:flex;flex-direction:column;gap:8px">
+          <button class="cinder-button" data-cinder-variant="primary" data-cinder-size="md" style="width:100%"><span>Approve</span></button>
+          <div style="display:flex;gap:8px"><button class="cinder-button" data-cinder-variant="soft-danger" data-cinder-size="md" style="flex:1"><span>Deny</span></button><button class="cinder-button" data-cinder-variant="soft" data-cinder-size="md" style="flex:1"><span>Remember</span></button></div>
+          <div style="text-align:center;font:400 10px system-ui;color:var(--cinder-text-subtle);margin-top:2px">Editing arguments opens on desktop</div>
+        </div>
+      </div>
+
+      <div style="max-width:300px;align-self:center">
+        <div style="font:600 13px system-ui;margin-bottom:8px">Why phone is read-mostly</div>
+        <p style="font:400 12.5px/1.6 system-ui;color:var(--cinder-text-muted);margin:0">A durable approval is the one decision worth surfacing anywhere — so it's first-class on phone, with full command and impact in view. But composing tasks, editing arguments, and steering a live run need the desktop's space and precision, so the phone routes you there instead of offering a cramped, error-prone version.</p>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:80px;padding-top:28px;border-top:1px solid var(--cinder-border);display:flex;align-items:center;gap:10px;color:var(--cinder-text-subtle)">
+    <span class="mark" style="font-size:11px">STARDUST</span><span class="subtle" style="font:400 12px system-ui">· console redesign · Cinder design system · dark</span>
+    <span class="spacer"></span>
+    <span class="subtle" style="font:400 12px system-ui">11 surfaces · 9 run states · desktop · tablet · phone</span>
+  </div>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() { this.icons(); }
+  componentDidUpdate() { this.icons(); }
+  icons() {
+    const draw = () => { if (window.lucide && window.lucide.createIcons) window.lucide.createIcons(); };
+    let n = 0;
+    clearInterval(this._iconTimer);
+    this._iconTimer = setInterval(() => { draw(); if (++n > 24) clearInterval(this._iconTimer); }, 450);
+    requestAnimationFrame(draw);
+  }
+  componentWillUnmount() { clearInterval(this._iconTimer); }
+  el(tag, props, children) { return React.createElement(tag, props, children); }
+  badge(variant, text) {
+    const C = window.CinderDesignSystem_3e8bc5;
+    return React.createElement(C.Badge, { variant, size: 'sm' }, text);
+  }
+  statusDot(variant, label) {
+    const C = window.CinderDesignSystem_3e8bc5;
+    return React.createElement(C.StatusDot, { variant, label });
+  }
+  btn(variant, label) {
+    const C = window.CinderDesignSystem_3e8bc5;
+    return React.createElement(C.Button, { variant, size: 'sm' }, label);
+  }
+  lns(text) {
+    return React.createElement('span', { className: 'lns' }, text);
+  }
+
+  sessions() {
+    return [
+      { name: 'Refactor auth guards', meta: 'ses_7af3 · running · 2m', color: 'var(--cinder-success)' },
+      { name: 'Migrate billing tables', meta: 'ses_b0d4 · approval · 4m', color: 'var(--cinder-warning)' },
+      { name: 'Nightly eval sweep', meta: 'ses_2c91 · idle · 1h', color: 'var(--cinder-text-disabled)' },
+    ];
+  }
+
+  renderVals() {
+    const C = window.CinderDesignSystem_3e8bc5 || {};
+    const sessionCards = [
+      {
+        name: 'Refactor auth guards', id: 'ses_7af3',
+        summary: 'Agent is running tests after editing 4 files. Streaming now.',
+        color: 'var(--cinder-success)', border: 'var(--cinder-border)',
+        statusBadge: this.badge('info', 'Running'), ago: 'active now',
+        engChips: this.lns('run wf_7af3 · step 6/9'),
+        resumeBtn: this.btn('secondary', 'Open'),
+      },
+      {
+        name: 'Migrate billing tables', id: 'ses_b0d4',
+        summary: 'Paused on a high-risk shell command. Needs your decision to continue.',
+        color: 'var(--cinder-warning)', border: 'var(--cinder-color-warning-border)',
+        statusBadge: this.badge('warning', 'Approval waiting'), ago: 'paused 4m ago',
+        engChips: this.lns('signal: human_approval'),
+        resumeBtn: this.btn('primary', 'Review'),
+      },
+      {
+        name: 'Nightly eval sweep', id: 'ses_2c91',
+        summary: 'Completed last night. 142 cases, 3 retries auto-recovered, 0 lost.',
+        color: 'var(--cinder-text-disabled)', border: 'var(--cinder-border)',
+        statusBadge: this.badge('success', 'Complete'), ago: '1h ago',
+        engChips: this.lns('schedule: nightly-eval'),
+        resumeBtn: this.btn('secondary', 'Open'),
+      },
+      {
+        name: 'Draft release notes', id: 'ses_4e10',
+        summary: 'Cancelled by you after the second turn. Transcript preserved.',
+        color: 'var(--cinder-text-disabled)', border: 'var(--cinder-border)',
+        statusBadge: this.badge('neutral', 'Cancelled'), ago: 'yesterday',
+        engChips: this.lns('workflow: terminated'),
+        resumeBtn: this.btn('secondary', 'Open'),
+      },
+    ];
+    const base = {
+      sessions: this.sessions(),
+      sessionCards,
+      sessionFacets: {
+        facets: [
+          { key: 'status', label: 'Status', options: [
+            { value: 'running', label: 'Running' },
+            { value: 'approval', label: 'Approval waiting' },
+            { value: 'complete', label: 'Complete' },
+            { value: 'cancelled', label: 'Cancelled' },
+          ]},
+          { key: 'source', label: 'Started by', options: [
+            { value: 'you', label: 'You' },
+            { value: 'schedule', label: 'Schedule' },
+          ]},
+        ],
+        appliedFilters: [{ key: 'status', value: 'approval', label: 'Approval waiting' }],
+      },
+      examplePrompts: [
+        { icon: 'git-branch', text: 'Refactor the auth guards and run the test suite' },
+        { icon: 'bug', text: 'Find why build #4821 is failing and propose a fix' },
+        { icon: 'file-text', text: 'Summarize this week\u2019s commits into release notes' },
+      ],
+    };
+    return Object.assign({}, base, this.convoVals(), this.inspectorVals(), this.approvalVals(), this.settingsVals());
+  }
+
+  settingsVals() {
+    return {
+      modelSelect: { options: [
+        { value: 'sonnet', label: 'Claude Sonnet (default)' },
+        { value: 'opus', label: 'Claude Opus' },
+        { value: 'haiku', label: 'Claude Haiku' },
+      ] },
+      themeSelect: { options: [
+        { value: 'dark', label: 'Dark' },
+        { value: 'light', label: 'Light' },
+        { value: 'system', label: 'Match system' },
+      ] },
+      viewSelect: { options: [
+        { value: 'split', label: 'Conversation + run timeline (split)' },
+        { value: 'conversation', label: 'Conversation only' },
+        { value: 'inspector', label: 'Run inspector first' },
+      ] },
+    };
+  }
+
+  approvalVals() {
+    const expires = new Date(Date.now() + 8 * 60000 + 30000).toISOString();
+    const card = {
+      tool: { name: 'shell.exec', risk: 'high' },
+      policyVersion: 'policy@2026.06.2',
+      idempotencyKey: 'idem_9f3a21',
+      snapshotId: 'snap_b0d4_07',
+      state: 'pending',
+      expiresAt: expires,
+      sandbox: { provider: 'local-subprocess', name: 'ses_b0d4', workingDir: '~/.stardust/ws/ses_b0d4' },
+      operation: {
+        kind: 'command',
+        command: 'psql $DATABASE_URL -f migrations/003_billing.sql',
+        filesTouched: ['migrations/003_billing.sql'],
+        argsPreview: { cwd: '~/.stardust/ws/ses_b0d4', timeoutMs: 60000, statementTimeout: '30s' },
+      },
+      env: ['DATABASE_URL', 'PGUSER', 'NODE_ENV'],
+      onapprove: () => {}, ondeny: () => {}, onremember: () => {}, oncancel: () => {}, onapprovewithedits: () => {},
+    };
+    return {
+      approvalSteps: {
+        label: 'Run ses_b0d4',
+        steps: [
+          { id: 'ap1', label: 'Plan migration', status: 'succeeded', duration: '1.8s' },
+          { id: 'ap2', label: 'Generate SQL patch', status: 'succeeded', duration: '2.2s', link: { href: '#', label: 'View patch' } },
+          { id: 'ap3', label: 'Run migration', status: 'waiting_approval', actionsCount: 1 },
+          { id: 'ap4', label: 'Verify row counts', status: 'pending' },
+        ],
+      },
+      billingApproval: Object.assign({}, card),
+      billingApprovalEditable: Object.assign({}, card, { editableArgs: true }),
+    };
+  }
+
+  inspectorVals() {
+    return {
+      inspectorSteps: {
+        label: 'Run wf_7af3',
+        steps: [
+          { id: 'i1', label: 'Plan turn', status: 'succeeded', duration: '2.1s' },
+          { id: 'i2', label: 'Read 3 guard modules', status: 'succeeded', duration: '0.8s', actionsCount: 3 },
+          { id: 'i3', label: 'Apply patch \u00b7 guards/shared.ts', status: 'succeeded', duration: '1.2s', link: { href: '#', label: 'View diff' } },
+          { id: 'i4', label: 'Subagent \u00b7 review patch safety', status: 'succeeded', duration: '3.4s', children: [
+            { id: 'i4a', label: 'read policy.ts', status: 'succeeded', duration: '0.5s' },
+            { id: 'i4b', label: 'lint changed files', status: 'succeeded', duration: '1.1s' },
+          ] },
+          { id: 'i5', label: 'Run test suite', status: 'succeeded', duration: '18.2s', attemptCount: 2, details: [
+            { id: 'i5a', label: 'attempt 1 \u00b7 failed (auto-retried)', content: 'Error: timeout connecting to test database after 30s\nTemporal scheduled retry with 5s backoff (RetryPolicy: max 3 attempts)' },
+            { id: 'i5b', label: 'attempt 2 \u00b7 passed', content: '63 files \u00b7 412 tests \u00b7 0 failures \u00b7 18.2s' },
+          ] },
+          { id: 'i6', label: 'Summarize & finish', status: 'running', progress: 40 },
+        ],
+      },
+      stepInput: {
+        label: 'Activity input',
+        value: { command: 'bun run test:unit', cwd: '~/.stardust/ws/ses_7af3', timeoutMs: 120000, attempt: 2 },
+        meta: { contentType: 'application/json', source: 'runTests', timestamp: '14:02:27' },
+      },
+      stepOutput: {
+        label: 'Activity result',
+        value: { files: 63, tests: 412, failures: 0, durationMs: 18200, attempt: 2, exitCode: 0 },
+        meta: { contentType: 'application/json', source: 'runTests', timestamp: '14:02:45' },
+      },
+      eventHistory: {
+        label: 'Event history',
+        style: { width: '100%', height: '100%' },
+        connectionState: 'connected',
+        detectSequenceGaps: true,
+        truncated: false,
+        onfilter: () => {},
+        oncopyvisible: (t) => { try { navigator.clipboard.writeText(t); } catch (e) {} },
+        events: [
+          { id: 'e1', sequence: 240, datetime: '2026-06-29T14:02:01Z', timestamp: '14:02:01', severity: 'info', source: 'workflow', summary: 'WorkflowExecutionStarted \u00b7 agentSession(ses_7af3)' },
+          { id: 'e2', sequence: 241, datetime: '2026-06-29T14:02:01Z', timestamp: '14:02:01', severity: 'info', source: 'worker-1', summary: 'ActivityTaskScheduled \u00b7 planTurn' },
+          { id: 'e3', sequence: 242, datetime: '2026-06-29T14:02:03Z', timestamp: '14:02:03', severity: 'success', source: 'worker-1', summary: 'ActivityTaskCompleted \u00b7 planTurn', details: { latencyMs: 2100, attempt: 1 } },
+          { id: 'e4', sequence: 243, datetime: '2026-06-29T14:02:04Z', timestamp: '14:02:04', severity: 'info', source: 'worker-1', summary: 'ActivityTaskScheduled \u00b7 runTests' },
+          { id: 'e5', sequence: 244, datetime: '2026-06-29T14:02:22Z', timestamp: '14:02:22', severity: 'warning', source: 'worker-1', summary: 'ActivityTaskFailed \u00b7 runTests (timeout) \u2014 retry scheduled', details: { attempt: 1, backoffMs: 5000, reason: 'test-db timeout' } },
+          { id: 'r1', kind: 'reconnected', replayedCount: 244, datetime: '2026-06-29T14:02:24Z', timestamp: '14:02:24' },
+          { id: 'e6', sequence: 245, datetime: '2026-06-29T14:02:27Z', timestamp: '14:02:27', severity: 'info', source: 'worker-1', summary: 'ActivityTaskScheduled \u00b7 runTests (attempt 2)' },
+          { id: 'e7', sequence: 247, datetime: '2026-06-29T14:02:45Z', timestamp: '14:02:45', severity: 'success', source: 'worker-1', summary: 'ActivityTaskCompleted \u00b7 runTests', details: { attempt: 2, tests: 412, failures: 0 } },
+        ],
+      },
+    };
+  }
+
+  buildConversation(id, messages) {
+    const ids = []; const map = {};
+    messages.forEach((m, i) => {
+      const mid = m.id || `${id}-m${i}`;
+      ids.push(mid);
+      map[mid] = { id: mid, role: m.role, content: m.content, createdAt: m.createdAt || new Date().toISOString(), metadata: m.metadata || {}, toolCall: m.toolCall, toolResult: m.toolResult };
+    });
+    return { id, title: undefined, status: 'active', ids, messages: map };
+  }
+
+  convoVals() {
+    const conversation = this.buildConversation('refactor', [
+      { role: 'user', content: "Refactor the auth guards in `src/lib/server` so they share one policy check, then run the test suite. Don't touch the public routes." },
+      { role: 'assistant', content: "Here's the plan:\n\n- Read the three guard modules\n- Extract a shared `requireSession` check into `guards/shared.ts`\n- Update the call sites\n- Run `bun run test:unit`\n\nStarting now." },
+      { role: 'tool-call', toolCall: { id: 'tc1', name: 'read_file', arguments: { paths: ['guards/session.ts', 'guards/admin.ts', 'guards/api.ts'] } }, toolResult: { outcome: 'success', content: '3 files \u00b7 218 lines read' } },
+      { role: 'assistant', content: "All three guards duplicate the same session lookup and redirect. I'll extract `requireSession(event)` into `guards/shared.ts` and point each guard at it. Public routes stay untouched." },
+      { role: 'tool-call', toolCall: { id: 'tc2', name: 'apply_patch', arguments: { file: 'guards/shared.ts', additions: 24, deletions: 18 } }, toolResult: { outcome: 'success', content: 'Patch applied \u00b7 +24 \u221218 across 4 files' } },
+      { role: 'assistant', content: "Patched, and the subagent's safety review passed. Running the unit suite to confirm nothing regressed." },
+      { role: 'assistant', content: "Running `bun run test:unit` \u2014 **41 of 63** files passed so far\u2026" },
+    ]);
+    return {
+      convo: {
+        id: 'refactor-chat',
+        conversation,
+        style: { height: '100%', width: '100%' },
+        isStreaming: true,
+        streamingStatus: 'Running tests\u2026',
+        placeholder: 'Steer the agent, or add context \u2014 it keeps running',
+        capabilities: { attachments: true, search: true, copy: true, editing: true, retry: true },
+        onsubmit: () => {}, onstop: () => {}, onedit: () => {},
+      },
+      refactorSteps: {
+        label: 'Run wf_7af3',
+        steps: [
+          { id: 's1', label: 'Plan turn', status: 'succeeded', duration: '2.1s' },
+          { id: 's2', label: 'Read 3 guard modules', status: 'succeeded', duration: '0.8s', actionsCount: 3, details: [{ id: 'd2', label: 'tool output', content: 'session.ts \u00b7 74 lines\nadmin.ts \u00b7 68 lines\napi.ts \u00b7 76 lines' }] },
+          { id: 's3', label: 'Apply patch \u00b7 guards/shared.ts', status: 'succeeded', duration: '1.2s', link: { href: '#', label: 'View diff' } },
+          { id: 's4', label: 'Subagent \u00b7 review patch safety', status: 'succeeded', duration: '3.4s', children: [
+            { id: 's4a', label: 'read policy.ts', status: 'succeeded', duration: '0.5s' },
+            { id: 's4b', label: 'lint changed files', status: 'succeeded', duration: '1.1s' },
+          ] },
+          { id: 's5', label: 'Run test suite', status: 'running', progress: 65, attemptCount: 1 },
+          { id: 's6', label: 'Summarize & finish', status: 'pending' },
+        ],
+      },
+    };
+  }
+}
+</script>
+</body>
+</html>

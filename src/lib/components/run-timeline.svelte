@@ -1,7 +1,19 @@
 <script lang="ts">
 	import Button from '@lostgradient/cinder/button';
 	import Drawer from '@lostgradient/cinder/drawer';
+	import { PayloadInspector } from '@lostgradient/cinder/payload-inspector';
 	import type { RunInspectorProjection } from '$lib/server/observability/projection';
+
+	type ToolCallPayload = {
+		text?: string;
+		calls: Array<{ id: string; name: string; input: unknown }>;
+	};
+
+	type ToolResultPayload = {
+		callId: string;
+		content: unknown;
+		isError: boolean;
+	};
 
 	type Props = {
 		projection: RunInspectorProjection;
@@ -25,9 +37,16 @@
 
 	const recoveryPayloads = $derived(new Set(recoveryMarkers));
 
+	// — step selection state —
+	let selectedStep = $state<RunInspectorProjection['transcript'][number] | null>(null);
+
 	// — raw event drawer state (engineer view only) —
 	let rawEventDrawerOpen = $state(false);
 	let rawEventSelected = $state<RunInspectorProjection['transcript'][number] | null>(null);
+
+	function toggleStep(event: RunInspectorProjection['transcript'][number]) {
+		selectedStep = selectedStep?.id === event.id ? null : event;
+	}
 
 	function openRawEvent(event: RunInspectorProjection['transcript'][number]) {
 		rawEventSelected = event;
@@ -70,6 +89,58 @@
 		};
 		return markers[kind] ?? '·';
 	}
+
+	function isToolCallPayload(value: unknown): value is ToolCallPayload {
+		return (
+			value !== null &&
+			typeof value === 'object' &&
+			'calls' in value &&
+			Array.isArray((value as Record<string, unknown>).calls)
+		);
+	}
+
+	function isToolResultPayload(value: unknown): value is ToolResultPayload {
+		return (
+			value !== null &&
+			typeof value === 'object' &&
+			'callId' in value &&
+			typeof (value as Record<string, unknown>).callId === 'string'
+		);
+	}
+
+	/** The activity/tool name for the selected step, used in PayloadInspector meta. */
+	const selectedStepSource = $derived.by(() => {
+		if (!selectedStep) return undefined;
+		if (selectedStep.kind === 'tool_call' && isToolCallPayload(selectedStep.payload)) {
+			return selectedStep.payload.calls[0]?.name ?? selectedStep.kind;
+		}
+		return selectedStep.kind;
+	});
+
+	/** The activity input payload for the selected step. */
+	const selectedStepInput = $derived.by(() => {
+		if (!selectedStep) return undefined;
+		if (selectedStep.kind === 'tool_call' && isToolCallPayload(selectedStep.payload)) {
+			const firstCall = selectedStep.payload.calls[0];
+			return firstCall ? firstCall.input : selectedStep.payload;
+		}
+		return selectedStep.payload;
+	});
+
+	/** The activity result payload for the selected step (tool_call only). */
+	const selectedStepResult = $derived.by(() => {
+		if (!selectedStep || selectedStep.kind !== 'tool_call') return undefined;
+		const payload = selectedStep.payload;
+		if (!isToolCallPayload(payload) || payload.calls.length === 0) return undefined;
+		const callId = payload.calls[0]?.id;
+		if (!callId) return undefined;
+		const resultEvent = transcript.find(
+			(e) =>
+				e.kind === 'tool_result' && isToolResultPayload(e.payload) && e.payload.callId === callId
+		);
+		if (!resultEvent) return undefined;
+		return isToolResultPayload(resultEvent.payload) ? resultEvent.payload.content : undefined;
+	});
 </script>
 
 <section class="run-timeline" aria-labelledby="run-timeline-heading">
@@ -84,7 +155,6 @@
 				<span class="model-badge">{run.model}</span>
 			{/if}
 			<Button
-				label="Temporal Web ↗"
 				variant="secondary"
 				size="sm"
 				data-temporal-web
@@ -95,7 +165,27 @@
 						window.open(temporalWebUrl, '_blank', 'noreferrer');
 					}
 				}}
-			/>
+			>
+				<span class="btn-inner">
+					<!-- lucide external-link -->
+					<svg
+						width="14"
+						height="14"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+						<polyline points="15 3 21 3 21 9" />
+						<line x1="10" y1="14" x2="21" y2="3" />
+					</svg>
+					Open in Temporal Web
+				</span>
+			</Button>
 		</div>
 	</div>
 
@@ -210,7 +300,13 @@
 								<strong class="recovery-label">Recovery marker</strong>
 							</div>
 						{/if}
-						<div class="step-header">
+						<button
+							class="step-header"
+							class:selected={selectedStep?.id === event.id}
+							type="button"
+							aria-pressed={selectedStep?.id === event.id}
+							onclick={() => toggleStep(event)}
+						>
 							{#if engineerView}
 								<span
 									class="eng-kind-marker"
@@ -234,7 +330,7 @@
 							<time class="timestamp" datetime={event.createdAt}>
 								{formatTimestamp(event.createdAt)}
 							</time>
-						</div>
+						</button>
 						{#if event.payload !== null && event.payload !== undefined}
 							<pre class="step-payload">{typeof event.payload === 'string'
 									? event.payload
@@ -252,6 +348,83 @@
 					</li>
 				{/each}
 			</ol>
+		{/if}
+
+		{#if selectedStep}
+			<div class="step-detail" aria-label="Selected step detail">
+				<div class="step-detail-heading">
+					<!-- lucide crosshair -->
+					<svg
+						width="14"
+						height="14"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+						class="step-detail-icon"
+					>
+						<circle cx="12" cy="12" r="10" />
+						<line x1="22" y1="12" x2="18" y2="12" />
+						<line x1="6" y1="12" x2="2" y2="12" />
+						<line x1="12" y1="6" x2="12" y2="2" />
+						<line x1="12" y1="22" x2="12" y2="18" />
+					</svg>
+					<span class="step-detail-title">Selected step</span>
+					<span class="kind-badge">{kindLabel(selectedStep.kind)}</span>
+					{#if selectedStep.attempts !== undefined && selectedStep.attempts > 1}
+						<span class="attempt-chip"
+							>attempt {selectedStep.attempts} / {selectedStep.attempts}</span
+						>
+					{/if}
+					<button
+						type="button"
+						class="step-detail-close"
+						aria-label="Close step detail"
+						onclick={() => (selectedStep = null)}>×</button
+					>
+				</div>
+
+				{#if selectedStep.attempts !== undefined && selectedStep.attempts > 1}
+					<div class="retry-callout" role="note">
+						<div class="retry-callout-header">
+							<!-- lucide rotate-cw -->
+							<svg
+								width="14"
+								height="14"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								aria-hidden="true"
+							>
+								<polyline points="23 4 23 10 17 10" />
+								<path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+							</svg>
+							Recovered without your help
+						</div>
+						<p class="retry-callout-body">
+							Attempt 1 encountered an error. Temporal applied a backoff and scheduled a retry.
+							Attempt {selectedStep.attempts} passed. No state was lost.
+						</p>
+					</div>
+				{/if}
+
+				<PayloadInspector
+					value={selectedStepInput}
+					meta={{ source: selectedStepSource }}
+					label="Activity input"
+				/>
+				<PayloadInspector
+					value={selectedStepResult}
+					meta={{ source: selectedStepSource }}
+					label="Activity result"
+				/>
+			</div>
 		{/if}
 	</div>
 </section>
@@ -525,13 +698,6 @@
 		font-weight: 700;
 	}
 
-	.step-header {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-		align-items: center;
-	}
-
 	.kind-badge {
 		padding: 0.1rem 0.45rem;
 		border-radius: 4px;
@@ -688,5 +854,115 @@
 		background: var(--cinder-surface-inset);
 		font-size: 0.75rem;
 		line-height: 1.5;
+	}
+
+	/* — Temporal Web button inner layout — */
+	.btn-inner {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	/* — step header as button — */
+	.step-header {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		align-items: center;
+		width: 100%;
+		background: transparent;
+		border: none;
+		padding: 0;
+		cursor: pointer;
+		text-align: left;
+		font: inherit;
+		color: inherit;
+		border-radius: 3px;
+	}
+
+	.step-header:hover {
+		background: var(--cinder-surface-hover);
+	}
+
+	.step-header.selected {
+		background: var(--cinder-surface-inset);
+	}
+
+	/* — step detail panel — */
+	.step-detail {
+		border-top: 1px solid var(--cinder-border-muted);
+		padding-top: 0.75rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+	}
+
+	.step-detail-heading {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.step-detail-icon {
+		color: var(--cinder-accent-text);
+		flex-shrink: 0;
+	}
+
+	.step-detail-title {
+		font: 600 0.85rem system-ui;
+		color: var(--cinder-text);
+	}
+
+	.attempt-chip {
+		padding: 0.1rem 0.4rem;
+		border-radius: 4px;
+		background: var(--cinder-surface);
+		font-size: 0.72rem;
+		font-family: var(--cinder-font-mono);
+		color: var(--cinder-text-subtle);
+		border: 1px solid var(--cinder-border-muted);
+	}
+
+	.step-detail-close {
+		margin-left: auto;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 22px;
+		height: 22px;
+		border: none;
+		border-radius: 4px;
+		background: transparent;
+		color: var(--cinder-text-subtle);
+		font-size: 1rem;
+		cursor: pointer;
+	}
+
+	.step-detail-close:hover {
+		background: var(--cinder-surface-hover);
+		color: var(--cinder-text);
+	}
+
+	/* — retry callout — */
+	.retry-callout {
+		border: 1px solid var(--cinder-color-warning-border);
+		background: var(--cinder-color-warning-bg);
+		border-radius: 9px;
+		padding: 0.7rem 0.8rem;
+	}
+
+	.retry-callout-header {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font: 600 11.5px system-ui;
+		color: var(--cinder-color-warning-fg);
+	}
+
+	.retry-callout-body {
+		font: 400 11.5px/1.5 system-ui;
+		color: var(--cinder-color-warning-fg);
+		opacity: 0.92;
+		margin: 0.35rem 0 0;
 	}
 </style>

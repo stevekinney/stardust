@@ -1,8 +1,7 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import Button from '@lostgradient/cinder/button';
+	import PageHeader from '$lib/components/page-header.svelte';
 	import Select from '@lostgradient/cinder/select';
-	import Toggle from '@lostgradient/cinder/toggle';
 	import { viewMode, type ViewMode } from '$lib/view-mode.svelte';
 
 	type Theme = 'system' | 'light' | 'dark';
@@ -16,9 +15,9 @@
 		| 'claude-haiku-4-5-20251001';
 
 	const MODEL_OPTIONS: Array<{ value: ModelId; label: string }> = [
-		{ value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5' },
 		{ value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
 		{ value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
+		{ value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5' },
 		{ value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' }
 	];
 
@@ -39,8 +38,7 @@
 				model: MODEL_OPTIONS[0].value,
 				theme: 'dark' as Theme,
 				maxBudgetUsd: 5,
-				tokensPerRun: 200000,
-				underTheHood: true
+				tokensPerRun: 200000
 			};
 		}
 		try {
@@ -51,7 +49,6 @@
 					theme: Theme;
 					maxBudgetUsd: number;
 					tokensPerRun: number;
-					underTheHood: boolean;
 				};
 			}
 		} catch {
@@ -61,8 +58,7 @@
 			model: MODEL_OPTIONS[0].value,
 			theme: 'dark' as Theme,
 			maxBudgetUsd: 5,
-			tokensPerRun: 200000,
-			underTheHood: true
+			tokensPerRun: 200000
 		};
 	}
 
@@ -70,7 +66,7 @@
 		if (typeof window === 'undefined') return;
 		localStorage.setItem(
 			SETTINGS_KEY,
-			JSON.stringify({ model, theme, maxBudgetUsd, tokensPerRun, underTheHood })
+			JSON.stringify({ model, theme, maxBudgetUsd, tokensPerRun })
 		);
 		applyTheme(theme);
 	}
@@ -96,7 +92,6 @@
 		theme = 'dark';
 		maxBudgetUsd = 5;
 		tokensPerRun = 200000;
-		underTheHood = true;
 		viewMode.set('operator');
 		applyTheme('dark');
 	}
@@ -107,14 +102,10 @@
 	let theme = $state<Theme>(initial.theme);
 	let maxBudgetUsd = $state(initial.maxBudgetUsd);
 	let tokensPerRun = $state(initial.tokensPerRun);
-	let underTheHood = $state(initial.underTheHood);
 	let defaultView = $derived<ViewMode>(viewMode.mode);
 
 	$effect(() => {
-		applyTheme(theme);
-	});
-
-	$effect(() => {
+		void [model, theme, maxBudgetUsd, tokensPerRun];
 		saveSettings();
 	});
 
@@ -123,10 +114,6 @@
 			viewMode.set(value);
 		}
 	}
-
-	onMount(() => {
-		applyTheme(theme);
-	});
 </script>
 
 <svelte:head>
@@ -134,9 +121,7 @@
 </svelte:head>
 
 <div class="page">
-	<div class="page-header">
-		<h1 class="page-title">Settings</h1>
-	</div>
+	<PageHeader title="Settings" />
 
 	<div class="page-body">
 		<div class="settings-column">
@@ -206,21 +191,6 @@
 							}}
 						/>
 					</div>
-					<div class="toggle-card">
-						<div class="toggle-info">
-							<div class="toggle-label">Under-the-hood lens on by default</div>
-							<div class="toggle-desc">
-								Show Temporal workflow & activity detail in place. You can flip it per-session
-								anytime.
-							</div>
-						</div>
-						<Toggle
-							id="under-the-hood"
-							label="Under the hood"
-							hideLabel
-							bind:checked={underTheHood}
-						/>
-					</div>
 				</div>
 			</section>
 
@@ -283,18 +253,6 @@
 		display: flex;
 		flex-direction: column;
 		height: 100%;
-	}
-
-	.page-header {
-		flex: none;
-		padding: 18px 22px 14px;
-		border-bottom: 1px solid var(--cinder-border);
-	}
-
-	.page-title {
-		font: 650 20px system-ui;
-		margin: 0;
-		color: var(--cinder-text);
 	}
 
 	.page-body {

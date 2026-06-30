@@ -1,11 +1,14 @@
 <script lang="ts">
 	import EmptyState from '@lostgradient/cinder/empty-state';
+	import Badge from '@lostgradient/cinder/badge';
+	import Button from '@lostgradient/cinder/button';
 
 	export type WorkspaceFile = {
 		path: string;
 		mimeType: string;
 		sizeBytes: number;
 		modifiedAt?: string;
+		status?: 'new' | 'modified';
 	};
 
 	export type WorkspaceCommand = {
@@ -40,6 +43,8 @@
 		toSnapshotId: string;
 		patch: string;
 		createdAt: string;
+		fileName?: string;
+		stepRef?: { number: number; name: string };
 	};
 
 	type Props = {
@@ -60,6 +65,21 @@
 			diffs.length === 0
 	);
 
+	let selectedDiffIndex = $state(0);
+	const activeDiff = $derived(diffs[selectedDiffIndex] ?? diffs[0] ?? null);
+
+	const lineStats = $derived.by(() => {
+		let additions = 0;
+		let deletions = 0;
+		for (const diff of diffs) {
+			for (const line of diff.patch.split('\n')) {
+				if (line.startsWith('+') && !line.startsWith('+++')) additions++;
+				if (line.startsWith('-') && !line.startsWith('---')) deletions++;
+			}
+		}
+		return { additions, deletions };
+	});
+
 	function shortSha(sha: string): string {
 		return sha.slice(0, 7);
 	}
@@ -77,10 +97,74 @@
 	function artifactFilename(objectKey: string): string {
 		return objectKey.split('/').at(-1) ?? objectKey;
 	}
+
+	function pathDir(path: string): string {
+		const parts = path.split('/');
+		return parts.length > 1 ? parts.slice(0, -1).join('/') + '/' : '';
+	}
+
+	function pathBasename(path: string): string {
+		return path.split('/').at(-1) ?? path;
+	}
+
+	function isDiffNewFile(patch: string): boolean {
+		return patch.includes('new file mode') || patch.includes('--- /dev/null');
+	}
+
+	function isJsonArtifact(mimeType: string): boolean {
+		return mimeType === 'application/json' || mimeType.endsWith('+json');
+	}
+
+	function extractDiffFilename(diff: WorkspaceDiff): string {
+		if (diff.fileName) return diff.fileName;
+		const match = diff.patch.match(/\+\+\+ b\/(.+)/);
+		return match?.[1] ?? 'diff';
+	}
+
+	type DiffLineKind = 'add' | 'remove' | 'context' | 'header';
+	type DiffLine = { kind: DiffLineKind; text: string };
+
+	function parsePatch(patch: string): DiffLine[] {
+		return patch
+			.split('\n')
+			.filter((line) => line.length > 0)
+			.map((line): DiffLine => {
+				if (line.startsWith('+') && !line.startsWith('+++')) return { kind: 'add', text: line };
+				if (line.startsWith('-') && !line.startsWith('---')) return { kind: 'remove', text: line };
+				if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++'))
+					return { kind: 'header', text: line };
+				return { kind: 'context', text: line };
+			});
+	}
 </script>
 
 <section class="workspace-panel" aria-labelledby="workspace-panel-heading">
-	<h2 id="workspace-panel-heading">Workspace</h2>
+	<header class="workspace-header">
+		<svg
+			class="icon"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			stroke-width="2"
+			stroke-linecap="round"
+			stroke-linejoin="round"
+			aria-hidden="true"
+		>
+			<path d="M18 19a5 5 0 0 1-5-5v8" />
+			<path
+				d="M9 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v5"
+			/>
+			<circle cx="13" cy="12" r="2" />
+			<circle cx="20" cy="19" r="2" />
+		</svg>
+		<h2 id="workspace-panel-heading">Workspace</h2>
+		{#if lineStats.additions > 0 || lineStats.deletions > 0}
+			<span class="line-stats">
+				<span class="stat-add">+{lineStats.additions}</span>
+				<span class="stat-del">−{lineStats.deletions}</span>
+			</span>
+		{/if}
+	</header>
 
 	{#if isEmpty}
 		<EmptyState
@@ -89,298 +173,687 @@
 			headingLevel={3}
 		/>
 	{:else}
-		{#if files.length > 0}
-			<div class="panel-section">
-				<h3>Files</h3>
-				<ul class="item-list">
+		<div class="workspace-body">
+			<!-- LEFT SIDEBAR: 236px -->
+			<aside class="sidebar-left">
+				{#if files.length > 0}
+					<div class="sidebar-label">Changed files</div>
 					{#each files as file (file.path)}
-						<li class="item-row">
-							<span class="item-path">{file.path}</span>
-							<span class="item-meta">{file.mimeType}</span>
-							<span class="item-meta">{formatSize(file.sizeBytes)}</span>
-							{#if file.modifiedAt}
-								<time class="item-time" datetime={file.modifiedAt}>
-									{formatTimestamp(file.modifiedAt)}
-								</time>
+						<div class="file-row">
+							<span class="file-status" class:status-new={file.status === 'new'}>
+								{file.status === 'new' ? '+' : '~'}
+							</span>
+							<span class="file-name">
+								<span class="file-dir">{pathDir(file.path)}</span>{pathBasename(file.path)}
+							</span>
+							<span class="file-size">{formatSize(file.sizeBytes)}</span>
+							{#if file.status === 'new'}
+								<Badge variant="success" size="sm">new</Badge>
 							{/if}
-						</li>
+						</div>
 					{/each}
-				</ul>
-			</div>
-		{/if}
+				{:else if diffs.length > 0}
+					<div class="sidebar-label">Diffs</div>
+					{#each diffs as diff, i (`${diff.fromSnapshotId}..${diff.toSnapshotId}`)}
+						<button
+							type="button"
+							class="diff-entry"
+							class:diff-entry-active={i === selectedDiffIndex}
+							onclick={() => {
+								selectedDiffIndex = i;
+							}}
+						>
+							<code class="sha">{shortSha(diff.fromSnapshotId)}</code>
+							<span class="diff-arrow" aria-hidden="true">→</span>
+							<code class="sha">{shortSha(diff.toSnapshotId)}</code>
+						</button>
+					{/each}
+				{/if}
+			</aside>
 
-		{#if commands.length > 0}
-			<div class="panel-section">
-				<h3>Commands</h3>
-				<ul class="item-list">
-					{#each commands as cmd (cmd.id)}
-						<li class="command-item">
-							<div class="item-row">
-								<span class="command-label">
-									{cmd.command}
-									{#if cmd.args.length > 0}
-										{cmd.args.join(' ')}
-									{/if}
-								</span>
-								<span
-									class="status-pill"
-									class:success={cmd.status === 'complete' && cmd.exitCode === 0}
-									class:failure={cmd.status === 'failed' ||
-										(cmd.exitCode !== null && cmd.exitCode !== 0)}
+			<!-- CENTER: flex-1 diff pane -->
+			<div class="workspace-center">
+				{#if activeDiff}
+					<div class="diff-file-header">
+						<span class="mono diff-filename">{extractDiffFilename(activeDiff)}</span>
+						<Badge variant={isDiffNewFile(activeDiff.patch) ? 'success' : 'neutral'} size="sm">
+							{isDiffNewFile(activeDiff.patch) ? 'new file' : 'modified'}
+						</Badge>
+						<span class="diff-sha-pair">
+							<code class="sha">{shortSha(activeDiff.fromSnapshotId)}</code>
+							<span aria-hidden="true">→</span>
+							<code class="sha">{shortSha(activeDiff.toSnapshotId)}</code>
+						</span>
+						{#if activeDiff.stepRef}
+							<a href="#{String(activeDiff.stepRef.number).padStart(2, '0')}a" class="step-link">
+								<svg
+									class="icon-xs"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									aria-hidden="true"
 								>
-									{cmd.status}
-								</span>
-								{#if cmd.exitCode !== null}
-									<span class="exit-code">exit {cmd.exitCode}</span>
+									<path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+									<path d="M9 14 4 9l5-5" />
+								</svg>
+								produced by step {activeDiff.stepRef.number}
+							</a>
+						{/if}
+					</div>
+					<div class="diff-content" data-diff-patch>
+						{#each parsePatch(activeDiff.patch) as line, i (`${i}:${line.text}`)}
+							<div class="diff-line diff-line-{line.kind}">{line.text}</div>
+						{/each}
+					</div>
+				{:else}
+					<div class="diff-placeholder">
+						<span class="subtle-text">No diff to display</span>
+					</div>
+				{/if}
+			</div>
+
+			<!-- RIGHT SIDEBAR: 316px -->
+			<aside class="sidebar-right">
+				{#if commands.length > 0}
+					<div class="right-section">
+						<div class="right-section-label">
+							<svg
+								class="icon-xs"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								aria-hidden="true"
+							>
+								<path d="M12 19h8" />
+								<path d="m4 17 6-6-6-6" />
+							</svg>
+							Commands
+						</div>
+						{#each commands as cmd (cmd.id)}
+							<div class="terminal-box">
+								<div class="terminal-cmd">
+									<span class="terminal-prompt">$</span>{cmd.command}{cmd.args.length > 0
+										? ' ' + cmd.args.join(' ')
+										: ''}
+								</div>
+								{#if cmd.stdout || cmd.stderr}
+									<details class="terminal-output" data-command-output>
+										<summary class="terminal-summary">Output</summary>
+										{#if cmd.stdout}
+											<pre class="terminal-pre">{cmd.stdout}</pre>
+										{/if}
+										{#if cmd.stderr}
+											<pre class="terminal-pre terminal-pre-err">{cmd.stderr}</pre>
+										{/if}
+									</details>
 								{/if}
+								<div class="terminal-footer">
+									<span class="terminal-status">{cmd.status}</span>
+									{#if cmd.exitCode !== null}
+										<span class="terminal-exit">exit {cmd.exitCode}</span>
+									{/if}
+								</div>
 							</div>
-							{#if cmd.stdout || cmd.stderr}
-								<!-- Raw <details> preserved: Cinder Collapsible doesn't support data-command-output
-								     which tests rely on for querying command output elements. -->
-								<details class="command-output" data-command-output>
-									<summary class="output-summary">Output</summary>
-									{#if cmd.stdout}
-										<pre class="output-pre">{cmd.stdout}</pre>
-									{/if}
-									{#if cmd.stderr}
-										<pre class="output-pre output-stderr">{cmd.stderr}</pre>
-									{/if}
-								</details>
-							{/if}
-						</li>
-					{/each}
-				</ul>
-			</div>
-		{/if}
+						{/each}
+					</div>
+				{/if}
 
-		{#if snapshots.length > 0}
-			<div class="panel-section">
-				<h3>Snapshots</h3>
-				<ul class="item-list">
-					{#each snapshots as snap (snap.id)}
-						<li class="item-row">
-							<code class="sha">{shortSha(snap.externalSnapshotId)}</code>
-							{#if snap.reason}
-								<span class="snap-reason">{snap.reason}</span>
-							{/if}
-							<time class="item-time" datetime={snap.createdAt}>
-								{formatTimestamp(snap.createdAt)}
-							</time>
-						</li>
-					{/each}
-				</ul>
-			</div>
-		{/if}
-
-		{#if artifacts.length > 0}
-			<div class="panel-section">
-				<h3>Artifacts</h3>
-				<ul class="item-list">
-					{#each artifacts as artifact (artifact.id)}
-						<li class="item-row">
-							<span class="item-path">{artifactFilename(artifact.objectKey)}</span>
-							<span class="item-meta">{artifact.mimeType}</span>
-							<span class="item-meta">{formatSize(artifact.sizeBytes)}</span>
-						</li>
-					{/each}
-				</ul>
-			</div>
-		{/if}
-
-		{#if diffs.length > 0}
-			<div class="panel-section">
-				<h3>Diffs</h3>
-				<ul class="item-list">
-					{#each diffs as diff (`${diff.fromSnapshotId}..${diff.toSnapshotId}`)}
-						<li class="diff-row">
-							<div class="diff-header">
-								<code class="sha">{shortSha(diff.fromSnapshotId)}</code>
-								<span class="diff-arrow" aria-hidden="true">→</span>
-								<code class="sha">{shortSha(diff.toSnapshotId)}</code>
-								<time class="item-time" datetime={diff.createdAt}>
-									{formatTimestamp(diff.createdAt)}
+				{#if snapshots.length > 0}
+					<div class="right-section">
+						<div class="right-section-label">
+							<svg
+								class="icon-xs"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								aria-hidden="true"
+							>
+								<path
+									d="M13.997 4a2 2 0 0 1 1.76 1.05l.486.9A2 2 0 0 0 18.003 7H20a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1.997a2 2 0 0 0 1.759-1.048l.489-.904A2 2 0 0 1 10.004 4z"
+								/>
+								<circle cx="12" cy="13" r="3" />
+							</svg>
+							Snapshots
+						</div>
+						{#each snapshots as snap (snap.id)}
+							<div class="snapshot-row">
+								<code class="sha">{shortSha(snap.externalSnapshotId)}</code>
+								{#if snap.reason}
+									<span class="snap-reason">{snap.reason}</span>
+								{/if}
+								<time class="item-time" datetime={snap.createdAt}>
+									{formatTimestamp(snap.createdAt)}
 								</time>
+								<Button variant="ghost" size="xs">Restore</Button>
 							</div>
-							<pre class="diff-patch" data-diff-patch>{diff.patch}</pre>
-						</li>
-					{/each}
-				</ul>
-			</div>
-		{/if}
+						{/each}
+					</div>
+				{/if}
+
+				{#if artifacts.length > 0}
+					<div class="right-section">
+						<div class="right-section-label">
+							<svg
+								class="icon-xs"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								aria-hidden="true"
+							>
+								<path
+									d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"
+								/>
+								<path d="M12 22V12" />
+								<polyline points="3.29 7 12 12 20.71 7" />
+								<path d="m7.5 4.27 9 5.15" />
+							</svg>
+							Artifacts
+						</div>
+						{#each artifacts as artifact (artifact.id)}
+							<div class="artifact-row">
+								{#if isJsonArtifact(artifact.mimeType)}
+									<svg
+										class="icon-xs artifact-icon"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<path
+											d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"
+										/>
+										<path d="M14 2v5a1 1 0 0 0 1 1h5" />
+										<path d="M10 12a1 1 0 0 0-1 1v1a1 1 0 0 1-1 1 1 1 0 0 1 1 1v1a1 1 0 0 0 1 1" />
+										<path
+											d="M14 18a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-1a1 1 0 0 0-1-1"
+										/>
+									</svg>
+								{:else}
+									<svg
+										class="icon-xs artifact-icon"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<path
+											d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"
+										/>
+										<path d="M14 2v5a1 1 0 0 0 1 1h5" />
+									</svg>
+								{/if}
+								<span class="mono artifact-name">{artifactFilename(artifact.objectKey)}</span>
+								<span class="subtle-text artifact-mime">{artifact.mimeType}</span>
+								<span class="subtle-text artifact-size">{formatSize(artifact.sizeBytes)}</span>
+								<button
+									type="button"
+									class="download-btn"
+									aria-label="Download {artifactFilename(artifact.objectKey)}"
+								>
+									<svg
+										class="icon-xs"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<path d="M12 15V3" />
+										<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+										<path d="m7 10 5 5 5-5" />
+									</svg>
+								</button>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</aside>
+		</div>
 	{/if}
 </section>
 
 <style>
 	.workspace-panel {
-		display: grid;
-		gap: 1rem;
-	}
-
-	h2 {
-		margin: 0 0 0.25rem;
-	}
-
-	h3 {
-		margin: 0 0 0.5rem;
-		font-size: 0.85rem;
-		font-weight: 700;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		color: var(--cinder-text-subtle);
-	}
-
-	.panel-section {
-		border-top: 1px solid var(--cinder-border-muted);
-		padding-top: 0.75rem;
-	}
-
-	.item-list {
-		display: grid;
-		gap: 0.35rem;
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-
-	.item-row {
 		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-		align-items: center;
-		padding: 0.4rem 0.6rem;
-		border: 1px solid var(--cinder-border-muted);
-		border-radius: 5px;
-		background: var(--cinder-bg);
-		font-size: 0.85rem;
+		flex-direction: column;
+		gap: 0;
 	}
 
-	.item-path,
-	.command-label {
+	/* ── Header ── */
+
+	.workspace-header {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 10px 14px;
+		border-bottom: 1px solid var(--cinder-border-muted);
+	}
+
+	.workspace-header h2 {
+		margin: 0;
+		font-size: 13px;
+		font-weight: 600;
+		flex: 1;
+	}
+
+	.line-stats {
+		display: flex;
+		gap: 6px;
+		font:
+			500 11px ui-monospace,
+			monospace;
+	}
+
+	.stat-add {
+		color: var(--cinder-color-success-fg);
+	}
+
+	.stat-del {
+		color: var(--cinder-color-danger-fg);
+	}
+
+	/* ── 3-column body ── */
+
+	.workspace-body {
+		display: grid;
+		grid-template-columns: 236px 1fr 316px;
+		min-height: 400px;
+		overflow: hidden;
+	}
+
+	/* ── Left sidebar ── */
+
+	.sidebar-left {
+		border-right: 1px solid var(--cinder-border-muted);
+		overflow-y: auto;
+		padding: 10px 8px;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.sidebar-label {
+		font:
+			700 10px/1 ui-sans-serif,
+			sans-serif;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--cinder-text-subtle);
+		padding: 4px 4px 6px;
+	}
+
+	.file-row {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		padding: 3px 4px;
+		border-radius: 4px;
+		font:
+			500 12px ui-monospace,
+			monospace;
+		cursor: default;
+	}
+
+	.file-row:hover {
+		background: var(--cinder-surface-raised);
+	}
+
+	.file-status {
+		flex-shrink: 0;
+		width: 12px;
+		text-align: center;
+		color: var(--cinder-warning);
+		font-weight: 700;
+	}
+
+	.file-status.status-new {
+		color: var(--cinder-success);
+	}
+
+	.file-name {
 		flex: 1;
 		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-		font-family: ui-monospace, monospace;
 	}
 
-	.item-meta {
+	.file-dir {
 		color: var(--cinder-text-subtle);
-		font-size: 0.78rem;
 	}
 
-	.item-time {
+	.file-size {
+		flex-shrink: 0;
+		font-size: 10px;
 		color: var(--cinder-text-disabled);
-		font-size: 0.75rem;
 	}
 
-	.status-pill {
-		padding: 0.1rem 0.4rem;
-		border-radius: 999px;
-		font-size: 0.72rem;
-		font-weight: 700;
-		background: var(--cinder-surface-raised);
-		text-transform: capitalize;
-	}
-
-	.status-pill.success {
-		background: var(--cinder-color-success-bg);
-		color: var(--cinder-color-success-fg);
-	}
-
-	.status-pill.failure {
-		background: var(--cinder-color-danger-bg);
-		color: var(--cinder-color-danger-fg);
-	}
-
-	.exit-code {
-		font-family: ui-monospace, monospace;
-		font-size: 0.75rem;
-		color: var(--cinder-text-subtle);
-	}
-
-	.sha {
-		font-family: ui-monospace, monospace;
-		font-size: 0.8rem;
-		background: var(--cinder-surface-inset);
-		padding: 0.1rem 0.4rem;
-		border-radius: 3px;
-	}
-
-	.snap-reason {
-		flex: 1;
-		font-size: 0.85rem;
-		color: var(--cinder-text-subtle);
-	}
-
-	.command-item {
-		border: 1px solid var(--cinder-border-muted);
-		border-radius: 5px;
-		background: var(--cinder-bg);
-		overflow: hidden;
-	}
-
-	.command-item .item-row {
-		border: none;
-		border-radius: 0;
-	}
-
-	.command-output {
-		border-top: 1px solid var(--cinder-surface-raised);
-	}
-
-	.output-summary {
-		padding: 0.25rem 0.6rem;
-		font-size: 0.75rem;
-		font-weight: 600;
-		color: var(--cinder-text-subtle);
-		cursor: pointer;
-		user-select: none;
-	}
-
-	.output-pre {
-		overflow-x: auto;
-		max-height: 10rem;
-		margin: 0;
-		padding: 0.4rem 0.6rem;
-		background: var(--cinder-surface-inset);
-		font-size: 0.75rem;
-		line-height: 1.4;
-		white-space: pre;
-	}
-
-	.output-stderr {
-		background: var(--cinder-color-danger-bg);
-	}
-
-	.diff-row {
-		border: 1px solid var(--cinder-border-muted);
-		border-radius: 5px;
-		padding: 0.4rem 0.6rem;
-		background: var(--cinder-bg);
-		font-size: 0.85rem;
-	}
-
-	.diff-header {
+	.diff-entry {
 		display: flex;
 		align-items: center;
-		gap: 0.4rem;
-		margin-bottom: 0.4rem;
+		gap: 4px;
+		padding: 4px 6px;
+		border: none;
+		border-radius: 4px;
+		background: none;
+		cursor: pointer;
+		font:
+			500 11px ui-monospace,
+			monospace;
+		color: var(--cinder-text);
+		width: 100%;
+		text-align: left;
+	}
+
+	.diff-entry:hover {
+		background: var(--cinder-surface-raised);
+	}
+
+	.diff-entry-active {
+		background: var(--cinder-surface-inset);
 	}
 
 	.diff-arrow {
 		color: var(--cinder-text-disabled);
 	}
 
-	.diff-patch {
-		overflow-x: auto;
-		max-height: 10rem;
-		margin: 0;
-		border-radius: 4px;
-		padding: 0.4rem;
+	/* ── Center diff pane ── */
+
+	.workspace-center {
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		border-right: 1px solid var(--cinder-border-muted);
+	}
+
+	.diff-file-header {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 8px 12px;
+		border-bottom: 1px solid var(--cinder-border-muted);
+		flex-shrink: 0;
+		flex-wrap: wrap;
+	}
+
+	.diff-filename {
+		font:
+			500 12px ui-monospace,
+			monospace;
+	}
+
+	.diff-sha-pair {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		font:
+			500 11px ui-monospace,
+			monospace;
+		color: var(--cinder-text-subtle);
+		margin-left: auto;
+	}
+
+	.step-link {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		font-size: 11px;
+		color: var(--cinder-accent-text);
+		text-decoration: none;
+	}
+
+	.step-link:hover {
+		text-decoration: underline;
+	}
+
+	.diff-content {
+		flex: 1;
+		overflow: auto;
+		font:
+			500 12px/1.7 ui-monospace,
+			monospace;
 		background: var(--cinder-surface-inset);
-		font-size: 0.75rem;
-		line-height: 1.4;
+	}
+
+	.diff-line {
+		padding: 0 6px;
 		white-space: pre;
+	}
+
+	.diff-line-add {
+		background: var(--cinder-color-success-bg);
+		color: var(--cinder-color-success-fg);
+	}
+
+	.diff-line-remove {
+		background: var(--cinder-color-danger-bg);
+		color: var(--cinder-color-danger-fg);
+	}
+
+	.diff-line-header {
+		color: var(--cinder-text-subtle);
+	}
+
+	.diff-placeholder {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	/* ── Right sidebar ── */
+
+	.sidebar-right {
+		overflow-y: auto;
+		padding: 10px 8px;
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.right-section {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+
+	.right-section-label {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+		font:
+			700 10px/1 ui-sans-serif,
+			sans-serif;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--cinder-text-subtle);
+		padding-bottom: 2px;
+	}
+
+	/* Terminal box */
+
+	.terminal-box {
+		background: var(--cinder-surface-inset);
+		border: 1px solid var(--cinder-border-muted);
+		border-radius: 6px;
+		overflow: hidden;
+		font:
+			500 12px/1.6 ui-monospace,
+			monospace;
+	}
+
+	.terminal-cmd {
+		padding: 8px 10px 2px;
+		color: var(--cinder-accent-text);
+	}
+
+	.terminal-prompt {
+		margin-right: 5px;
+		opacity: 0.5;
+	}
+
+	.terminal-output {
+		border-top: 1px solid var(--cinder-border-muted);
+	}
+
+	.terminal-summary {
+		padding: 3px 10px;
+		font-size: 10px;
+		color: var(--cinder-text-subtle);
+		cursor: pointer;
+		user-select: none;
+		list-style: none;
+	}
+
+	.terminal-pre {
+		margin: 0;
+		padding: 4px 10px;
+		font-size: 11px;
+		white-space: pre;
+		overflow-x: auto;
+	}
+
+	.terminal-pre-err {
+		background: var(--cinder-color-danger-bg);
+		color: var(--cinder-color-danger-fg);
+	}
+
+	.terminal-footer {
+		padding: 2px 10px 8px;
+		display: flex;
+		gap: 8px;
+		align-items: center;
+		color: var(--cinder-text-subtle);
+		font-size: 11px;
+	}
+
+	/* Snapshot rows */
+
+	.snapshot-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		border: 1px solid var(--cinder-border-muted);
+		border-radius: 8px;
+		padding: 8px 10px;
+		font-size: 12px;
+	}
+
+	.snap-reason {
+		flex: 1;
+		font-size: 11px;
+		color: var(--cinder-text-subtle);
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.item-time {
+		color: var(--cinder-text-disabled);
+		font-size: 10px;
+		white-space: nowrap;
+	}
+
+	/* Artifact rows */
+
+	.artifact-row {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		border: 1px solid var(--cinder-border-muted);
+		border-radius: 8px;
+		padding: 8px 10px;
+		font-size: 12px;
+	}
+
+	.artifact-icon {
+		flex-shrink: 0;
+		color: var(--cinder-accent-text);
+	}
+
+	.artifact-name {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font:
+			500 12px ui-monospace,
+			monospace;
+	}
+
+	.artifact-mime,
+	.artifact-size {
+		color: var(--cinder-text-subtle);
+		font-size: 10px;
+		white-space: nowrap;
+	}
+
+	.download-btn {
+		background: none;
+		border: none;
+		cursor: pointer;
+		padding: 0;
+		color: var(--cinder-text-subtle);
+		display: flex;
+		align-items: center;
+		flex-shrink: 0;
+	}
+
+	.download-btn:hover {
+		color: var(--cinder-text);
+	}
+
+	/* Shared utilities */
+
+	.sha {
+		font:
+			500 11px ui-monospace,
+			monospace;
+		background: var(--cinder-surface-inset);
+		padding: 1px 4px;
+		border-radius: 3px;
+	}
+
+	.mono {
+		font-family: ui-monospace, monospace;
+	}
+
+	.subtle-text {
+		color: var(--cinder-text-subtle);
+	}
+
+	.icon {
+		width: 16px;
+		height: 16px;
+		flex-shrink: 0;
+		color: var(--cinder-text-subtle);
+	}
+
+	.icon-xs {
+		width: 13px;
+		height: 13px;
+		flex-shrink: 0;
 	}
 </style>

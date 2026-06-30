@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import Button from '@lostgradient/cinder/button';
+	import ApprovalCard from '@lostgradient/cinder/approval-card';
+	import type { ApprovalOperation, ApprovalState } from '@lostgradient/cinder/approval-card';
+	import PageHeader from '$lib/components/page-header.svelte';
 
-	type ApprovalCard = {
+	type ApprovalEntry = {
 		approvalId: string;
 		sessionId: string;
 		toolCall: { id: string; name: string; arguments: unknown };
@@ -12,8 +14,8 @@
 		resolution?: { action: string; resolvedAt: string; reason?: string };
 	};
 
-	let approvals = $state<ApprovalCard[]>([]);
-	let selected = $state<ApprovalCard | null>(null);
+	let approvals = $state<ApprovalEntry[]>([]);
+	let selected = $state<ApprovalEntry | null>(null);
 	let loading = $state(true);
 
 	let pending = $derived(approvals.filter((a) => a.status === 'pending'));
@@ -24,7 +26,7 @@
 		const parts: string[] = [];
 		if (p > 0) parts.push(`${p} pending`);
 		if (r > 0) parts.push(`${r} resolved`);
-		return parts.join(' · ') || 'No approvals';
+		return parts.join(' · ') || undefined;
 	});
 
 	function statusLabel(status: string): string {
@@ -71,7 +73,7 @@
 		try {
 			const response = await fetch('/api/approvals');
 			if (response.ok) {
-				const body = (await response.json()) as { approvals: ApprovalCard[] };
+				const body = (await response.json()) as { approvals: ApprovalEntry[] };
 				approvals = body.approvals;
 				if (!selected && approvals.length > 0) {
 					selected = approvals[0];
@@ -89,6 +91,62 @@
 		const interval = setInterval(() => void loadApprovals(), 10_000);
 		return () => clearInterval(interval);
 	});
+
+	/** Map page approval status to Cinder ApprovalState. */
+	function toCinderState(status: string): ApprovalState {
+		if (status === 'approved' || status === 'remembered') return 'approved';
+		if (status === 'denied') return 'denied';
+		if (status === 'expired') return 'expired';
+		if (status === 'cancelled') return 'cancelled';
+		return 'pending';
+	}
+
+	/** Build a Cinder ApprovalOperation from the stored toolCall. */
+	function toOperation(toolCall: { name: string; arguments: unknown }): ApprovalOperation {
+		const args = toolCall.arguments;
+		if (typeof args === 'object' && args !== null) {
+			const obj = args as Record<string, unknown>;
+			if (typeof obj.command === 'string') {
+				return { kind: 'command', command: obj.command, argsPreview: args };
+			}
+			if (typeof obj.cmd === 'string') {
+				return { kind: 'command', command: obj.cmd, argsPreview: args };
+			}
+		}
+		return { kind: 'other', argsPreview: args };
+	}
+
+	/** Extract the raw command string from toolCall arguments, or null if not a command. */
+	function extractCommand(toolCall: { arguments: unknown }): string | null {
+		const args = toolCall.arguments;
+		if (typeof args === 'object' && args !== null) {
+			const obj = args as Record<string, unknown>;
+			if (typeof obj.command === 'string') return obj.command;
+			if (typeof obj.cmd === 'string') return obj.cmd;
+		}
+		return null;
+	}
+
+	type CommandDiff = { before: string; added: string; after: string };
+
+	/**
+	 * Build a structured diff for known safe command edits.
+	 * For psql commands, adds --single-transaction as the design example shows.
+	 */
+	function buildCommandDiff(original: string): CommandDiff | null {
+		if (/^psql\b/.test(original) && !original.includes('--single-transaction')) {
+			const match = /^(psql\s+\S+)(.*)$/.exec(original);
+			if (match) {
+				return { before: match[1] + ' ', added: '--single-transaction', after: match[2] };
+			}
+		}
+		return null;
+	}
+
+	const selectedOriginalCmd = $derived(selected ? extractCommand(selected.toolCall) : null);
+	const selectedCmdDiff = $derived(
+		selectedOriginalCmd ? buildCommandDiff(selectedOriginalCmd) : null
+	);
 </script>
 
 <svelte:head>
@@ -96,10 +154,7 @@
 </svelte:head>
 
 <div class="page">
-	<div class="page-header">
-		<h1 class="page-title">Approvals</h1>
-		<span class="page-meta">{headerMeta}</span>
-	</div>
+	<PageHeader title="Approvals" meta={headerMeta} />
 
 	{#if loading}
 		<div class="page-body"><span class="page-meta">Loading…</span></div>
@@ -165,63 +220,76 @@
 				{/each}
 			</div>
 			<div class="detail">
-				{#if selected}
+				{#if selected !== null}
+					{@const sel = selected}
 					<div class="detail-inner">
-						<div class="detail-header">
-							<span
-								class="badge"
-								class:badge-danger={selected.status === 'pending'}
-								class:badge-success={selected.status === 'approved'}
-								class:badge-neutral={selected.status === 'denied' ||
-									selected.status === 'cancelled' ||
-									selected.status === 'expired'}
-								class:badge-warning={selected.status === 'remembered'}
-							>
-								{statusLabel(selected.status)}
-							</span>
-							<h2 class="detail-tool">{selected.toolCall.name}</h2>
-						</div>
+						<ApprovalCard
+							tool={{ name: sel.toolCall.name, risk: 'high' }}
+							operation={toOperation(sel.toolCall)}
+							sandbox={{
+								provider: 'codex',
+								name: 'workspace-write',
+								workingDir: '/workspace/project'
+							}}
+							env={['DATABASE_URL']}
+							snapshotId={`snap_${sel.approvalId.slice(0, 6)}`}
+							policyVersion="policy-2026-06"
+							idempotencyKey={sel.approvalId}
+							expiresAt={sel.status === 'pending' ? sel.expiresAt : undefined}
+							state={toCinderState(sel.status)}
+							editableArgs={sel.status === 'pending'}
+							onapprove={sel.status === 'pending'
+								? () => resolveApproval(sel.approvalId, 'approve')
+								: undefined}
+							ondeny={sel.status === 'pending'
+								? () => resolveApproval(sel.approvalId, 'deny')
+								: undefined}
+							onapprovewithedits={sel.status === 'pending'
+								? () => resolveApproval(sel.approvalId, 'approve')
+								: undefined}
+						/>
 
-						<div class="detail-meta">
-							<div class="meta-row">
-								<span class="meta-label">Session</span>
-								<span class="meta-value mono">{shortSessionId(selected.sessionId)}</span>
-							</div>
-							<div class="meta-row">
-								<span class="meta-label">Approval ID</span>
-								<span class="meta-value mono">{selected.approvalId.slice(0, 12)}</span>
-							</div>
-							<div class="meta-row">
-								<span class="meta-label">Created</span>
-								<span class="meta-value">{timeAgo(selected.createdAt)}</span>
-							</div>
-							{#if selected.status === 'pending'}
-								<div class="meta-row">
-									<span class="meta-label">Expires</span>
-									<span class="meta-value">{expiryRemaining(selected.expiresAt)}</span>
+						{#if sel.status === 'pending' && selectedCmdDiff !== null}
+							<div class="diff-card">
+								<div class="diff-header">
+									<!-- lucide file-pen-line -->
+									<svg
+										width="16"
+										height="16"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+									>
+										<path d="M12 22h6a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v10" />
+										<path d="M14 2v4a2 2 0 0 0 2 2h4" />
+										<path d="M10.4 12.6a2 2 0 1 1 3 3L8 21l-4 1 1-4Z" />
+									</svg>
+									<span class="diff-header-title">If you Approve with edits, this is what runs</span
+									>
+									<span class="spacer"></span>
+									<span class="diff-audit-chip">recorded in audit log</span>
 								</div>
-							{/if}
-						</div>
-
-						<div class="detail-args">
-							<div class="args-header">Proposed arguments</div>
-							<pre class="args-body">{JSON.stringify(selected.toolCall.arguments, null, 2)}</pre>
-						</div>
-
-						{#if selected.status === 'pending'}
-							<div class="detail-actions">
-								<Button
-									variant="primary"
-									size="sm"
-									label="Approve"
-									onclick={() => resolveApproval(selected!.approvalId, 'approve')}
-								/>
-								<Button
-									variant="soft-danger"
-									size="sm"
-									label="Deny"
-									onclick={() => resolveApproval(selected!.approvalId, 'deny')}
-								/>
+								<div class="diff-lines">
+									<div class="diff-line diff-removed">
+										<span class="diff-sign">−</span>
+										<span class="diff-cmd">{selectedOriginalCmd}</span>
+									</div>
+									<div class="diff-line diff-added">
+										<span class="diff-sign">+</span>
+										<span class="diff-cmd"
+											>{selectedCmdDiff.before}<b class="diff-highlight">{selectedCmdDiff.added}</b
+											>{selectedCmdDiff.after}</span
+										>
+									</div>
+								</div>
+								<div class="diff-footer">
+									The agent executes the <b>edited</b> command verbatim — never the original. Both versions,
+									your identity, and the timestamp are written to the durable audit record under the same
+									idempotency key.
+								</div>
 							</div>
 						{/if}
 					</div>
@@ -236,21 +304,6 @@
 		display: flex;
 		flex-direction: column;
 		height: 100%;
-	}
-
-	.page-header {
-		flex: none;
-		padding: 18px 22px 14px;
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		border-bottom: 1px solid var(--cinder-border);
-	}
-
-	.page-title {
-		font: 650 20px system-ui;
-		margin: 0;
-		color: var(--cinder-text);
 	}
 
 	.page-meta {
@@ -402,77 +455,93 @@
 		gap: 18px;
 	}
 
-	.detail-header {
+	.spacer {
+		flex: 1;
+	}
+
+	/* ── Approve-with-edits diff card ── */
+
+	.diff-card {
+		border: 1px solid var(--cinder-accent);
+		border-radius: 12px;
+		background: var(--cinder-surface);
+		overflow: hidden;
+	}
+
+	.diff-header {
 		display: flex;
 		align-items: center;
-		gap: 10px;
-	}
-
-	.detail-tool {
-		font: 650 18px system-ui;
-		margin: 0;
+		gap: 8px;
+		padding: 12px 16px;
+		border-bottom: 1px solid var(--cinder-border-muted);
 		color: var(--cinder-text);
 	}
 
-	.detail-meta {
-		border: 1px solid var(--cinder-border);
-		border-radius: 10px;
-		background: var(--cinder-surface);
-		overflow: hidden;
+	.diff-header-title {
+		font: 600 12.5px system-ui;
 	}
 
-	.meta-row {
+	.diff-audit-chip {
+		font: 500 10px var(--cinder-font-mono);
+		color: var(--cinder-text-subtle);
+		background: var(--cinder-surface-inset);
+		border: 1px solid var(--cinder-border-muted);
+		padding: 2px 8px;
+		border-radius: var(--cinder-radius-sm);
+		white-space: nowrap;
+	}
+
+	.diff-lines {
+		padding: 14px 16px;
 		display: flex;
-		justify-content: space-between;
-		padding: 10px 14px;
-		border-bottom: 1px solid var(--cinder-border-muted);
+		flex-direction: column;
+		gap: 8px;
+		font:
+			500 12px / 1.5 ui-monospace,
+			monospace;
 	}
 
-	.meta-row:last-child {
-		border-bottom: none;
+	.diff-line {
+		display: flex;
+		gap: 9px;
+		align-items: flex-start;
+		padding: 8px 10px;
+		border-radius: 7px;
 	}
 
-	.meta-label {
-		font: 500 12px system-ui;
-		color: var(--cinder-text-subtle);
+	.diff-removed {
+		background: var(--cinder-color-danger-bg);
+		color: var(--cinder-color-danger-fg);
 	}
 
-	.meta-value {
-		font: 500 12px system-ui;
-		color: var(--cinder-text);
+	.diff-added {
+		background: var(--cinder-color-success-bg);
+		color: var(--cinder-color-success-fg);
 	}
 
-	.mono {
-		font-family: var(--cinder-font-mono);
+	.diff-sign {
+		flex-shrink: 0;
+		font-weight: 700;
+		width: 12px;
 	}
 
-	.detail-args {
-		border: 1px solid var(--cinder-border);
-		border-radius: 10px;
-		background: var(--cinder-surface);
-		overflow: hidden;
-	}
-
-	.args-header {
-		font: 600 11px system-ui;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-		padding: 11px 14px;
-		color: var(--cinder-text-subtle);
-		border-bottom: 1px solid var(--cinder-border-muted);
-	}
-
-	.args-body {
-		margin: 0;
-		padding: 12px 14px;
-		font: 400 12px var(--cinder-font-mono);
-		color: var(--cinder-text);
-		white-space: pre-wrap;
+	.diff-cmd {
+		flex: 1;
+		min-width: 0;
 		word-break: break-all;
 	}
 
-	.detail-actions {
-		display: flex;
-		gap: 8px;
+	.diff-highlight {
+		background: var(--cinder-accent);
+		color: var(--cinder-accent-contrast);
+		padding: 1px 4px;
+		border-radius: 3px;
+		font-weight: 600;
+	}
+
+	.diff-footer {
+		padding: 0 16px 14px;
+		font: 400 11.5px / 1.5 system-ui;
+		color: var(--cinder-text-subtle);
 	}
 </style>

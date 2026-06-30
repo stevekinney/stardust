@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import Button from '@lostgradient/cinder/button';
+	import PageHeader from '$lib/components/page-header.svelte';
 
 	type Schedule = {
 		id: string;
@@ -23,7 +24,7 @@
 
 	let activeCount = $derived(schedules.filter((s) => s.status === 'active').length);
 	let headerMeta = $derived.by(() => {
-		if (schedules.length === 0) return 'No schedules';
+		if (schedules.length === 0) return undefined;
 		return `${schedules.length} schedule${schedules.length === 1 ? '' : 's'} · ${activeCount} active`;
 	});
 
@@ -108,10 +109,7 @@
 </svelte:head>
 
 <div class="page">
-	<div class="page-header">
-		<h1 class="page-title">Schedules</h1>
-		<span class="page-meta">{headerMeta}</span>
-		<span class="spacer"></span>
+	<PageHeader title="Schedules" meta={headerMeta}>
 		<Button variant="primary" size="sm">
 			<span style="display:inline-flex;align-items:center;gap:7px">
 				<svg
@@ -130,7 +128,7 @@
 				New schedule
 			</span>
 		</Button>
-	</div>
+	</PageHeader>
 
 	{#if loading}
 		<div class="page-center"><span class="page-meta">Loading…</span></div>
@@ -318,26 +316,6 @@
 		display: flex;
 		flex-direction: column;
 		height: 100%;
-	}
-
-	.page-header {
-		flex: none;
-		padding: 18px 22px 14px;
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		border-bottom: 1px solid var(--cinder-border);
-	}
-
-	.page-title {
-		font: 650 20px system-ui;
-		margin: 0;
-		color: var(--cinder-text);
-	}
-
-	.page-meta {
-		font: 500 12px system-ui;
-		color: var(--cinder-text-subtle);
 	}
 
 	.spacer {
