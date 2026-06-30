@@ -29,3 +29,11 @@ test-results
 *.db-wal
 *.db-journal
 tmp/
+
+# Claude Code artifacts
+.agents/
+skills-lock.json
+.claude/worktrees/
+
+# Stale Neon connection dirs
+postgresql:/

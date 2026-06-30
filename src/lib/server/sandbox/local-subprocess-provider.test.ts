@@ -115,17 +115,16 @@ describe('LocalSubprocessSandboxProvider', () => {
 		expect.assertions(4);
 
 		const provider = new LocalSubprocessSandboxProvider({ workspaceRoot: temporaryRoot });
-		// `sh` + `printf` cold-start is ~100x faster than `bun -e`, so "started"
-		// reliably flushes within the 100ms timeout even under CPU load; `sleep`
-		// then hangs until the provider kills the command. (A `bun -e` process can
-		// cold-start slower than 100ms under contention and be killed before it
-		// prints, which made this assertion flaky.)
+		// `sh -c 'printf … ; sleep 10'` prints immediately then blocks on sleep.
+		// The 500ms timeout is generous enough for sh+printf under heavy CI load
+		// while still well below the 10s sleep, so the provider always kills the
+		// process mid-sleep and captures the partial stdout.
 		const result = await provider.runCommand({
 			sessionKey: 'session-a',
 			runId: 'run-a',
 			command: 'sh',
 			args: ['-c', 'printf "started\\n"; sleep 10'],
-			timeoutMs: 100
+			timeoutMs: 500
 		});
 
 		expect(result.stdout).toBe('started\n');
