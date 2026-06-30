@@ -40,7 +40,11 @@ import { hashApprovalArguments } from '../policy/arguments-hash';
 import { fetchWithSsrfGuard } from '../policy/ssrf';
 import type { ArtifactStore } from '../artifacts/artifact-store';
 import { spillLargeOutput } from '../artifacts/spill';
-import type { SandboxProvider } from '../sandbox/sandbox-provider';
+import type {
+	SandboxCommandInput,
+	SandboxCommandResult,
+	SandboxProvider
+} from '../sandbox/sandbox-provider';
 
 const webFetchInput = z.object({
 	url: z.string().url(),
@@ -325,6 +329,15 @@ function requireSandbox(
 	return [sandboxProvider, sessionKey];
 }
 
+function requireCommandRunner(
+	commandRunner: ((input: SandboxCommandInput) => Promise<SandboxCommandResult>) | undefined
+): (input: SandboxCommandInput) => Promise<SandboxCommandResult> {
+	if (!commandRunner) {
+		throw new Error('runSandboxCommand is required for command-backed tools but was not provided');
+	}
+	return commandRunner;
+}
+
 export async function executeRegisteredTool(input: {
 	call: ToolCallInput;
 	sessionId?: string;
@@ -341,6 +354,8 @@ export async function executeRegisteredTool(input: {
 	artifactStore?: ArtifactStore;
 	/** Sandbox provider used for all workspace, shell, and snapshot tool operations. */
 	sandboxProvider?: SandboxProvider;
+	/** Heartbeat-aware Temporal Activity wrapper for sandbox subprocess execution. */
+	runSandboxCommand?: (input: SandboxCommandInput) => Promise<SandboxCommandResult>;
 }): Promise<ToolExecutionResult> {
 	const decision = validateToolCall(getConfiguredTools(), input.call);
 	if (decision.status === 'denied') {
@@ -392,6 +407,7 @@ export async function executeRegisteredTool(input: {
 			}
 			case 'workspace.applyPatch': {
 				const [sandbox, sessionKey] = requireSandbox(input.sandboxProvider, input.sessionKey);
+				const runCommand = requireCommandRunner(input.runSandboxCommand);
 				const args = applyPatchInput.parse(input.call.arguments);
 				// Write the patch content to a temp file inside the workspace.  The
 				// provider's runCommand has no stdin support, so we use `patch -i
@@ -406,7 +422,7 @@ export async function executeRegisteredTool(input: {
 					reason: `pre-apply-patch: ${args.path}`
 				});
 				try {
-					const patchResult = await sandbox.runCommand({
+					const patchResult = await runCommand({
 						sessionKey,
 						runId: input.runId ?? 'tool',
 						command: 'patch',
@@ -421,7 +437,7 @@ export async function executeRegisteredTool(input: {
 				} finally {
 					// Best-effort cleanup of the temporary patch file.
 					try {
-						await sandbox.runCommand({
+						await runCommand({
 							sessionKey,
 							runId: input.runId ?? 'tool',
 							command: 'rm',
@@ -438,6 +454,7 @@ export async function executeRegisteredTool(input: {
 			}
 			case 'shell.exec': {
 				const [sandbox, sessionKey] = requireSandbox(input.sandboxProvider, input.sessionKey);
+				const runCommand = requireCommandRunner(input.runSandboxCommand);
 				const args = shellExecInput.parse(input.call.arguments);
 				// Snapshot before arbitrary shell execution so the workspace state is
 				// recoverable regardless of what the command does.
@@ -447,7 +464,7 @@ export async function executeRegisteredTool(input: {
 					toolCallId: input.call.id,
 					reason: `pre-shell: ${args.command}`
 				});
-				const result = await sandbox.runCommand({
+				const result = await runCommand({
 					sessionKey,
 					runId: input.runId ?? 'tool',
 					command: args.command,
@@ -465,9 +482,10 @@ export async function executeRegisteredTool(input: {
 				break;
 			}
 			case 'workspace.searchFiles': {
-				const [sandbox, sessionKey] = requireSandbox(input.sandboxProvider, input.sessionKey);
+				const [, sessionKey] = requireSandbox(input.sandboxProvider, input.sessionKey);
+				const runCommand = requireCommandRunner(input.runSandboxCommand);
 				const args = searchFilesInput.parse(input.call.arguments);
-				const findResult = await sandbox.runCommand({
+				const findResult = await runCommand({
 					sessionKey,
 					runId: input.runId ?? 'tool',
 					command: 'find',

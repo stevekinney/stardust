@@ -19,7 +19,7 @@ Stardust is a local, single-user proof of concept for a Temporal-native durable 
 The honest minimum is:
 
 - **One SvelteKit application:** The web user interface, server routes, and Temporal client live in one application.
-- **One Temporal Worker process:** The Worker hosts the workflow bundle and the named activity task queues.
+- **One Temporal Worker process:** The Worker hosts the workflow bundle and narrowly owned named activity task queues.
 - **One Temporal dev server:** `temporal server start-dev` provides durable orchestration and Temporal Web locally.
 - **One SQLite file:** Application data, canonical transcript, stream bus, memory, schedules, and audit records live in SQLite.
 - **Two local directories:** Artifacts live under `~/.stardust/artifacts`; per-session workspaces live under `~/.stardust/workspaces`.
@@ -33,7 +33,7 @@ The current checkout already contains parts of the early task plan:
 
 - SvelteKit, TypeScript, Bun, ESLint, Prettier, Vitest, Playwright, Drizzle, Temporal SDKs, and Cinder are installed.
 - `@sveltejs/adapter-node` is configured.
-- `src/worker/main.ts` starts a single Worker process that hosts the orchestrator, model, tools, sandbox, and memory task queues.
+- `src/worker/main.ts` starts a single Worker process that hosts the orchestrator, model, tools, sandbox, and memory task queues. Each activity task queue registers only the activities it owns.
 - `src/workflows/agent-session.workflow.ts` and `src/workflows/agent-run.workflow.ts` contain the early no-tool session and run skeleton.
 - `src/routes/api/sessions/[sessionKey]/turn/+server.ts` starts or reuses an `agent-session:{sessionKey}` workflow and submits a turn by Workflow Update.
 - `src/lib/server/db/schema.ts`, migrations, migration tests, and a runs repository exist for the SQLite schema.
@@ -194,8 +194,11 @@ Stardust keeps a hard split between live state and durable truth:
 - An autoincrement SQLite `id` used as the SSE cursor.
 - A per-run monotonic `sequence` used for ordering, deduplication, and gap detection.
 - A `kind`, JSON `payload`, `runId`, `sessionId`, and timestamp.
+- An optional semantic `deduplication_key`. Retry-prone Activity side effects must pass stable keys so re-entering the same publication returns the existing stream event instead of creating a duplicate.
 
 Token deltas are written out of band by the model Activity. They are coalesced before insert and are not returned to workflow code as streaming values. Workflow code sees a single deterministic model result.
+
+Canonical transcript events use deterministic identifiers for workflow-derived side effects such as lifecycle messages, tool calls, and tool results. Repeating the same Activity-side publication must not create duplicate transcript rows.
 
 ## Model and Context
 
@@ -211,6 +214,8 @@ The model call is an Activity. The Activity:
 - Computes token usage and estimated cost from a local price table keyed by model ID.
 
 Unknown model IDs should fail before under-counting cost.
+
+Model calls use a deterministic `modelCallId` supplied by the workflow. Temporal Activity retry for provider calls is disabled by default because streaming provider requests are not assumed idempotent and may spend tokens twice. Local stream and transcript side effects still use `modelCallId`-derived keys so re-entering Activity code cannot duplicate assistant deltas or tool-call records.
 
 ## Tool Registry and Policy
 
@@ -234,6 +239,8 @@ Policy is enforced in three stages:
 - **Side-effect gate:** Risky tools enter Temporal's durable approval wait before execution.
 
 The demo-critical tool set is `web.fetch`, `workspace.readFile`, `workspace.writeFile`, `workspace.applyPatch`, and `shell.exec`. Extended tools such as `web.search`, process management, `sandbox.snapshot`, `memory.writeCandidate`, and `delegate.*` are fast follows.
+
+Command-backed sandbox tools must execute through the heartbeat-aware sandbox command Activity helper. The registry still owns policy, artifact spill, and tool idempotency behavior, but subprocess work must heartbeat while running and observe Temporal cancellation instead of calling the sandbox provider directly inside a larger opaque Activity.
 
 `web.fetch` must keep the SSRF guard: allow only `http` and `https`, deny private, loopback, link-local, and metadata ranges, cap redirects, and re-check each redirect target.
 

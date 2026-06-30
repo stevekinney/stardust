@@ -800,6 +800,7 @@ describe('agentRunWorkflow steering', () => {
 	const capturedSteeringPerCall: Array<string[] | undefined> = [];
 	/** Per-call capture of ModelCallInput.memoryNotes (undefined = not present). */
 	const capturedMemoryPerCall: Array<unknown[] | undefined> = [];
+	const capturedModelCallIds: string[] = [];
 	/** All queries received by searchMemory across the run. */
 	const capturedSearchMemoryQueries: string[] = [];
 
@@ -819,6 +820,7 @@ describe('agentRunWorkflow steering', () => {
 	function resetCaptures() {
 		capturedSteeringPerCall.length = 0;
 		capturedMemoryPerCall.length = 0;
+		capturedModelCallIds.length = 0;
 		capturedSearchMemoryQueries.length = 0;
 		modelCallCounts.clear();
 	}
@@ -830,6 +832,7 @@ describe('agentRunWorkflow steering', () => {
 			modelCallCounts.set(input.runId, count);
 			capturedSteeringPerCall.push(input.steeringMessages);
 			capturedMemoryPerCall.push(input.memoryNotes);
+			capturedModelCallIds.push(input.modelCallId);
 
 			const base = {
 				runId: input.runId,
@@ -1090,6 +1093,7 @@ describe('agentRunWorkflow steering', () => {
 
 		// Second call: steering message present (drained from buffer before call 2).
 		expect(capturedSteeringPerCall[1]).toEqual(['focus on the budget']);
+		expect(capturedModelCallIds).toEqual([`${runId}:model-call-1`, `${runId}:model-call-2`]);
 	});
 
 	it('steering message is drained exactly once — absent in the third model call', async () => {
@@ -1239,8 +1243,10 @@ describe('agentRunWorkflow subagents', () => {
 		// The subagent model mock always returns a text answer (no tool calls).
 		// Research and code subagents each make one model call with MOCK_MODEL_USAGE.
 		// The critic makes no model call and returns zero usage.
+		const capturedModelCallIds: string[] = [];
 		const subagentTestActivities = {
 			async callModel(input: ModelCallInput): Promise<ModelCallResult> {
+				capturedModelCallIds.push(input.modelCallId);
 				return {
 					runId: input.runId,
 					model: input.model ?? 'claude-sonnet-4-5-20250929',
@@ -1396,6 +1402,14 @@ describe('agentRunWorkflow subagents', () => {
 					message: expect.stringContaining('Advisory critic reviewed the final answer')
 				})
 			]);
+			expect(capturedModelCallIds).toHaveLength(3);
+			expect(capturedModelCallIds).toEqual(
+				expect.arrayContaining([
+					`${runId}:model-call-1`,
+					`${runId}:research:model-call-1`,
+					`${runId}:code:model-call-1`
+				])
+			);
 		});
 
 		const toolsTask = tools.runUntil(task.catch(() => undefined));

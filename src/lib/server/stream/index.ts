@@ -1,5 +1,4 @@
 import { and, asc, desc, eq, gt, lte } from 'drizzle-orm';
-import { randomUUID } from 'node:crypto';
 import type { DatabaseClient } from '../db/client';
 import { runs, streamEvents, transcriptEvents } from '../db/schema';
 
@@ -13,6 +12,7 @@ export type PublishStreamEventInput = Pick<
 	'runId' | 'sessionId' | 'kind' | 'payload'
 > & {
 	createdAt?: string;
+	deduplicationKey?: string;
 };
 
 export type AppendTranscriptEventInput = Pick<
@@ -42,6 +42,20 @@ export async function publishStreamEvent(
 ): Promise<StreamEventSelect> {
 	const createdAt = input.createdAt ?? new Date().toISOString();
 	const row = database.transaction((tx) => {
+		if (input.deduplicationKey) {
+			const existing = tx
+				.select()
+				.from(streamEvents)
+				.where(
+					and(
+						eq(streamEvents.runId, input.runId),
+						eq(streamEvents.deduplicationKey, input.deduplicationKey)
+					)
+				)
+				.limit(1)
+				.get();
+			if (existing) return existing;
+		}
 		const last = tx
 			.select({ sequence: streamEvents.sequence })
 			.from(streamEvents)
@@ -58,6 +72,7 @@ export async function publishStreamEvent(
 				kind: input.kind,
 				payload: input.payload,
 				sequence,
+				deduplicationKey: input.deduplicationKey,
 				createdAt
 			})
 			.returning()
@@ -83,6 +98,7 @@ export async function publishAssistantDeltas(
 		runId: input.runId,
 		sessionId: input.sessionId,
 		createdAt: input.createdAt,
+		deduplicationKey: input.deduplicationKey,
 		kind: 'assistant.delta',
 		payload: JSON.stringify({ text })
 	});
@@ -138,6 +154,14 @@ export async function appendTranscriptEvent(
 ): Promise<TranscriptEventSelect> {
 	const createdAt = input.createdAt ?? new Date().toISOString();
 	const row = database.transaction((tx) => {
+		const existing = tx
+			.select()
+			.from(transcriptEvents)
+			.where(eq(transcriptEvents.id, input.id))
+			.limit(1)
+			.get();
+		if (existing) return existing;
+
 		const last = tx
 			.select({ sequence: transcriptEvents.sequence })
 			.from(transcriptEvents)
@@ -216,7 +240,7 @@ export async function persistToolResult(
 	}
 ): Promise<void> {
 	const now = new Date().toISOString();
-	const id = `${input.runId}:tool-result:${randomUUID()}`;
+	const id = `${input.runId}:tool-result:${input.callId}`;
 	const resultPayload = JSON.stringify({
 		callId: input.callId,
 		content: input.content,
@@ -235,6 +259,7 @@ export async function persistToolResult(
 		runId: input.runId,
 		kind: 'tool.result',
 		payload: resultPayload,
+		deduplicationKey: `tool-result:${input.callId}`,
 		createdAt: now
 	});
 }

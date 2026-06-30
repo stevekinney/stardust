@@ -89,6 +89,7 @@ describe('model activity', () => {
 				{
 					sessionId: 'session-001',
 					runId: 'run-001',
+					modelCallId: 'run-001:model-call-1',
 					model: 'claude-unknown'
 				},
 				{ database, provider, apiKey: 'test-key' }
@@ -130,6 +131,7 @@ describe('model activity', () => {
 			{
 				sessionId: 'session-001',
 				runId: 'run-001',
+				modelCallId: 'run-001:model-call-1',
 				model: 'claude-sonnet-4-5-20250929'
 			},
 			{ database, provider }
@@ -197,7 +199,12 @@ describe('model activity', () => {
 		};
 
 		await runModelCall(
-			{ sessionId: 'session-001', runId: 'run-001', model: 'claude-sonnet-4-5-20250929' },
+			{
+				sessionId: 'session-001',
+				runId: 'run-001',
+				modelCallId: 'run-001:model-call-1',
+				model: 'claude-sonnet-4-5-20250929'
+			},
 			{ database, provider, apiKey: 'test-key' }
 		);
 
@@ -240,7 +247,12 @@ describe('model activity', () => {
 		};
 
 		await runModelCall(
-			{ sessionId: 'session-001', runId: 'run-001', model: 'claude-sonnet-4-5-20250929' },
+			{
+				sessionId: 'session-001',
+				runId: 'run-001',
+				modelCallId: 'run-001:model-call-1',
+				model: 'claude-sonnet-4-5-20250929'
+			},
 			{ database, provider, apiKey: 'test-key' }
 		);
 
@@ -265,6 +277,64 @@ describe('model activity', () => {
 		expect(streamPayload.name).toBe('web.fetch');
 	});
 
+	it('does not duplicate model stream or tool-call side effects for the same modelCallId', async () => {
+		await appendTranscriptEvent(database, {
+			id: 'transcript-001',
+			runId: 'run-001',
+			sessionId: 'session-001',
+			kind: 'user_message',
+			payload: JSON.stringify({ text: 'Fetch https://example.com' }),
+			createdAt: '2026-01-01T00:00:00.000Z'
+		});
+
+		const provider: ModelProviderClient = {
+			createMessage: vi.fn(async (_request, onDelta) => {
+				await onDelta('hel');
+				await onDelta('lo');
+				return {
+					message: {
+						role: 'assistant' as const,
+						content: [
+							{
+								type: 'tool_use' as const,
+								id: 'call-1',
+								name: 'web.fetch',
+								input: { url: 'https://example.com' }
+							}
+						],
+						usage: { input_tokens: 50, output_tokens: 10 }
+					}
+				};
+			})
+		};
+		const input = {
+			sessionId: 'session-001',
+			runId: 'run-001',
+			modelCallId: 'run-001:model-call-1',
+			model: 'claude-sonnet-4-5-20250929'
+		};
+
+		await runModelCall(input, { database, provider, apiKey: 'test-key' });
+		await runModelCall(input, { database, provider, apiKey: 'test-key' });
+
+		expect(provider.createMessage).toHaveBeenCalledTimes(2);
+		const transcript = await reconstructSessionTranscript(database, 'session-001');
+		expect(
+			transcript.filter((event) => event.id === 'run-001:model-call-1:tool-call')
+		).toHaveLength(1);
+		const stream = await readStreamEventsAfterCursor(database, { runId: 'run-001' });
+		expect(
+			stream.events.filter((event) =>
+				event.deduplicationKey?.startsWith('assistant-delta:run-001:model-call-1:')
+			)
+		).toHaveLength(2);
+		expect(
+			stream.events.filter(
+				(event) => event.deduplicationKey === 'tool-call:run-001:model-call-1:call-1'
+			)
+		).toHaveLength(1);
+	});
+
 	it('persistToolResult writes a tool_result transcript event and tool.result stream event', async () => {
 		await persistToolResult(database, {
 			sessionId: 'session-001',
@@ -285,6 +355,30 @@ describe('model activity', () => {
 		const streamEvents = await readStreamEventsAfterCursor(database, { runId: 'run-001' });
 		const toolResultStreamEvent = streamEvents.events.find((e) => e.kind === 'tool.result');
 		expect(toolResultStreamEvent).toBeDefined();
+	});
+
+	it('persistToolResult is idempotent for repeated tool call identifiers', async () => {
+		const input = {
+			sessionId: 'session-001',
+			runId: 'run-001',
+			callId: 'call-idempotent',
+			content: '<html>result</html>',
+			isError: false
+		};
+
+		await persistToolResult(database, input);
+		await persistToolResult(database, input);
+
+		const transcript = await reconstructSessionTranscript(database, 'session-001');
+		expect(
+			transcript.filter((event) => event.id === 'run-001:tool-result:call-idempotent')
+		).toHaveLength(1);
+		const streamEvents = await readStreamEventsAfterCursor(database, { runId: 'run-001' });
+		expect(
+			streamEvents.events.filter(
+				(event) => event.deduplicationKey === 'tool-result:call-idempotent'
+			)
+		).toHaveLength(1);
 	});
 
 	it('classifies retryable provider failures', () => {
@@ -330,6 +424,7 @@ describe('model activity', () => {
 			{
 				sessionId: 'session-001',
 				runId: 'run-001',
+				modelCallId: 'run-001:model-call-1',
 				model: 'claude-sonnet-4-5-20250929',
 				steeringMessages: ['focus on the budget']
 			},
@@ -373,6 +468,7 @@ describe('model activity', () => {
 			{
 				sessionId: 'session-001',
 				runId: 'run-001',
+				modelCallId: 'run-001:model-call-1',
 				model: 'claude-sonnet-4-5-20250929',
 				systemPrompt: 'You are a helpful assistant.',
 				memoryNotes: [
@@ -424,6 +520,7 @@ describe('model activity', () => {
 			{
 				sessionId: 'session-001',
 				runId: 'run-001',
+				modelCallId: 'run-001:model-call-1',
 				model: 'claude-sonnet-4-5-20250929',
 				workspacePath: '/workspace/session-xyz'
 			},

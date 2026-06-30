@@ -16,7 +16,7 @@ type ModelActivities = {
 const modelActivities = proxyActivities<ModelActivities>({
 	taskQueue: TASK_QUEUE_MODEL,
 	startToCloseTimeout: '120 seconds',
-	retry: { maximumAttempts: 2 }
+	retry: { maximumAttempts: 1 }
 });
 
 /**
@@ -29,6 +29,7 @@ export async function codeSubagentWorkflow(
 	const modelResult = await modelActivities.callModel({
 		sessionId: input.sessionKey,
 		runId: input.subagentRunId,
+		modelCallId: `${input.subagentRunId}:model-call-1`,
 		model: input.model ?? DEFAULT_MODEL,
 		systemPrompt: 'You are a code assistant. Write clean, concise code that solves the user task.',
 		maxTokens: 1024

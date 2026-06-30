@@ -196,7 +196,7 @@ const observabilityActivities = proxyActivities<ObservabilityActivities>({
 const modelActivities = proxyActivities<ModelActivities>({
 	taskQueue: TASK_QUEUE_MODEL,
 	startToCloseTimeout: '120 seconds',
-	retry: { maximumAttempts: 2 }
+	retry: { maximumAttempts: 1 }
 });
 
 const memoryActivities = proxyActivities<MemoryActivities>({
@@ -770,6 +770,7 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 			const modelResult = await modelActivities.callModel({
 				sessionId: input.sessionKey,
 				runId: input.runId,
+				modelCallId: `${input.runId}:model-call-${modelCallCount + 1}`,
 				model: input.model ?? DEFAULT_MODEL,
 				tools: input.tools,
 				systemPrompt: input.systemPrompt,

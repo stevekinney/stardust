@@ -250,6 +250,8 @@ export type ContextMemoryNote = {
 export type ModelCallInput = {
 	sessionId: string;
 	runId: string;
+	/** Deterministic per-workflow model call identifier used for idempotent side effects. */
+	modelCallId: string;
 	model: string;
 	tools?: ModelToolSchema[];
 	maxTokens?: number;

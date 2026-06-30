@@ -72,6 +72,31 @@ describe('stream events', () => {
 		expect(second.id).toBeGreaterThan(first.id);
 	});
 
+	it('returns the existing stream event for a repeated run deduplication key', async () => {
+		const first = await publishStreamEvent(database, {
+			runId: 'run-001',
+			sessionId: 'session-001',
+			kind: 'lifecycle',
+			payload: JSON.stringify({ status: 'dedupe-started' }),
+			deduplicationKey: 'lifecycle:dedupe-started'
+		});
+		const second = await publishStreamEvent(database, {
+			runId: 'run-001',
+			sessionId: 'session-001',
+			kind: 'lifecycle',
+			payload: JSON.stringify({ status: 'dedupe-started' }),
+			deduplicationKey: 'lifecycle:dedupe-started'
+		});
+		const replay = await readStreamEventsAfterCursor(database, { runId: 'run-001' });
+		const matching = replay.events.filter(
+			(event) => event.deduplicationKey === 'lifecycle:dedupe-started'
+		);
+
+		expect(second.id).toBe(first.id);
+		expect(second.sequence).toBe(first.sequence);
+		expect(matching).toHaveLength(1);
+	});
+
 	it('rejects a duplicate (run_id, sequence) pair — UNIQUE constraint is enforced', () => {
 		// The migration must have created the index for this to throw.
 		expect(() => {
@@ -249,6 +274,27 @@ describe('stream events', () => {
 
 		expect(event?.kind).toBe('assistant.delta');
 		expect(JSON.parse(event!.payload)).toEqual({ text: 'hello' });
+	});
+
+	it('deduplicates coalesced assistant deltas by semantic key', async () => {
+		const first = await publishAssistantDeltas(database, {
+			runId: 'run-001',
+			sessionId: 'session-001',
+			chunks: ['retry-safe'],
+			deduplicationKey: 'assistant-delta:model-call-1:0'
+		});
+		const second = await publishAssistantDeltas(database, {
+			runId: 'run-001',
+			sessionId: 'session-001',
+			chunks: ['retry-safe'],
+			deduplicationKey: 'assistant-delta:model-call-1:0'
+		});
+
+		expect(second?.id).toBe(first?.id);
+		const replay = await readStreamEventsAfterCursor(database, { runId: 'run-001' });
+		expect(
+			replay.events.filter((event) => event.deduplicationKey === 'assistant-delta:model-call-1:0')
+		).toHaveLength(1);
 	});
 
 	it('trims stream events only after a run is complete', async () => {

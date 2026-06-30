@@ -3,7 +3,6 @@ import { toAnthropicTools } from 'armorer/adapters/anthropic';
 import type { AnthropicTool } from 'armorer/adapters/anthropic';
 import type { JsonObject, SerializedToolDefinition } from 'armorer/core';
 import { ApplicationFailure } from '@temporalio/common';
-import { randomUUID } from 'node:crypto';
 import type {
 	ModelCallInput,
 	ModelCallResult,
@@ -136,10 +135,13 @@ export async function runModelCall(
 
 	// Publish each incoming text token to the live stream bus before the final
 	// model result is available, so the UI can render assistant text incrementally.
+	let deltaIndex = 0;
 	const onDelta: OnDelta = async (delta) => {
+		const currentDeltaIndex = deltaIndex++;
 		await publishAssistantDeltas(database, {
 			sessionId: input.sessionId,
 			runId: input.runId,
+			deduplicationKey: `assistant-delta:${input.modelCallId}:${currentDeltaIndex}`,
 			chunks: [delta]
 		});
 	};
@@ -163,9 +165,8 @@ export async function runModelCall(
 		// Write a tool_call transcript event so the next model call sees the tool
 		// requests in its context window and so the context builder can reconstruct
 		// the multi-turn conversation correctly.
-		const turnId = randomUUID();
 		await appendTranscriptEvent(database, {
-			id: `${input.runId}:tool-call:${turnId}`,
+			id: `${input.modelCallId}:tool-call`,
 			sessionId: input.sessionId,
 			runId: input.runId,
 			kind: 'tool_call',
@@ -187,6 +188,7 @@ export async function runModelCall(
 				runId: input.runId,
 				kind: 'tool.call',
 				payload: JSON.stringify({ id: tc.id, name: tc.name, input: tc.input }),
+				deduplicationKey: `tool-call:${input.modelCallId}:${tc.id}`,
 				createdAt: now
 			});
 		}

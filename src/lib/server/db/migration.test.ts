@@ -100,6 +100,16 @@ describe('migration', () => {
 		expect(names).toContain('memory_notes_ad');
 	});
 
+	it('adds stream event semantic deduplication support', () => {
+		const columns = sqlite.prepare(`PRAGMA table_info(stream_events)`).all() as { name: string }[];
+		expect(columns.map((column) => column.name)).toContain('deduplication_key');
+
+		const indexes = sqlite.prepare(`PRAGMA index_list(stream_events)`).all() as { name: string }[];
+		expect(indexes.map((index) => index.name)).toContain(
+			'stream_events_run_id_deduplication_key_unique'
+		);
+	});
+
 	it('FTS5 mirror syncs on insert', () => {
 		const id = 'fts-test-1';
 		sqlite

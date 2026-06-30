@@ -82,6 +82,7 @@ export async function recordRunStarted(input: {
 		runId: input.runId,
 		kind: 'lifecycle',
 		payload: JSON.stringify({ status: 'started' }),
+		deduplicationKey: 'lifecycle:started',
 		createdAt: now
 	});
 }
@@ -98,6 +99,7 @@ export async function recordSubagentStarted(input: {
 		sessionId: input.sessionId,
 		runId: input.runId,
 		kind: 'subagent.start',
+		deduplicationKey: `subagent:start:${input.subagentRunId}`,
 		payload: JSON.stringify({
 			subagentRunId: input.subagentRunId,
 			kind: input.kind,
@@ -122,6 +124,7 @@ export async function recordSubagentCompleted(input: {
 		sessionId: input.sessionId,
 		runId: input.runId,
 		kind: 'subagent.complete',
+		deduplicationKey: `subagent:complete:${input.subagentRunId}`,
 		payload: JSON.stringify({
 			subagentRunId: input.subagentRunId,
 			kind: input.kind,
@@ -206,6 +209,7 @@ export async function recordRunCompleted(input: {
 		runId: input.runId,
 		kind: 'lifecycle',
 		payload: JSON.stringify(streamLifecyclePayload),
+		deduplicationKey: 'lifecycle:completed',
 		createdAt: now
 	});
 

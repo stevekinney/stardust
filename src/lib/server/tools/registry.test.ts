@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApplicationFailure } from '@temporalio/common';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
@@ -22,6 +23,11 @@ import {
 import { hashApprovalArguments } from '../policy/arguments-hash';
 import { LocalArtifactStore } from '../artifacts/local-artifact-store';
 import { LocalSubprocessSandboxProvider } from '../sandbox';
+import type {
+	SandboxCommandInput,
+	SandboxCommandResult,
+	SandboxProvider
+} from '../sandbox/sandbox-provider';
 import * as schema from '../db/schema';
 
 let workspaceRoot: string;
@@ -29,6 +35,10 @@ let provider: LocalSubprocessSandboxProvider;
 
 /** Stable session key used across workspace tool tests. Must satisfy SESSION_KEY_RE. */
 const TEST_SESSION = 'test-registry-session';
+
+function runCommandThroughProvider(input: SandboxCommandInput): Promise<SandboxCommandResult> {
+	return provider.runCommand(input);
+}
 
 beforeEach(async () => {
 	vi.stubEnv('TAVILY_API_KEY', '');
@@ -372,6 +382,7 @@ describe('tool registry', () => {
 		const result = await executeRegisteredTool({
 			sessionKey: TEST_SESSION,
 			sandboxProvider: provider,
+			runSandboxCommand: runCommandThroughProvider,
 			approved: true,
 			runId: 'run-snap-shell',
 			call: {
@@ -441,6 +452,7 @@ describe('tool registry', () => {
 		const result = await executeRegisteredTool({
 			sessionKey: TEST_SESSION,
 			sandboxProvider: provider,
+			runSandboxCommand: runCommandThroughProvider,
 			approved: true,
 			runId: 'run-patch-01',
 			call: {
@@ -478,6 +490,7 @@ describe('tool registry', () => {
 		const result = await executeRegisteredTool({
 			sessionKey: TEST_SESSION,
 			sandboxProvider: provider,
+			runSandboxCommand: runCommandThroughProvider,
 			approved: true,
 			runId: 'run-patch-bad',
 			call: {
@@ -549,6 +562,7 @@ describe('tool registry', () => {
 		const result = await executeRegisteredTool({
 			sessionKey: TEST_SESSION,
 			sandboxProvider: provider,
+			runSandboxCommand: runCommandThroughProvider,
 			approved: true,
 			runId: 'run-search-01',
 			call: {
@@ -573,6 +587,7 @@ describe('tool registry', () => {
 		const result = await executeRegisteredTool({
 			sessionKey: TEST_SESSION,
 			sandboxProvider: provider,
+			runSandboxCommand: runCommandThroughProvider,
 			approved: true,
 			runId: 'run-shell-01',
 			call: {
@@ -587,6 +602,70 @@ describe('tool registry', () => {
 		expect(content.stdout).toBe('provider-routed\n');
 		expect(content.exitCode).toBe(0);
 		expect(content.status).toBe('complete');
+	});
+
+	it('shell.exec uses the injected command runner instead of sandboxProvider.runCommand', async () => {
+		const providerRunCommand = vi.fn(async () => {
+			throw ApplicationFailure.nonRetryable('provider.runCommand should not be called directly');
+		});
+		const fakeProvider: SandboxProvider = {
+			name: 'local-subprocess',
+			ensureWorkspace: vi.fn(async () => '/tmp/stardust-workspace'),
+			readFile: vi.fn(),
+			writeFile: vi.fn(),
+			runCommand: providerRunCommand,
+			snapshot: vi.fn(async () => ({
+				id: 'snapshot-001',
+				sessionKey: TEST_SESSION,
+				workspacePath: '/tmp/stardust-workspace',
+				gitCommitSha: '0'.repeat(40),
+				createdAt: '2026-01-01T00:00:00.000Z'
+			})),
+			restore: vi.fn(),
+			createEphemeralSandbox: vi.fn(),
+			killProcess: vi.fn(),
+			cancelSession: vi.fn()
+		};
+		const runSandboxCommand = vi.fn(async () => ({
+			id: 'cmd-001',
+			sessionKey: TEST_SESSION,
+			workspacePath: '/tmp/stardust-workspace',
+			command: 'echo',
+			args: ['runner-routed'],
+			status: 'complete' as const,
+			exitCode: 0,
+			stdout: 'runner-routed\n',
+			stderr: '',
+			timedOut: false,
+			killed: false,
+			startedAt: '2026-01-01T00:00:00.000Z',
+			completedAt: '2026-01-01T00:00:01.000Z'
+		}));
+
+		const result = await executeRegisteredTool({
+			sessionKey: TEST_SESSION,
+			sandboxProvider: fakeProvider,
+			runSandboxCommand,
+			approved: true,
+			runId: 'run-shell-runner',
+			call: {
+				id: 'call-shell-runner',
+				name: 'shell.exec',
+				arguments: { command: 'echo', args: ['runner-routed'] }
+			}
+		});
+
+		expect(result.outcome).toBe('success');
+		expect(runSandboxCommand).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionKey: TEST_SESSION,
+				runId: 'run-shell-runner',
+				command: 'echo',
+				args: ['runner-routed'],
+				toolCallId: 'call-shell-runner'
+			})
+		);
+		expect(providerRunCommand).not.toHaveBeenCalled();
 	});
 
 	it('shell.exec requires approval before executing', async () => {
@@ -622,6 +701,7 @@ describe('tool registry', () => {
 			const result = await executeRegisteredTool({
 				sessionKey: TEST_SESSION,
 				sandboxProvider: dbProvider,
+				runSandboxCommand: (input) => dbProvider.runCommand(input),
 				approved: true,
 				runId: 'run-db-shell',
 				call: {

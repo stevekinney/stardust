@@ -3,6 +3,7 @@ import { db } from '../lib/server/db/client';
 import { getArtifactStore } from '../lib/server/artifacts';
 import { getSandboxProvider } from '../lib/server/sandbox';
 import { executeRegisteredTool } from '../lib/server/tools/registry';
+import { runSandboxCommand } from './sandbox.activities';
 
 const artifactStore = getArtifactStore();
 const sandboxProvider = getSandboxProvider({ database: db });
@@ -10,5 +11,11 @@ const sandboxProvider = getSandboxProvider({ database: db });
 export async function executeTool(
 	input: ToolExecutionInput & { approved?: boolean }
 ): Promise<ToolExecutionResult> {
-	return executeRegisteredTool({ ...input, database: db, artifactStore, sandboxProvider });
+	return executeRegisteredTool({
+		...input,
+		database: db,
+		artifactStore,
+		sandboxProvider,
+		runSandboxCommand
+	});
 }

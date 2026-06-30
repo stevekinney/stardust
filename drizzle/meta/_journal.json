@@ -43,6 +43,13 @@
       "when": 1782425000000,
       "tag": "0005_sessions_name_archived_at",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1782425010000,
+      "tag": "0006_stream_events_deduplication_key",
+      "breakpoints": true
     }
   ]
 }

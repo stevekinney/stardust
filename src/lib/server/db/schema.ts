@@ -256,6 +256,7 @@ export const streamEvents = sqliteTable(
 		runId: text('run_id').notNull(),
 		sessionId: text('session_id').notNull(),
 		sequence: integer('sequence').notNull(),
+		deduplicationKey: text('deduplication_key'),
 		kind: text('kind', {
 			enum: [
 				'assistant.delta',
@@ -277,7 +278,11 @@ export const streamEvents = sqliteTable(
 	(table) => [
 		// Enforces monotonic per-run sequence authority: no two events for the same
 		// run may share a sequence number, preventing duplicates under concurrent writes.
-		uniqueIndex('stream_events_run_id_sequence_unique').on(table.runId, table.sequence)
+		uniqueIndex('stream_events_run_id_sequence_unique').on(table.runId, table.sequence),
+		uniqueIndex('stream_events_run_id_deduplication_key_unique').on(
+			table.runId,
+			table.deduplicationKey
+		)
 	]
 );
 

@@ -6,7 +6,11 @@ import { mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import * as schema from '../lib/server/db/schema';
-import { publishStreamEvent, readStreamEventsAfterCursor } from '../lib/server/stream';
+import {
+	publishStreamEvent,
+	readStreamEventsAfterCursor,
+	reconstructSessionTranscript
+} from '../lib/server/stream';
 import { recordRunCompleted, recordRunStarted } from './observability.activities';
 
 const TEST_DB_DIR = join(tmpdir(), 'stardust-observability-activities-test');
@@ -118,6 +122,42 @@ describe('recordRunCompleted', () => {
 			estimatedCostUsd: 0.003
 		});
 	});
+
+	it('is idempotent for canonical transcript and stream lifecycle completion events', async () => {
+		sqlite
+			.prepare(`INSERT INTO runs (id, session_id, workflow_id, status) VALUES (?, ?, ?, ?)`)
+			.run(
+				'run-complete-idempotent',
+				'obs-session',
+				'agent-run:run-complete-idempotent',
+				'running'
+			);
+
+		const input = {
+			sessionId: 'obs-session',
+			runId: 'run-complete-idempotent',
+			status: 'failed' as const,
+			finalAnswer: 'failed',
+			reason: 'planned retry failure'
+		};
+
+		await recordRunCompleted(input);
+		await recordRunCompleted(input);
+
+		const transcript = await reconstructSessionTranscript(database, 'obs-session');
+		expect(
+			transcript.filter((event) => event.id === 'run-complete-idempotent:assistant-message')
+		).toHaveLength(1);
+		expect(
+			transcript.filter((event) => event.id === 'run-complete-idempotent:completed')
+		).toHaveLength(1);
+		const replay = await readStreamEventsAfterCursor(database, {
+			runId: 'run-complete-idempotent'
+		});
+		expect(
+			replay.events.filter((event) => event.deduplicationKey === 'lifecycle:completed')
+		).toHaveLength(1);
+	});
 });
 
 describe('recordRunStarted', () => {
@@ -170,5 +210,28 @@ describe('recordRunStarted', () => {
 			.get('run-started-minimal') as { id: string; status: string };
 		expect(row.id).toBe('run-started-minimal');
 		expect(row.status).toBe('running');
+	});
+
+	it('is idempotent for canonical transcript and stream lifecycle start events', async () => {
+		const input = {
+			sessionId: 'obs-session-start-idempotent',
+			runId: 'run-started-idempotent',
+			message: 'hello'
+		};
+
+		await recordRunStarted(input);
+		await recordRunStarted(input);
+
+		const transcript = await reconstructSessionTranscript(database, 'obs-session-start-idempotent');
+		expect(
+			transcript.filter((event) => event.id === 'run-started-idempotent:user-message')
+		).toHaveLength(1);
+		expect(
+			transcript.filter((event) => event.id === 'run-started-idempotent:started')
+		).toHaveLength(1);
+		const replay = await readStreamEventsAfterCursor(database, { runId: 'run-started-idempotent' });
+		expect(
+			replay.events.filter((event) => event.deduplicationKey === 'lifecycle:started')
+		).toHaveLength(1);
 	});
 });
