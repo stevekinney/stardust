@@ -432,4 +432,27 @@
 		background: var(--cinder-surface-hover);
 		color: var(--cinder-text);
 	}
+
+	@media (max-width: 1024px) {
+		.inspector-pane {
+			width: 320px;
+		}
+	}
+
+	@media (max-width: 640px) {
+		.split-surface {
+			flex-direction: column;
+		}
+
+		.inspector-pane {
+			width: 100%;
+			max-height: 50%;
+			border-left: none;
+			border-top: 1px solid var(--cinder-border);
+		}
+
+		.inspector-toggle {
+			display: none;
+		}
+	}
 </style>

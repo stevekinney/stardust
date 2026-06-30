@@ -21,6 +21,7 @@
 	let sessionsError = $state<string | null>(null);
 	let settingsOpen = $state(false);
 	let search = $state('');
+	let railOpen = $state(false);
 
 	const currentSessionKey = $derived($page.params.sessionKey ?? null);
 
@@ -66,6 +67,7 @@
 	}
 
 	function handleSelectSession(session: SessionRow) {
+		railOpen = false;
 		void goto(resolve(`/sessions/${encodeURIComponent(session.sessionKey)}`));
 	}
 
@@ -130,6 +132,30 @@
 <div class="app">
 	<!-- Top bar -->
 	<header class="top">
+		<button
+			type="button"
+			class="rail-toggle icon-button"
+			aria-label="Toggle navigation"
+			onclick={() => (railOpen = !railOpen)}
+		>
+			<svg
+				width="18"
+				height="18"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+			>
+				<line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line
+					x1="3"
+					y1="18"
+					x2="21"
+					y2="18"
+				/>
+			</svg>
+		</button>
 		<a href={resolve('/')} class="brand" aria-label="Stardust home">
 			<span class="brand-mark">✦</span>
 			<span class="brand-name">STARDUST</span>
@@ -185,8 +211,14 @@
 	<DurabilityRibbon />
 
 	<div class="body">
+		{#if railOpen}
+			<!-- svelte-ignore a11y_click_events_have_key_events -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div class="rail-backdrop" onclick={() => (railOpen = false)}></div>
+		{/if}
+
 		<!-- Left rail -->
-		<nav class="rail" aria-label="Session navigation">
+		<nav class="rail" class:rail-open={railOpen} aria-label="Session navigation">
 			<div class="rail-top">
 				<Button
 					label="New Session"
@@ -604,5 +636,145 @@
 
 	.rail-error {
 		color: var(--cinder-color-danger-fg);
+	}
+
+	/* ── Rail toggle (hidden on desktop) ─────────────────── */
+	.rail-toggle {
+		display: none;
+	}
+
+	/* ── Backdrop overlay for mobile rail ────────────────── */
+	.rail-backdrop {
+		display: none;
+	}
+
+	/* ── Tablet: collapsed icon-only rail ────────────────── */
+	@media (max-width: 1024px) {
+		.rail {
+			width: 56px;
+		}
+
+		.rail-top {
+			padding: 8px;
+		}
+
+		.rail-sessions {
+			padding: 0 4px;
+		}
+
+		.session-card {
+			padding: 8px;
+			justify-content: center;
+		}
+
+		.card-top-row {
+			justify-content: center;
+		}
+
+		.card-label,
+		.card-meta,
+		.rail-top :global(.cinder-search-field),
+		.rail-nav-item span,
+		.rail-footer span:not(.temporal-dot) {
+			display: none;
+		}
+
+		.rail-nav-item {
+			justify-content: center;
+			padding: 8px;
+		}
+
+		.rail-footer {
+			padding: 10px 0;
+			display: flex;
+			justify-content: center;
+		}
+
+		.temporal-status {
+			justify-content: center;
+		}
+
+		.brand-name {
+			display: none;
+		}
+
+		.session-chip {
+			display: none;
+		}
+
+		.rail-toggle {
+			display: flex;
+		}
+	}
+
+	/* ── Phone: hidden rail with overlay ─────────────────── */
+	@media (max-width: 640px) {
+		.rail {
+			position: fixed;
+			top: 0;
+			left: 0;
+			bottom: 0;
+			z-index: 100;
+			width: 280px;
+			transform: translateX(-100%);
+			transition: transform 0.2s ease;
+		}
+
+		.rail.rail-open {
+			transform: translateX(0);
+		}
+
+		.rail-backdrop {
+			display: block;
+			position: fixed;
+			inset: 0;
+			z-index: 99;
+			background: oklch(0% 0 0 / 0.5);
+		}
+
+		/* Restore full rail content when open on phone */
+		.rail.rail-open .card-label,
+		.rail.rail-open .card-meta,
+		.rail.rail-open :global(.cinder-search-field),
+		.rail.rail-open .rail-nav-item span,
+		.rail.rail-open .rail-footer span:not(.temporal-dot) {
+			display: revert;
+		}
+
+		.rail.rail-open .session-card {
+			padding: 8px 10px;
+			justify-content: flex-start;
+		}
+
+		.rail.rail-open .card-top-row {
+			justify-content: flex-start;
+		}
+
+		.rail.rail-open .rail-nav-item {
+			justify-content: flex-start;
+			padding: 8px 10px;
+		}
+
+		.rail.rail-open .rail-top {
+			padding: 12px;
+		}
+
+		.rail.rail-open .rail-sessions {
+			padding: 0 8px;
+		}
+
+		.rail.rail-open .rail-footer {
+			padding: 10px 12px;
+			justify-content: flex-start;
+		}
+
+		.rail.rail-open .temporal-status {
+			justify-content: flex-start;
+		}
+
+		.top {
+			gap: 8px;
+			padding: 0 10px;
+		}
 	}
 </style>
