@@ -2,8 +2,6 @@
 	import { onMount } from 'svelte';
 	import Button from '@lostgradient/cinder/button';
 	import Input from '@lostgradient/cinder/input';
-	import Segment from '@lostgradient/cinder/segment';
-	import SegmentedControl from '@lostgradient/cinder/segmented-control';
 	import Textarea from '@lostgradient/cinder/textarea';
 	import type { ScheduleProjection } from '$lib/types';
 	import type { RunInspectorProjection } from '$lib/server/observability/projection';
@@ -27,9 +25,6 @@
 		SandboxSnapshotRow
 	} from '$lib/components/SandboxInspector.svelte';
 	import ApprovalCenter from '$lib/components/ApprovalCenter.svelte';
-	import Settings from '$lib/components/Settings.svelte';
-
-	let settingsOpen = $state(false);
 
 	type SessionRow = {
 		id: string;
@@ -445,19 +440,6 @@
 			<h1>Operations Console</h1>
 		</div>
 		<div class="header-actions">
-			<SegmentedControl
-				id="view-mode-control"
-				label="View mode"
-				hideLabel
-				density="toolbar"
-				value={viewMode.mode}
-				onchange={(value) => {
-					if (value === 'operator' || value === 'engineer') viewMode.set(value);
-				}}
-			>
-				<Segment value="operator">Operator</Segment>
-				<Segment value="engineer">Engineer</Segment>
-			</SegmentedControl>
 			<Button
 				variant="ghost"
 				size="sm"
@@ -472,16 +454,8 @@
 				onclick={loadSchedules}
 				disabled={schedulesLoading}
 			/>
-			<Button
-				variant="secondary"
-				size="sm"
-				label="Settings"
-				onclick={() => (settingsOpen = true)}
-			/>
 		</div>
 	</header>
-
-	<Settings bind:open={settingsOpen} />
 
 	<!-- ── Sessions and Run Navigation ─────────────────────────────────────── -->
 	<section class="panel" aria-labelledby="sessions-heading">
