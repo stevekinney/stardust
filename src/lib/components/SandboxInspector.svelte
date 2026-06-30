@@ -1,4 +1,7 @@
 <script lang="ts">
+	import Callout from '@lostgradient/cinder/callout';
+	import EmptyState from '@lostgradient/cinder/empty-state';
+
 	export type SandboxInfo = {
 		id: string;
 		sessionId: string;
@@ -62,13 +65,20 @@
 	<h2 id="sandbox-inspector-heading">Sandbox Inspector</h2>
 
 	{#if !sandbox}
-		<p class="empty muted">No sandbox provisioned for this session.</p>
+		<EmptyState
+			title="No sandbox provisioned"
+			description="No sandbox provisioned for this session."
+			headingLevel={3}
+		/>
 	{:else}
-		<div class="caveat" role="note" data-caveat>
+		<!-- Callout does not support data-caveat natively; data attribute passes through via rest spread -->
+		<Callout variant="warning" data-caveat>
 			<strong>Note:</strong> This sandbox is a local subprocess — not microVM-isolated. It is safe only
 			for a trusted, single-user local POC.
-		</div>
+		</Callout>
 
+		<!-- Raw <dl> preserved: DescriptionList only supports plain string definitions;
+		     sandbox metadata uses <code> and status-pill <span> elements which require HTML. -->
 		<dl class="sandbox-meta">
 			<div>
 				<dt>Provider</dt>
@@ -173,16 +183,6 @@
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		color: color-mix(in srgb, CanvasText 60%, transparent);
-	}
-
-	.caveat {
-		padding: 0.6rem 0.75rem;
-		border-left: 3px solid #d97706;
-		border-radius: 0 6px 6px 0;
-		background: #fffbeb;
-		color: #7a4f00;
-		font-size: 0.85rem;
-		line-height: 1.45;
 	}
 
 	.sandbox-meta {
@@ -335,14 +335,5 @@
 	.item-time {
 		color: color-mix(in srgb, CanvasText 45%, transparent);
 		font-size: 0.75rem;
-	}
-
-	.empty {
-		margin: 0;
-		font-size: 0.9rem;
-	}
-
-	.muted {
-		color: color-mix(in srgb, CanvasText 55%, transparent);
 	}
 </style>

@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import Button from '@lostgradient/cinder/button';
+	import Input from '@lostgradient/cinder/input';
 	import Segment from '@lostgradient/cinder/segment';
 	import SegmentedControl from '@lostgradient/cinder/segmented-control';
+	import Textarea from '@lostgradient/cinder/textarea';
 	import type { ScheduleProjection } from '$lib/types';
 	import type { RunInspectorProjection } from '$lib/server/observability/projection';
 	import type { MemoryNote, MemoryCandidate } from '$lib/server/memory/memory-store';
@@ -501,6 +503,8 @@
 		{:else}
 			<div class="session-list">
 				{#each sessions as session (session.id)}
+					<!-- Raw <button> preserved: full-width nav list item with class:selected
+					     and complex inner layout; Cinder Button can't accommodate this style. -->
 					<button
 						type="button"
 						class="session-row"
@@ -530,6 +534,8 @@
 					<ul class="run-list">
 						{#each sessionRuns as run (run.id)}
 							<li>
+								<!-- Raw <button> preserved: list-item layout with class:selected and
+								     complex inner content; Cinder Button can't accommodate this style. -->
 								<button
 									type="button"
 									class="run-row"
@@ -625,13 +631,12 @@
 				<p class="muted">Enter a session key and run ID to inspect directly.</p>
 			</div>
 			{#if inspector}
-				<button
-					type="button"
-					class="temporal-link secondary"
+				<Button
+					label="Temporal Web ↗"
+					variant="secondary"
+					size="sm"
 					onclick={() => openTemporalWeb(inspector!.temporalWebUrl)}
-				>
-					Temporal Web ↗
-				</button>
+				/>
 			{/if}
 		</div>
 
@@ -642,17 +647,27 @@
 				void loadRunInspectorManual();
 			}}
 		>
-			<label>
-				Session Key
-				<input bind:value={inspectorSessionKey} required autocomplete="off" />
-			</label>
-			<label>
-				Run Id
-				<input bind:value={inspectorRunId} required autocomplete="off" />
-			</label>
-			<button type="submit" disabled={inspectorLoading}>
-				{inspectorLoading ? 'Loading…' : 'Inspect Run'}
-			</button>
+			<Input
+				id="inspector-session-key"
+				label="Session Key"
+				bind:value={inspectorSessionKey}
+				required
+				autocomplete="off"
+			/>
+			<Input
+				id="inspector-run-id"
+				label="Run Id"
+				bind:value={inspectorRunId}
+				required
+				autocomplete="off"
+			/>
+			<Button
+				label={inspectorLoading ? 'Loading…' : 'Inspect Run'}
+				variant="primary"
+				type="submit"
+				disabled={inspectorLoading}
+				class="form-submit"
+			/>
 		</form>
 
 		{#if inspectorFormError}
@@ -672,23 +687,35 @@
 				void createSchedule();
 			}}
 		>
-			<label>
-				Name
-				<input bind:value={form.name} required autocomplete="off" />
-			</label>
-			<label>
-				Description
-				<input bind:value={form.description} autocomplete="off" />
-			</label>
-			<label>
-				Cron Expression
-				<input bind:value={form.cronExpression} required autocomplete="off" />
-			</label>
-			<label class="prompt-field">
-				Prompt
-				<textarea bind:value={form.prompt} required rows="4"></textarea>
-			</label>
-			<button type="submit" disabled={saving}>{saving ? 'Creating…' : 'Create Schedule'}</button>
+			<Input id="schedule-name" label="Name" bind:value={form.name} required autocomplete="off" />
+			<Input
+				id="schedule-description"
+				label="Description"
+				bind:value={form.description}
+				autocomplete="off"
+			/>
+			<Input
+				id="schedule-cron"
+				label="Cron Expression"
+				bind:value={form.cronExpression}
+				required
+				autocomplete="off"
+			/>
+			<Textarea
+				id="schedule-prompt"
+				label="Prompt"
+				bind:value={form.prompt}
+				required
+				rows={4}
+				class="prompt-field"
+			/>
+			<Button
+				label={saving ? 'Creating…' : 'Create Schedule'}
+				variant="primary"
+				type="submit"
+				disabled={saving}
+				class="form-submit"
+			/>
 		</form>
 	</section>
 
@@ -729,41 +756,37 @@
 						</dl>
 						<p class="prompt">{schedule.prompt}</p>
 						<div class="actions">
-							<button
-								type="button"
-								class="secondary"
+							<Button
+								label="Trigger Now"
+								variant="secondary"
+								size="sm"
 								onclick={() => void triggerSchedule(schedule.temporalScheduleId)}
 								disabled={activeScheduleId === schedule.temporalScheduleId}
-							>
-								Trigger Now
-							</button>
+							/>
 							{#if schedule.status === 'paused'}
-								<button
-									type="button"
-									class="secondary"
+								<Button
+									label="Resume"
+									variant="secondary"
+									size="sm"
 									onclick={() => void resumeSchedule(schedule.temporalScheduleId)}
 									disabled={activeScheduleId === schedule.temporalScheduleId}
-								>
-									Resume
-								</button>
+								/>
 							{:else}
-								<button
-									type="button"
-									class="secondary"
+								<Button
+									label="Pause"
+									variant="secondary"
+									size="sm"
 									onclick={() => void pauseSchedule(schedule.temporalScheduleId)}
 									disabled={activeScheduleId === schedule.temporalScheduleId}
-								>
-									Pause
-								</button>
+								/>
 							{/if}
-							<button
-								type="button"
-								class="danger"
+							<Button
+								label="Delete"
+								variant="danger"
+								size="sm"
 								onclick={() => void deleteSchedule(schedule.temporalScheduleId)}
 								disabled={activeScheduleId === schedule.temporalScheduleId}
-							>
-								Delete
-							</button>
+							/>
 						</div>
 					</article>
 				{/each}
@@ -787,9 +810,8 @@
 			sans-serif;
 	}
 
-	button,
-	input,
-	textarea {
+	/* Raw <button> session/run row elements need font inheritance */
+	button {
 		font: inherit;
 	}
 
@@ -1076,30 +1098,8 @@
 		gap: 14px;
 	}
 
-	label {
-		display: grid;
-		gap: 6px;
-		color: #40505f;
-		font-size: 0.9rem;
-		font-weight: 700;
-	}
-
-	input,
-	textarea {
-		width: 100%;
-		box-sizing: border-box;
-		border: 1px solid #c8d0d8;
-		border-radius: 6px;
-		padding: 10px 12px;
-		color: #17202a;
-		background: #ffffff;
-	}
-
-	textarea {
-		resize: vertical;
-	}
-
-	.prompt-field {
+	/* .prompt-field targets the Cinder Textarea root wrapper for the schedule prompt field */
+	:global(.prompt-field) {
 		grid-column: 1 / -1;
 	}
 
@@ -1108,47 +1108,10 @@
 		align-items: end;
 	}
 
-	/* Buttons */
-	button {
-		min-height: 40px;
-		border: 1px solid #174c77;
-		border-radius: 6px;
-		padding: 0 14px;
-		color: #ffffff;
-		background: #174c77;
-		font-weight: 700;
-		cursor: pointer;
-	}
-
-	form button {
+	/* All action buttons now use Cinder Button. Session/run row raw <button>
+	   elements have their own rules (.session-row, .run-row) below. */
+	:global(.form-submit) {
 		justify-self: start;
-	}
-
-	button.secondary {
-		color: #174c77;
-		background: #ffffff;
-	}
-
-	button.danger {
-		border-color: #9b2c2c;
-		color: #9b2c2c;
-		background: #ffffff;
-	}
-
-	button:disabled {
-		opacity: 0.55;
-		cursor: wait;
-	}
-
-	.temporal-link {
-		padding: 9px 12px;
-		border: 1px solid #174c77;
-		border-radius: 6px;
-		color: #174c77;
-		font-weight: 800;
-		text-decoration: none;
-		white-space: nowrap;
-		font-size: 0.85rem;
 	}
 
 	.actions {

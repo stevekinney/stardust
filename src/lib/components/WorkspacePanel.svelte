@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '@lostgradient/cinder/empty-state';
+
 	export type WorkspaceFile = {
 		path: string;
 		mimeType: string;
@@ -81,7 +83,11 @@
 	<h2 id="workspace-panel-heading">Workspace</h2>
 
 	{#if isEmpty}
-		<p class="empty muted">No workspace data recorded for this run.</p>
+		<EmptyState
+			title="No workspace data"
+			description="No workspace data recorded for this run."
+			headingLevel={3}
+		/>
 	{:else}
 		{#if files.length > 0}
 			<div class="panel-section">
@@ -129,6 +135,8 @@
 								{/if}
 							</div>
 							{#if cmd.stdout || cmd.stderr}
+								<!-- Raw <details> preserved: Cinder Collapsible doesn't support data-command-output
+								     which tests rely on for querying command output elements. -->
 								<details class="command-output" data-command-output>
 									<summary class="output-summary">Output</summary>
 									{#if cmd.stdout}
@@ -374,14 +382,5 @@
 		font-size: 0.75rem;
 		line-height: 1.4;
 		white-space: pre;
-	}
-
-	.empty {
-		margin: 0;
-		font-size: 0.9rem;
-	}
-
-	.muted {
-		color: color-mix(in srgb, CanvasText 55%, transparent);
 	}
 </style>
