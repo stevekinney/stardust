@@ -293,4 +293,13 @@ export class ApprovalsRepository {
 			.orderBy(asc(approvalRequests.status), desc(approvalRequests.createdAt));
 		return rows.map(toCardState);
 	}
+
+	/** List all approval requests across all sessions, pending first then newest first. */
+	async listAll(): Promise<ApprovalCardState[]> {
+		const rows = await this.database
+			.select()
+			.from(approvalRequests)
+			.orderBy(asc(approvalRequests.status), desc(approvalRequests.createdAt));
+		return rows.map(toCardState);
+	}
 }

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import type { DatabaseClient } from '../db';
-import { memoryNotes } from '../db';
+import { memoryNotes, streamEvents } from '../db';
 import { publishStreamEvent } from '../stream';
 
 export type MemoryLayer = 'session' | 'durable' | 'action_sensitive';
@@ -176,6 +176,49 @@ export class MemoryStore {
 			.where(and(...filters))
 			.orderBy(memoryNotes.createdAt);
 		return rows.map(toMemoryNote);
+	}
+
+	/** List all confirmed memory notes across all sessions. */
+	async listAll(layers?: MemoryLayer[]): Promise<MemoryNote[]> {
+		const filters = [isNotNull(memoryNotes.confirmedAt)];
+		if (layers && layers.length > 0) {
+			filters.push(
+				inArray(
+					memoryNotes.kind,
+					layers.map((layer) => MEMORY_LAYER_TO_KIND[layer])
+				)
+			);
+		}
+
+		const rows = await this.database
+			.select()
+			.from(memoryNotes)
+			.where(and(...filters))
+			.orderBy(memoryNotes.createdAt);
+		return rows.map(toMemoryNote);
+	}
+
+	/** List all unconfirmed memory candidates across all sessions. */
+	async listAllCandidates(): Promise<MemoryCandidate[]> {
+		const candidateEvents = await this.database
+			.select()
+			.from(streamEvents)
+			.where(eq(streamEvents.kind, 'memory.candidate'))
+			.orderBy(streamEvents.createdAt);
+
+		const confirmedNotes = await this.listAll();
+		const confirmedIds = new Set(confirmedNotes.map((note) => note.id));
+
+		return candidateEvents
+			.map((event) => {
+				try {
+					return JSON.parse(event.payload) as MemoryCandidate;
+				} catch {
+					return null;
+				}
+			})
+			.filter((candidate): candidate is MemoryCandidate => candidate !== null)
+			.filter((candidate) => !confirmedIds.has(candidate.id));
 	}
 
 	async searchLexical(input: LexicalMemorySearchInput): Promise<MemorySearchResult[]> {
