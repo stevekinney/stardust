@@ -1,4 +1,4 @@
-import { chromium, type Page } from 'playwright';
+import type { Page } from 'playwright';
 import type { ArtifactStore } from '../artifacts/artifact-store';
 import type { DatabaseClient } from '../db/client';
 import { persistToolArtifact } from './artifact-output';
@@ -35,6 +35,7 @@ export async function actInBrowser(input: BrowserAgentInput) {
 }
 
 async function runBrowserAgent(input: BrowserAgentInput) {
+	const { chromium } = await import(/* @vite-ignore */ 'playwright');
 	const browser = await chromium.launch({ headless: true });
 	const consoleMessages: Array<{ type: string; text: string }> = [];
 	const pageErrors: string[] = [];

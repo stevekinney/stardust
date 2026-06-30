@@ -17,14 +17,21 @@ import type {
 	ToolMetadata
 } from '@src/lib/types';
 import {
+	BROWSER_ACTION_TOOL,
+	BROWSER_INSPECT_TOOL,
 	DELEGATE_TOOL,
 	LOW_RISK_TOOL,
 	MEMORY_WRITE_CANDIDATE_TOOL,
 	MUTATING_WORKSPACE_TOOL,
 	PROCESS_KILL_TOOL,
 	PROCESS_START_TOOL,
+	REPOSITORY_INSPECT_TOOL,
+	SAFE_ARTIFACT_TOOL,
+	SANDBOX_RESTORE_TOOL,
 	SANDBOX_SNAPSHOT_TOOL,
-	SHELL_EXEC_TOOL
+	SHELL_EXEC_TOOL,
+	TEMPORAL_MCP_TOOL,
+	VERIFICATION_TOOL
 } from '../policy/risk';
 import type { DatabaseClient } from '../db/client';
 import { toolInvocations } from '../db/schema';
@@ -42,6 +49,10 @@ import type { ArtifactStore } from '../artifacts/artifact-store';
 import { spillLargeOutput } from '../artifacts/spill';
 import { TAVILY_API_KEY } from '../config';
 import type { MemoryCandidate, MemoryLayer, MemorySearchResult } from '../memory';
+import { persistToolArtifact } from './artifact-output';
+import { actInBrowser, inspectBrowser } from './browser-agent';
+import { inspectRepository } from './repository-inspection';
+import { callTemporalMcpTool, inspectTemporal, isTemporalMcpToolAllowed } from './temporal-mcp';
 import type {
 	SandboxCommandInput,
 	SandboxCommandResult,
@@ -120,6 +131,101 @@ const sandboxSnapshotInput = z.object({
 	description: z.string().optional()
 });
 
+const workspaceDiffInput = z.object({
+	base: z.string().min(1).optional(),
+	head: z.string().min(1).optional(),
+	path: z.string().min(1).optional(),
+	contextLines: z.number().int().min(0).max(20).default(3)
+});
+
+const sandboxRestoreInput = z.object({
+	snapshotId: z.string().min(1),
+	reason: z.string().min(1).optional()
+});
+
+const verificationRunInput = z.object({
+	check: z.enum(['format:check', 'lint', 'typecheck', 'test:unit', 'test:e2e', 'test', 'build']),
+	args: z.array(z.string()).default([]),
+	timeoutMs: z.number().int().positive().max(120_000).optional()
+});
+
+const browserInspectInput = z.object({
+	url: z.string().url(),
+	waitForSelector: z.string().min(1).optional(),
+	waitForLoadState: z.enum(['load', 'domcontentloaded', 'networkidle']).default('domcontentloaded'),
+	includeScreenshot: z.boolean().default(true),
+	includeAccessibilitySnapshot: z.boolean().default(true)
+});
+
+const browserActionInput = browserInspectInput.extend({
+	actions: z
+		.array(
+			z.discriminatedUnion('type', [
+				z.object({ type: z.literal('goto'), url: z.string().url() }),
+				z.object({ type: z.literal('click'), selector: z.string().min(1) }),
+				z.object({ type: z.literal('fill'), selector: z.string().min(1), value: z.string() }),
+				z.object({ type: z.literal('press'), selector: z.string().min(1), key: z.string().min(1) }),
+				z.object({ type: z.literal('waitForSelector'), selector: z.string().min(1) }),
+				z.object({
+					type: z.literal('waitForLoadState'),
+					state: z.enum(['load', 'domcontentloaded', 'networkidle'])
+				})
+			])
+		)
+		.min(1)
+		.max(20)
+});
+
+const repositoryInspectInput = z.object({
+	path: z.string().min(1).optional(),
+	includePackageScripts: z.boolean().default(true),
+	includeRoutes: z.boolean().default(true),
+	includeTests: z.boolean().default(true),
+	includeGitStatus: z.boolean().default(true)
+});
+
+const temporalInspectInput = z.object({
+	workflowId: z.string().min(1).optional(),
+	runId: z.string().min(1).optional(),
+	taskQueue: z.string().min(1).optional(),
+	namespace: z.string().min(1).optional()
+});
+
+const temporalMcpCallInput = z.object({
+	toolName: z.string().min(1).refine(isTemporalMcpToolAllowed, {
+		message: 'Temporal MCP tool is not exposed by Stardust policy'
+	}),
+	arguments: z.record(z.string(), z.unknown()).default({})
+});
+
+const delegateParallelInput = z.object({
+	tasks: z
+		.array(
+			z.object({
+				kind: z.enum(['research', 'code', 'critic']),
+				label: z.string().min(1),
+				prompt: z.string().min(1),
+				maxTokens: z.number().int().positive().max(8_000).optional()
+			})
+		)
+		.min(2)
+		.max(6)
+});
+
+const reportArtifactInput = z.object({
+	title: z.string().min(1),
+	summary: z.string().min(1).optional(),
+	sections: z
+		.array(
+			z.object({
+				heading: z.string().min(1),
+				body: z.string().min(1)
+			})
+		)
+		.default([]),
+	includeToolResults: z.boolean().default(true)
+});
+
 const memoryWriteCandidateInput = z.object({
 	layer: z.enum(['session', 'durable', 'action-sensitive']),
 	content: z.string().min(1),
@@ -183,6 +289,13 @@ function defineCoreTools(): RegisteredTool[] {
 			metadata: MUTATING_WORKSPACE_TOOL
 		}),
 		defineStardustTool({
+			name: 'workspace.diff',
+			description:
+				'Generate a read-only git diff between sandbox snapshots, commits, or the working tree.',
+			schema: workspaceDiffInput,
+			metadata: REPOSITORY_INSPECT_TOOL
+		}),
+		defineStardustTool({
 			name: 'shell.exec',
 			description: 'Run a shell command in the current workspace.',
 			schema: shellExecInput,
@@ -230,6 +343,61 @@ function defineExtendedTools(): RegisteredTool[] {
 			metadata: SANDBOX_SNAPSHOT_TOOL
 		}),
 		defineStardustTool({
+			name: 'sandbox.restore',
+			description:
+				'Restore the sandbox workspace to a previous snapshot commit. Requires approval.',
+			schema: sandboxRestoreInput,
+			metadata: SANDBOX_RESTORE_TOOL
+		}),
+		defineStardustTool({
+			name: 'verification.run',
+			description:
+				'Run a structured verification command such as format:check, lint, typecheck, test, or build.',
+			schema: verificationRunInput,
+			metadata: VERIFICATION_TOOL
+		}),
+		defineStardustTool({
+			name: 'browser.inspect',
+			description:
+				'Inspect a page with Playwright and capture console, request, accessibility, and screenshot evidence.',
+			schema: browserInspectInput,
+			metadata: BROWSER_INSPECT_TOOL
+		}),
+		defineStardustTool({
+			name: 'browser.act',
+			description:
+				'Perform approved browser interactions with Playwright, then capture inspection evidence.',
+			schema: browserActionInput,
+			metadata: BROWSER_ACTION_TOOL
+		}),
+		defineStardustTool({
+			name: 'repository.inspect',
+			description:
+				'Read a compact project map: package scripts, dependencies, routes, nearby tests, and git status.',
+			schema: repositoryInspectInput,
+			metadata: REPOSITORY_INSPECT_TOOL
+		}),
+		defineStardustTool({
+			name: 'temporal.inspect',
+			description:
+				'Run a read-only Temporal MCP triage for connection, workflow, history, and task queue state.',
+			schema: temporalInspectInput,
+			metadata: TEMPORAL_MCP_TOOL
+		}),
+		defineStardustTool({
+			name: 'temporal.mcp.call',
+			description: 'Call an allowed read-only temporal-mcp tool through Stardust policy.',
+			schema: temporalMcpCallInput,
+			metadata: TEMPORAL_MCP_TOOL
+		}),
+		defineStardustTool({
+			name: 'artifact.createReport',
+			description:
+				'Create a local Markdown report artifact from summaries, tool evidence, verification output, and links.',
+			schema: reportArtifactInput,
+			metadata: SAFE_ARTIFACT_TOOL
+		}),
+		defineStardustTool({
 			name: 'memory.writeCandidate',
 			description: 'Propose a memory candidate for user review.',
 			schema: memoryWriteCandidateInput,
@@ -251,6 +419,12 @@ function defineExtendedTools(): RegisteredTool[] {
 			name: 'delegate.critic',
 			description: 'Ask a critic delegate for an advisory review.',
 			schema: delegateInput,
+			metadata: DELEGATE_TOOL
+		}),
+		defineStardustTool({
+			name: 'delegate.parallel',
+			description: 'Launch multiple approved child workflow delegate tasks in parallel.',
+			schema: delegateParallelInput,
 			metadata: DELEGATE_TOOL
 		})
 	];
@@ -384,6 +558,50 @@ async function searchWebWithTavily(input: {
 						: ''
 		}))
 	};
+}
+
+function diffCommandArguments(input: z.infer<typeof workspaceDiffInput>): string[] {
+	const args = ['diff', `--unified=${input.contextLines}`];
+	if (input.base && input.head) args.push(input.base, input.head);
+	else if (input.base) args.push(input.base);
+	else if (input.head) args.push('HEAD', input.head);
+	if (input.path) args.push('--', input.path);
+	return args;
+}
+
+function verificationCommand(input: z.infer<typeof verificationRunInput>): {
+	command: string;
+	args: string[];
+} {
+	return { command: 'bun', args: ['run', input.check, ...input.args] };
+}
+
+function createReportMarkdown(input: {
+	title: string;
+	summary?: string;
+	sections: Array<{ heading: string; body: string }>;
+	toolRows: Array<typeof toolInvocations.$inferSelect>;
+	includeToolResults: boolean;
+}): string {
+	const lines = [`# ${input.title}`, ''];
+	if (input.summary) lines.push(input.summary, '');
+	for (const section of input.sections) {
+		lines.push(`## ${section.heading}`, '', section.body, '');
+	}
+	if (input.includeToolResults) {
+		lines.push('## Tool Evidence', '');
+		for (const tool of input.toolRows) {
+			lines.push(`### ${tool.toolName}`, '');
+			lines.push(`- Status: ${tool.status}`);
+			lines.push(`- Risk: ${tool.risk}`);
+			lines.push(`- Task queue: ${tool.taskQueue}`);
+			if (tool.resultRef) lines.push(`- Artifact: ${tool.resultRef}`);
+			if (tool.resultInline) lines.push('', '```json', tool.resultInline, '```');
+			lines.push('');
+		}
+		if (input.toolRows.length === 0) lines.push('No tool invocations were recorded.', '');
+	}
+	return `${lines.join('\n').trimEnd()}\n`;
 }
 
 export async function executeRegisteredTool(input: {
@@ -595,6 +813,43 @@ export async function executeRegisteredTool(input: {
 				};
 				break;
 			}
+			case 'workspace.diff': {
+				const [, sessionKey] = requireSandbox(input.sandboxProvider, input.sessionKey);
+				const runCommand = requireCommandRunner(input.runSandboxCommand);
+				const args = workspaceDiffInput.parse(input.call.arguments);
+				const result = await runCommand({
+					sessionKey,
+					runId: input.runId ?? 'tool',
+					command: 'git',
+					args: diffCommandArguments(args),
+					toolCallId: input.call.id
+				});
+				const artifact =
+					input.artifactStore && input.sessionId && input.sessionKey && input.runId && result.stdout
+						? await persistToolArtifact({
+								sessionId: input.sessionId,
+								sessionKey: input.sessionKey,
+								runId: input.runId,
+								toolCallId: input.call.id,
+								artifactStore: input.artifactStore,
+								database: input.database,
+								content: result.stdout,
+								mimeType: 'text/x-patch',
+								extension: 'patch'
+							})
+						: null;
+				content = {
+					base: args.base ?? 'working-tree',
+					head: args.head ?? null,
+					path: args.path ?? null,
+					exitCode: result.exitCode,
+					status: result.status,
+					patch: result.stdout,
+					stderr: result.stderr,
+					artifact
+				};
+				break;
+			}
 			case 'sandbox.snapshot': {
 				const [sandbox, sessionKey] = requireSandbox(input.sandboxProvider, input.sessionKey);
 				const args = sandboxSnapshotInput.parse(input.call.arguments);
@@ -609,6 +864,178 @@ export async function executeRegisteredTool(input: {
 					label: args.label,
 					gitCommitSha: snapshot.gitCommitSha,
 					createdAt: snapshot.createdAt
+				};
+				break;
+			}
+			case 'sandbox.restore': {
+				const [sandbox, sessionKey] = requireSandbox(input.sandboxProvider, input.sessionKey);
+				const args = sandboxRestoreInput.parse(input.call.arguments);
+				await sandbox.restore(sessionKey, args.snapshotId);
+				content = {
+					snapshotId: args.snapshotId,
+					restoredAt: new Date().toISOString(),
+					reason: args.reason ?? null
+				};
+				break;
+			}
+			case 'verification.run': {
+				const [, sessionKey] = requireSandbox(input.sandboxProvider, input.sessionKey);
+				const runCommand = requireCommandRunner(input.runSandboxCommand);
+				const args = verificationRunInput.parse(input.call.arguments);
+				const command = verificationCommand(args);
+				const result = await runCommand({
+					sessionKey,
+					runId: input.runId ?? 'tool',
+					command: command.command,
+					args: command.args,
+					timeoutMs: args.timeoutMs,
+					toolCallId: input.call.id
+				});
+				const log = [
+					`$ ${[command.command, ...command.args].join(' ')}`,
+					'',
+					'## stdout',
+					result.stdout || '(empty)',
+					'',
+					'## stderr',
+					result.stderr || '(empty)'
+				].join('\n');
+				const artifact =
+					input.artifactStore && input.sessionId && input.sessionKey && input.runId
+						? await persistToolArtifact({
+								sessionId: input.sessionId,
+								sessionKey: input.sessionKey,
+								runId: input.runId,
+								toolCallId: input.call.id,
+								artifactStore: input.artifactStore,
+								database: input.database,
+								content: log,
+								mimeType: 'text/markdown',
+								extension: 'md'
+							})
+						: null;
+				content = {
+					check: args.check,
+					command: command.command,
+					args: command.args,
+					status: result.status,
+					exitCode: result.exitCode,
+					timedOut: result.timedOut,
+					stdout: result.stdout,
+					stderr: result.stderr,
+					artifact
+				};
+				break;
+			}
+			case 'browser.inspect': {
+				const { sessionKey, runId } = requireSessionRun(input);
+				if (!input.sessionId)
+					throw new Error('sessionId is required for browser.inspect but was not provided');
+				const args = browserInspectInput.parse(input.call.arguments);
+				content = await inspectBrowser({
+					...args,
+					sessionId: input.sessionId,
+					sessionKey,
+					runId,
+					toolCallId: input.call.id,
+					artifactStore: input.artifactStore,
+					database: input.database
+				});
+				break;
+			}
+			case 'browser.act': {
+				const { sessionKey, runId } = requireSessionRun(input);
+				if (!input.sessionId)
+					throw new Error('sessionId is required for browser.act but was not provided');
+				const args = browserActionInput.parse(input.call.arguments);
+				content = await actInBrowser({
+					...args,
+					sessionId: input.sessionId,
+					sessionKey,
+					runId,
+					toolCallId: input.call.id,
+					artifactStore: input.artifactStore,
+					database: input.database
+				});
+				break;
+			}
+			case 'repository.inspect': {
+				const { sessionKey, runId } = requireSessionRun(input);
+				const args = repositoryInspectInput.parse(input.call.arguments);
+				content = await inspectRepository({
+					sessionKey,
+					runId,
+					workspacePath: input.workspacePath,
+					runCommand: input.runSandboxCommand,
+					...args
+				});
+				break;
+			}
+			case 'temporal.inspect': {
+				content = await inspectTemporal(temporalInspectInput.parse(input.call.arguments));
+				if (input.artifactStore && input.sessionId && input.sessionKey && input.runId) {
+					content = {
+						...(content as Record<string, unknown>),
+						artifact: await persistToolArtifact({
+							sessionId: input.sessionId,
+							sessionKey: input.sessionKey,
+							runId: input.runId,
+							toolCallId: input.call.id,
+							artifactStore: input.artifactStore,
+							database: input.database,
+							content: JSON.stringify(content, null, 2),
+							mimeType: 'application/json',
+							extension: 'json'
+						})
+					};
+				}
+				break;
+			}
+			case 'temporal.mcp.call': {
+				const args = temporalMcpCallInput.parse(input.call.arguments);
+				content = await callTemporalMcpTool({ toolName: args.toolName, arguments: args.arguments });
+				break;
+			}
+			case 'artifact.createReport': {
+				const { sessionKey, runId } = requireSessionRun(input);
+				if (!input.sessionId || !input.artifactStore) {
+					throw new Error(
+						'sessionId and artifactStore are required for artifact.createReport but were not provided'
+					);
+				}
+				const args = reportArtifactInput.parse(input.call.arguments);
+				const toolRows =
+					input.database && args.includeToolResults
+						? await input.database
+								.select()
+								.from(toolInvocations)
+								.where(eq(toolInvocations.runId, runId))
+						: [];
+				content = await persistToolArtifact({
+					sessionId: input.sessionId,
+					sessionKey,
+					runId,
+					toolCallId: input.call.id,
+					artifactStore: input.artifactStore,
+					database: input.database,
+					content: createReportMarkdown({
+						title: args.title,
+						summary: args.summary,
+						sections: args.sections,
+						includeToolResults: args.includeToolResults,
+						toolRows
+					}),
+					mimeType: 'text/markdown',
+					extension: 'md'
+				});
+				break;
+			}
+			case 'delegate.parallel': {
+				const args = delegateParallelInput.parse(input.call.arguments);
+				content = {
+					tasks: args.tasks,
+					message:
+						'delegate.parallel is executed by the orchestrator workflow after approval, not inside the tool activity.'
 				};
 				break;
 			}

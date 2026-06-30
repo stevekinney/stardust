@@ -57,17 +57,27 @@ describe('tool registry', () => {
 	it('exposes implemented local tools and hides only credential-gated web.search', () => {
 		const manifest = getToolManifest();
 		expect(manifest.map((tool) => tool.name).sort()).toEqual([
+			'artifact.createReport',
+			'browser.act',
+			'browser.inspect',
 			'delegate.code',
 			'delegate.critic',
+			'delegate.parallel',
 			'delegate.research',
 			'memory.search',
 			'memory.writeCandidate',
 			'process.kill',
 			'process.start',
+			'repository.inspect',
+			'sandbox.restore',
 			'sandbox.snapshot',
 			'shell.exec',
+			'temporal.inspect',
+			'temporal.mcp.call',
+			'verification.run',
 			'web.fetch',
 			'workspace.applyPatch',
+			'workspace.diff',
 			'workspace.readFile',
 			'workspace.searchFiles',
 			'workspace.writeFile'
