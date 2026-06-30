@@ -1,6 +1,6 @@
 import { mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import ConversationView, { type StreamEvent } from './ConversationView.svelte';
+import ConversationView, { type StreamEvent } from './conversation-view.svelte';
 
 function makeEvent(id: number, kind: string, payload: Record<string, unknown>): StreamEvent {
 	return { id, kind, payload: JSON.stringify(payload) };

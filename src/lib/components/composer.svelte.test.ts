@@ -1,6 +1,6 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import Composer from './Composer.svelte';
+import Composer from './composer.svelte';
 
 function getTextarea(label: string): HTMLTextAreaElement {
 	const el = Array.from(document.querySelectorAll('textarea')).find(

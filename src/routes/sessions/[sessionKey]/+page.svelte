@@ -3,10 +3,10 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import Button from '@lostgradient/cinder/button';
-	import ConversationView, { type StreamEvent } from '$lib/components/ConversationView.svelte';
-	import Composer from '$lib/components/Composer.svelte';
-	import DurabilityRibbon from '$lib/components/DurabilityRibbon.svelte';
-	import RunTimeline from '$lib/components/RunTimeline.svelte';
+	import ConversationView, { type StreamEvent } from '$lib/components/conversation-view.svelte';
+	import Composer from '$lib/components/composer.svelte';
+	import DurabilityRibbon from '$lib/components/durability-ribbon.svelte';
+	import RunTimeline from '$lib/components/run-timeline.svelte';
 	import type { RunInspectorProjection } from '$lib/server/observability/projection';
 	import { viewMode } from '$lib/view-mode.svelte';
 	import type { PageData } from './$types';

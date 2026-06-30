@@ -6,9 +6,9 @@
 	import { resolve } from '$app/paths';
 	import Button from '@lostgradient/cinder/button';
 	import Toggle from '@lostgradient/cinder/toggle';
-	import Settings from '$lib/components/Settings.svelte';
+	import Settings from '$lib/components/settings.svelte';
 	import { viewMode } from '$lib/view-mode.svelte';
-	import type { SessionRow } from '$lib/components/SessionList.svelte';
+	import type { SessionRow } from '$lib/components/session-list.svelte';
 	import favicon from '$lib/assets/favicon.svg';
 
 	let { children } = $props();

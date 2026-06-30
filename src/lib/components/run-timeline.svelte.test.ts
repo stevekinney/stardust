@@ -2,7 +2,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { RunInspectorProjection } from '$lib/server/observability/projection';
 import { TASK_QUEUE_ORCHESTRATOR } from '$lib/server/temporal/task-queues';
-import RunTimeline from './RunTimeline.svelte';
+import RunTimeline from './run-timeline.svelte';
 
 const baseRun: RunInspectorProjection['run'] = {
 	id: 'run-001',

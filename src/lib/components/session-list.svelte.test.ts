@@ -1,6 +1,6 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import SessionList, { type SessionRow } from './SessionList.svelte';
+import SessionList, { type SessionRow } from './session-list.svelte';
 
 function makeSession(overrides: Partial<SessionRow> = {}): SessionRow {
 	return {

@@ -1,7 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TASK_QUEUE_SANDBOX, type ApprovalCardState } from '$lib/types';
-import ApprovalCenter from './ApprovalCenter.svelte';
+import ApprovalCenter from './approval-center.svelte';
 
 function makeApproval(
 	id: string,

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import EmptyState from '@lostgradient/cinder/empty-state';
 	import type { ApprovalCardState, ApprovalResolutionInput } from '$lib/types';
-	import ApprovalCard from './ApprovalCard.svelte';
+	import ApprovalCard from './approval-card.svelte';
 
 	type Props = {
 		approvals: ApprovalCardState[];

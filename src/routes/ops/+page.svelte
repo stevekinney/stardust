@@ -8,23 +8,23 @@
 	import type { MemoryNote, MemoryCandidate } from '$lib/server/memory/memory-store';
 	import type { ApprovalCardState, ApprovalResolutionInput } from '$lib/types';
 	import { viewMode } from '$lib/view-mode.svelte';
-	import RunTimeline from '$lib/components/RunTimeline.svelte';
-	import MemoryPanel from '$lib/components/MemoryPanel.svelte';
-	import WorkspacePanel from '$lib/components/WorkspacePanel.svelte';
+	import RunTimeline from '$lib/components/run-timeline.svelte';
+	import MemoryPanel from '$lib/components/memory-panel.svelte';
+	import WorkspacePanel from '$lib/components/workspace-panel.svelte';
 	import type {
 		WorkspaceFile,
 		WorkspaceCommand,
 		WorkspaceSnapshot,
 		WorkspaceArtifact,
 		WorkspaceDiff
-	} from '$lib/components/WorkspacePanel.svelte';
-	import SandboxInspector from '$lib/components/SandboxInspector.svelte';
+	} from '$lib/components/workspace-panel.svelte';
+	import SandboxInspector from '$lib/components/sandbox-inspector.svelte';
 	import type {
 		SandboxInfo,
 		SandboxCommandRow,
 		SandboxSnapshotRow
-	} from '$lib/components/SandboxInspector.svelte';
-	import ApprovalCenter from '$lib/components/ApprovalCenter.svelte';
+	} from '$lib/components/sandbox-inspector.svelte';
+	import ApprovalCenter from '$lib/components/approval-center.svelte';
 
 	type SessionRow = {
 		id: string;

@@ -1,7 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { MemoryNote, MemoryCandidate } from '$lib/server/memory/memory-store';
-import MemoryPanel from './MemoryPanel.svelte';
+import MemoryPanel from './memory-panel.svelte';
 
 const sessionNote: MemoryNote = {
 	id: 'note-001',

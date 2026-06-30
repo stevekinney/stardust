@@ -5,7 +5,7 @@ import {
 	type ApprovalCardState,
 	type ApprovalResolutionInput
 } from '$lib/types';
-import ApprovalCard from './ApprovalCard.svelte';
+import ApprovalCard from './approval-card.svelte';
 
 const approval: ApprovalCardState = {
 	approvalId: 'approval-001',

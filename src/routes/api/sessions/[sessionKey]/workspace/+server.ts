@@ -14,7 +14,7 @@ import type {
 	WorkspaceCommand,
 	WorkspaceDiff,
 	WorkspaceSnapshot
-} from '$lib/components/WorkspacePanel.svelte';
+} from '$lib/components/workspace-panel.svelte';
 
 const IDENTIFIER_RE = /^[\w-]{1,128}$/;
 

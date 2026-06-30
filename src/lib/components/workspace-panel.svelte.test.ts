@@ -1,6 +1,6 @@
 import { mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
-import WorkspacePanel from './WorkspacePanel.svelte';
+import WorkspacePanel from './workspace-panel.svelte';
 
 export type WorkspaceFile = {
 	path: string;

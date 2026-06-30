@@ -1,6 +1,6 @@
 import { mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import SessionHeader from './SessionHeader.svelte';
+import SessionHeader from './session-header.svelte';
 
 function getByLabel(label: string): Element | null {
 	return document.querySelector(`[aria-label="${label}"]`);

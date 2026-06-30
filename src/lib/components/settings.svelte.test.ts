@@ -1,6 +1,6 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import Settings from './Settings.svelte';
+import Settings from './settings.svelte';
 import { viewMode } from '$lib/view-mode.svelte';
 
 describe('Settings', () => {

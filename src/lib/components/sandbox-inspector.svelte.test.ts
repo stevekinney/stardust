@@ -1,6 +1,6 @@
 import { mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
-import SandboxInspector from './SandboxInspector.svelte';
+import SandboxInspector from './sandbox-inspector.svelte';
 
 export type SandboxInfo = {
 	id: string;
