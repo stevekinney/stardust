@@ -239,9 +239,7 @@
 			<div class="rail-sessions">
 				{#if sessionsError}
 					<p class="rail-message rail-error">{sessionsError}</p>
-				{/if}
-
-				{#if sessionsLoading}
+				{:else if sessionsLoading}
 					<p class="rail-message">Loading…</p>
 				{:else if filteredSessions.length === 0}
 					<p class="rail-message">

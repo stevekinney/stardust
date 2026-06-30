@@ -417,7 +417,15 @@
 	}
 
 	function messageFromCaught(caught: unknown, fallback: string) {
-		return caught instanceof Error && caught.message ? caught.message : fallback;
+		if (caught instanceof Error && caught.message) {
+			try {
+				const parsed = JSON.parse(caught.message) as { message?: string };
+				return parsed.message ?? caught.message;
+			} catch {
+				return caught.message;
+			}
+		}
+		return fallback;
 	}
 
 	function formatDate(value: string | null) {
@@ -468,9 +476,7 @@
 
 		{#if sessionsError}
 			<p class="error">{sessionsError}</p>
-		{/if}
-
-		{#if sessionsLoading}
+		{:else if sessionsLoading}
 			<p class="muted">Loading sessions...</p>
 		{:else if sessions.length === 0}
 			<p class="muted">No sessions found. Start a session using the turn endpoint.</p>
