@@ -221,7 +221,11 @@
 				/>
 			</div>
 
-			<div class="rail-sessions">
+			<div class="rail-scroll">
+				<div class="rail-heading">
+					Sessions <span class="rail-count">{activeSessions.length}</span>
+				</div>
+
 				{#if sessionsError}
 					<p class="rail-message rail-error">{sessionsError}</p>
 				{:else if sessionsLoading}
@@ -229,41 +233,39 @@
 				{:else if activeSessions.length === 0}
 					<p class="rail-message">No sessions yet.</p>
 				{:else}
-					<ul class="session-list" role="list">
-						{#each activeSessions as session (session.id)}
-							<li>
-								<button
-									type="button"
-									class="session-card"
-									class:selected={currentSessionKey === session.sessionKey}
-									onclick={() => handleSelectSession(session)}
-									aria-label="Session {displayLabel(session)}"
-									aria-current={currentSessionKey === session.sessionKey ? 'true' : undefined}
+					{#each activeSessions as session (session.id)}
+						<button
+							type="button"
+							class="session-card"
+							class:selected={currentSessionKey === session.sessionKey}
+							onclick={() => handleSelectSession(session)}
+							aria-label="Session {displayLabel(session)}"
+							aria-current={currentSessionKey === session.sessionKey ? 'true' : undefined}
+						>
+							<span
+								class="status-dot {statusDotClass(session.status)}"
+								aria-label={formatStatus(session.status)}
+							></span>
+							<div class="card-content">
+								<span class="card-label">{displayLabel(session)}</span>
+								<span class="card-meta"
+									>{session.sessionKey} · {formatStatus(session.status)} · {relativeTime(
+										session.updatedAt
+									)}</span
 								>
-									<span class="card-top-row">
-										<span
-											class="status-dot {statusDotClass(session.status)}"
-											aria-label={formatStatus(session.status)}
-										></span>
-										<span class="card-label">{displayLabel(session)}</span>
-									</span>
-									<span class="card-meta">
-										<span class="card-status">{formatStatus(session.status)}</span>
-										<span class="card-time">{relativeTime(session.updatedAt)}</span>
-									</span>
-								</button>
-							</li>
-						{/each}
-					</ul>
+							</div>
+						</button>
+					{/each}
 				{/if}
-			</div>
 
-			<div class="rail-nav">
+				<div class="rail-heading" style="margin-top: 18px;">Global</div>
+
 				<a
-					href={resolve('/ops')}
+					href={resolve('/approvals')}
 					class="rail-nav-item"
-					aria-current={$page.url.pathname === '/ops' ? 'page' : undefined}
+					aria-current={$page.url.pathname === '/approvals' ? 'page' : undefined}
 				>
+					<!-- shield-alert -->
 					<svg
 						width="16"
 						height="16"
@@ -273,30 +275,95 @@
 						stroke-width="2"
 						stroke-linecap="round"
 						stroke-linejoin="round"
+						><path
+							d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"
+						/><path d="M12 8v4" /><path d="M12 16h.01" /></svg
 					>
-						<rect width="7" height="9" x="3" y="3" rx="1" /><rect
-							width="7"
-							height="5"
-							x="14"
-							y="3"
-							rx="1"
-						/><rect width="7" height="9" x="14" y="12" rx="1" /><rect
-							width="7"
-							height="5"
-							x="3"
-							y="16"
-							rx="1"
-						/>
-					</svg>
-					<span>Operations</span>
+					<span>Approvals</span>
+				</a>
+				<a
+					href={resolve('/schedules')}
+					class="rail-nav-item"
+					aria-current={$page.url.pathname === '/schedules' ? 'page' : undefined}
+				>
+					<!-- calendar-clock -->
+					<svg
+						width="16"
+						height="16"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5" /><path
+							d="M16 2v4"
+						/><path d="M8 2v4" /><path d="M3 10h5" /><path d="M17.5 17.5 16 16.3V14" /><circle
+							cx="16"
+							cy="16"
+							r="6"
+						/></svg
+					>
+					<span>Schedules</span>
+				</a>
+				<a
+					href={resolve('/memory')}
+					class="rail-nav-item"
+					aria-current={$page.url.pathname === '/memory' ? 'page' : undefined}
+				>
+					<!-- brain -->
+					<svg
+						width="16"
+						height="16"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						><path
+							d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"
+						/><path
+							d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"
+						/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4" /><path
+							d="M17.599 6.5a3 3 0 0 0 .399-1.375"
+						/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5" /><path
+							d="M3.477 10.896a4 4 0 0 1 .585-.396"
+						/><path d="M19.938 10.5a4 4 0 0 1 .585.396" /><path
+							d="M6 18a4 4 0 0 1-1.967-.516"
+						/><path d="M19.967 17.484A4 4 0 0 1 18 18" /></svg
+					>
+					<span>Memory</span>
+				</a>
+				<a
+					href={resolve('/settings')}
+					class="rail-nav-item"
+					aria-current={$page.url.pathname === '/settings' ? 'page' : undefined}
+				>
+					<!-- settings -->
+					<svg
+						width="16"
+						height="16"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						><path
+							d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"
+						/><circle cx="12" cy="12" r="3" /></svg
+					>
+					<span>Settings</span>
 				</a>
 			</div>
 
 			<div class="rail-footer">
-				<span class="temporal-status">
-					<span class="temporal-dot"></span>
-					<span>Temporal Server</span>
-				</span>
+				<span class="temporal-dot"></span>
+				<div class="temporal-info">
+					<span class="temporal-name">Temporal dev server</span>
+					<span class="temporal-detail">localhost:7776 · default namespace</span>
+				</div>
 			</div>
 		</nav>
 
@@ -491,7 +558,7 @@
 		width: 100%;
 	}
 
-	.rail-sessions {
+	.rail-scroll {
 		flex: 1;
 		overflow-y: auto;
 		padding: 0 8px;
@@ -499,19 +566,25 @@
 		scrollbar-color: var(--cinder-scrollbar-thumb) var(--cinder-scrollbar-track);
 	}
 
-	.session-list {
-		margin: 0;
-		padding: 0;
-		list-style: none;
-		display: flex;
-		flex-direction: column;
-		gap: 2px;
+	.rail-heading {
+		padding: 10px 10px 6px;
+		font-size: 11px;
+		font-weight: 600;
+		color: var(--cinder-text-subtle);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
+	.rail-count {
+		font-family: var(--cinder-font-mono);
+		font-size: 9px;
+		color: var(--cinder-text-disabled);
 	}
 
 	.session-card {
 		display: flex;
-		flex-direction: column;
-		gap: 4px;
+		align-items: flex-start;
+		gap: 8px;
 		width: 100%;
 		padding: 8px 10px;
 		border: 1px solid transparent;
@@ -533,17 +606,12 @@
 		border-color: var(--cinder-border-muted);
 	}
 
-	.card-top-row {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
-
 	.status-dot {
 		width: 7px;
 		height: 7px;
 		border-radius: 50%;
 		flex-shrink: 0;
+		margin-top: 5px;
 	}
 
 	.dot-success {
@@ -584,6 +652,14 @@
 		}
 	}
 
+	.card-content {
+		min-width: 0;
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
 	.card-label {
 		font-weight: 500;
 		overflow: hidden;
@@ -592,23 +668,15 @@
 	}
 
 	.card-meta {
-		display: flex;
-		justify-content: space-between;
-		padding-left: 15px;
-		font-size: var(--cinder-text-xs);
+		font-size: 10.5px;
+		font-family: var(--cinder-font-mono);
 		color: var(--cinder-text-subtle);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
-	.card-status {
-		text-transform: capitalize;
-	}
-
-	/* ── Rail nav ────────────────────────────────────────────── */
-	.rail-nav {
-		border-top: 1px solid var(--cinder-border-muted);
-		padding: 8px;
-	}
-
+	/* ── Rail nav items ──────────────────────────────────────── */
 	.rail-nav-item {
 		display: flex;
 		align-items: center;
@@ -634,14 +702,9 @@
 	.rail-footer {
 		border-top: 1px solid var(--cinder-border-muted);
 		padding: 10px 12px;
-	}
-
-	.temporal-status {
 		display: flex;
 		align-items: center;
-		gap: 6px;
-		font-size: var(--cinder-text-xs);
-		color: var(--cinder-text-subtle);
+		gap: 8px;
 	}
 
 	.temporal-dot {
@@ -649,6 +712,25 @@
 		height: 6px;
 		border-radius: 50%;
 		background: var(--cinder-success);
+		flex-shrink: 0;
+	}
+
+	.temporal-info {
+		display: flex;
+		flex-direction: column;
+		line-height: 1.3;
+	}
+
+	.temporal-name {
+		font-size: 11px;
+		font-weight: 600;
+		color: var(--cinder-text);
+	}
+
+	.temporal-detail {
+		font-size: 9.5px;
+		font-family: var(--cinder-font-mono);
+		color: var(--cinder-text-subtle);
 	}
 
 	/* ── Main content ────────────────────────────────────────── */
@@ -690,11 +772,15 @@
 			display: none;
 		}
 
-		.rail-sessions {
+		.rail-scroll {
 			padding: 4px;
 		}
 
-		.rail-message {
+		.rail-heading,
+		.rail-message,
+		.card-content,
+		.rail-nav-item span,
+		.temporal-info {
 			display: none;
 		}
 
@@ -703,15 +789,8 @@
 			justify-content: center;
 		}
 
-		.card-top-row {
-			justify-content: center;
-		}
-
-		.card-label,
-		.card-meta,
-		.rail-nav-item span,
-		.rail-footer span:not(.temporal-dot) {
-			display: none;
+		.status-dot {
+			margin-top: 0;
 		}
 
 		.rail-nav-item {
@@ -721,11 +800,6 @@
 
 		.rail-footer {
 			padding: 10px 0;
-			display: flex;
-			justify-content: center;
-		}
-
-		.temporal-status {
 			justify-content: center;
 		}
 
@@ -788,14 +862,11 @@
 			display: flex;
 		}
 
-		.rail.rail-open .rail-message {
-			display: block;
-		}
-
-		.rail.rail-open .card-label,
-		.rail.rail-open .card-meta,
+		.rail.rail-open .rail-heading,
+		.rail.rail-open .rail-message,
+		.rail.rail-open .card-content,
 		.rail.rail-open .rail-nav-item span,
-		.rail.rail-open .rail-footer span:not(.temporal-dot) {
+		.rail.rail-open .temporal-info {
 			display: revert;
 		}
 
@@ -804,8 +875,8 @@
 			justify-content: flex-start;
 		}
 
-		.rail.rail-open .card-top-row {
-			justify-content: flex-start;
+		.rail.rail-open .status-dot {
+			margin-top: 5px;
 		}
 
 		.rail.rail-open .rail-nav-item {
@@ -817,16 +888,12 @@
 			padding: 12px;
 		}
 
-		.rail.rail-open .rail-sessions {
+		.rail.rail-open .rail-scroll {
 			padding: 0 8px;
 		}
 
 		.rail.rail-open .rail-footer {
 			padding: 10px 12px;
-			justify-content: flex-start;
-		}
-
-		.rail.rail-open .temporal-status {
 			justify-content: flex-start;
 		}
 
