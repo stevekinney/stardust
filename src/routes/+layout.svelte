@@ -5,10 +5,7 @@
 	import { page } from '$app/stores';
 	import { resolve } from '$app/paths';
 	import Button from '@lostgradient/cinder/button';
-	import SearchField from '@lostgradient/cinder/search-field';
-	import SegmentedControl from '@lostgradient/cinder/segmented-control';
-	import Segment from '@lostgradient/cinder/segment';
-	import DurabilityRibbon from '$lib/components/DurabilityRibbon.svelte';
+	import Toggle from '@lostgradient/cinder/toggle';
 	import Settings from '$lib/components/Settings.svelte';
 	import { viewMode } from '$lib/view-mode.svelte';
 	import type { SessionRow } from '$lib/components/SessionList.svelte';
@@ -20,22 +17,11 @@
 	let sessionsLoading = $state(false);
 	let sessionsError = $state<string | null>(null);
 	let settingsOpen = $state(false);
-	let search = $state('');
 	let railOpen = $state(false);
 
 	const currentSessionKey = $derived($page.params.sessionKey ?? null);
 
 	const activeSessions = $derived(sessions.filter((s) => !s.archivedAt));
-
-	const filteredSessions = $derived(
-		search.trim()
-			? activeSessions.filter(
-					(s) =>
-						(s.name ?? s.sessionKey).toLowerCase().includes(search.trim().toLowerCase()) ||
-						s.sessionKey.toLowerCase().includes(search.trim().toLowerCase())
-				)
-			: activeSessions
-	);
 
 	onMount(() => {
 		document.documentElement.setAttribute('data-theme', 'dark');
@@ -157,9 +143,10 @@
 			</svg>
 		</button>
 		<a href={resolve('/')} class="brand" aria-label="Stardust home">
-			<span class="brand-mark">✦</span>
 			<span class="brand-name">STARDUST</span>
 		</a>
+
+		<span class="vr" aria-hidden="true"></span>
 
 		{#if currentSessionKey}
 			<span class="session-chip">
@@ -170,19 +157,26 @@
 
 		<div class="top-spacer"></div>
 
-		<SegmentedControl
-			id="view-mode-toggle"
-			label="View mode"
-			hideLabel
-			density="toolbar"
-			value={viewMode.mode}
-			onchange={(value) => {
-				if (value === 'operator' || value === 'engineer') viewMode.set(value);
-			}}
-		>
-			<Segment value="operator">Operator</Segment>
-			<Segment value="engineer">Engineer</Segment>
-		</SegmentedControl>
+		<div class="worker-status">
+			<span class="worker-dot"></span>
+			<b class="worker-label">Worker · live</b>
+		</div>
+
+		<div class="uth">
+			<div class="uth-label">
+				<b>Under the hood</b>
+				<span>Show Temporal internals</span>
+			</div>
+			<Toggle
+				id="view-mode-toggle"
+				label="Under the hood"
+				hideLabel
+				checked={viewMode.mode === 'engineer'}
+				onValueChange={(next) => {
+					viewMode.set(next ? 'engineer' : 'operator');
+				}}
+			/>
+		</div>
 
 		<button
 			type="button"
@@ -208,8 +202,6 @@
 		</button>
 	</header>
 
-	<DurabilityRibbon />
-
 	<div class="body">
 		{#if railOpen}
 			<!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -227,13 +219,6 @@
 					onclick={handleCreateSession}
 					class="new-session-button"
 				/>
-
-				<SearchField
-					value={search}
-					oninput={(v: string) => (search = v)}
-					placeholder="Search sessions…"
-					aria-label="Search sessions"
-				/>
 			</div>
 
 			<div class="rail-sessions">
@@ -241,13 +226,11 @@
 					<p class="rail-message rail-error">{sessionsError}</p>
 				{:else if sessionsLoading}
 					<p class="rail-message">Loading…</p>
-				{:else if filteredSessions.length === 0}
-					<p class="rail-message">
-						{activeSessions.length === 0 ? 'No sessions yet.' : 'No matches.'}
-					</p>
+				{:else if activeSessions.length === 0}
+					<p class="rail-message">No sessions yet.</p>
 				{:else}
 					<ul class="session-list" role="list">
-						{#each filteredSessions as session (session.id)}
+						{#each activeSessions as session (session.id)}
 							<li>
 								<button
 									type="button"
@@ -362,21 +345,22 @@
 	.brand {
 		display: flex;
 		align-items: center;
-		gap: 8px;
 		text-decoration: none;
 		color: var(--cinder-text);
 	}
 
-	.brand-mark {
-		font-size: 1.1rem;
-		color: var(--cinder-accent);
+	.brand-name {
+		font-size: 12.5px;
+		font-weight: 700;
+		letter-spacing: 0.2em;
+		color: var(--cinder-text);
 	}
 
-	.brand-name {
-		font-size: var(--cinder-text-sm);
-		font-weight: 800;
-		letter-spacing: 0.08em;
-		color: var(--cinder-text);
+	.vr {
+		width: 1px;
+		height: 20px;
+		background: var(--cinder-border);
+		flex-shrink: 0;
 	}
 
 	.session-chip {
@@ -409,6 +393,55 @@
 
 	.top-spacer {
 		flex: 1;
+	}
+
+	.worker-status {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		padding: 4px 10px;
+		border: 1px solid var(--cinder-border);
+		border-radius: var(--cinder-radius-full);
+		background: var(--cinder-surface-raised);
+		font-size: 11px;
+		white-space: nowrap;
+	}
+
+	.worker-dot {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		background: var(--cinder-success);
+		flex-shrink: 0;
+	}
+
+	.worker-label {
+		font-weight: 600;
+		color: var(--cinder-text);
+	}
+
+	.uth {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+
+	.uth-label {
+		display: flex;
+		flex-direction: column;
+		text-align: right;
+		line-height: 1.2;
+	}
+
+	.uth-label b {
+		font-size: 11.5px;
+		font-weight: 600;
+		color: var(--cinder-text);
+	}
+
+	.uth-label span {
+		font-size: 10px;
+		color: var(--cinder-text-subtle);
 	}
 
 	.icon-button {
@@ -700,7 +733,23 @@
 			display: none;
 		}
 
+		.vr {
+			display: none;
+		}
+
 		.session-chip {
+			display: none;
+		}
+
+		.worker-status {
+			padding: 4px 7px;
+		}
+
+		.worker-label {
+			display: none;
+		}
+
+		.uth-label {
 			display: none;
 		}
 
