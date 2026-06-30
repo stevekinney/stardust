@@ -4,42 +4,31 @@ import { viewMode } from './view-mode.svelte';
 describe('viewMode store', () => {
 	beforeEach(() => {
 		localStorage.clear();
-		// Reset to default after each suite bootstraps
-		viewMode.set('operator');
+		viewMode.set();
 	});
 
 	afterEach(() => {
 		localStorage.clear();
-		viewMode.set('operator');
+		viewMode.set();
 	});
 
-	it('defaults to operator mode', () => {
-		expect(viewMode.mode).toBe('operator');
-	});
-
-	it('isEngineer is false in operator mode', () => {
-		expect(viewMode.isEngineer).toBe(false);
-	});
-
-	it('set() changes mode to engineer', () => {
-		viewMode.set('engineer');
+	it('defaults to engineer mode', () => {
 		expect(viewMode.mode).toBe('engineer');
 	});
 
-	it('isEngineer is true in engineer mode', () => {
-		viewMode.set('engineer');
+	it('isEngineer is always true', () => {
 		expect(viewMode.isEngineer).toBe(true);
 	});
 
-	it('set() persists mode to localStorage', () => {
-		viewMode.set('engineer');
+	it('set() persists engineer mode to localStorage', () => {
+		viewMode.set();
 		expect(localStorage.getItem('stardust-view-mode')).toBe('engineer');
 	});
 
-	it('set() can switch back to operator', () => {
-		viewMode.set('engineer');
-		viewMode.set('operator');
-		expect(viewMode.mode).toBe('operator');
-		expect(localStorage.getItem('stardust-view-mode')).toBe('operator');
+	it('set() ignores attempts to switch back to operator', () => {
+		viewMode.set();
+		expect(viewMode.mode).toBe('engineer');
+		expect(viewMode.isEngineer).toBe(true);
+		expect(localStorage.getItem('stardust-view-mode')).toBe('engineer');
 	});
 });

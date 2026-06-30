@@ -66,27 +66,28 @@ describe('ViewModeStore – SSR (no window)', () => {
 		expect(typeof window).toBe('undefined');
 	});
 
-	it('defaults to operator mode without reading localStorage when window is absent', () => {
+	it('defaults to engineer mode without touching localStorage when window is absent', () => {
 		const store = new ViewModeStore();
-		expect(store.mode).toBe('operator');
+		expect(store.mode).toBe('engineer');
 		expect(getItemSpy).not.toHaveBeenCalled();
+		expect(setItemSpy).not.toHaveBeenCalled();
 	});
 
 	it('does not throw when constructed in a window-less SSR environment', () => {
 		expect(() => new ViewModeStore()).not.toThrow();
 	});
 
-	it('set() updates mode in memory without writing to localStorage when window is absent', () => {
+	it('set() keeps engineer mode without writing to localStorage when window is absent', () => {
 		const store = new ViewModeStore();
-		store.set('engineer');
+		store.set();
 		expect(store.mode).toBe('engineer');
 		expect(setItemSpy).not.toHaveBeenCalled();
 	});
 
-	it('isEngineer reflects the in-memory mode correctly in SSR', () => {
+	it('isEngineer is always true in SSR', () => {
 		const store = new ViewModeStore();
-		expect(store.isEngineer).toBe(false);
-		store.set('engineer');
+		expect(store.isEngineer).toBe(true);
+		store.set();
 		expect(store.isEngineer).toBe(true);
 	});
 });

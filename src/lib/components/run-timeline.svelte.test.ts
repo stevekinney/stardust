@@ -81,6 +81,20 @@ describe('RunTimeline', () => {
 		unmount(component);
 	});
 
+	it('labels the timeline section without rendering a duplicate title', () => {
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection }
+		});
+
+		const section = document.querySelector('.run-timeline');
+		expect(section?.getAttribute('aria-label')).toBe('Run inspector timeline');
+		expect(document.querySelector('#run-timeline-heading')).toBeNull();
+		expect(document.body.textContent).not.toContain('Run Inspector');
+
+		unmount(component);
+	});
+
 	it('renders transcript events in sequence order with kind labels', () => {
 		const component = mount(RunTimeline, {
 			target: document.body,
@@ -92,6 +106,23 @@ describe('RunTimeline', () => {
 		expect(items[0]?.getAttribute('data-kind')).toBe('user_message');
 		expect(items[1]?.getAttribute('data-kind')).toBe('tool_call');
 		expect(items[2]?.getAttribute('data-kind')).toBe('lifecycle');
+
+		unmount(component);
+	});
+
+	it('compacts flat step payloads and preserves pretty JSON for nested payloads', () => {
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection }
+		});
+
+		const payloads = [...document.querySelectorAll('.step-payload')].map(
+			(payload) => payload.textContent ?? ''
+		);
+		expect(payloads[0]).toBe('{"text":"Hello"}');
+		expect(payloads[1]).toContain('{\n  "name": "workspace.writeFile",');
+		expect(document.querySelector('.json-token-key')?.textContent).toBe('"text"');
+		expect(document.querySelector('.json-token-string')?.textContent).toBe('"Hello"');
 
 		unmount(component);
 	});
@@ -115,7 +146,13 @@ describe('RunTimeline', () => {
 		});
 
 		expect(document.body.textContent).toContain('5'); // total actions
-		expect(document.body.textContent).toContain('transcriptEvents');
+		const actionMeterItems = document.querySelectorAll('[data-action-meter-item]');
+		expect(actionMeterItems).toHaveLength(5);
+		expect(document.body.textContent).toContain('Transcript Events');
+		expect(document.body.textContent).toContain('Tool Invocations');
+		expect(document.body.textContent).toContain('Approval Requests');
+		expect(document.body.textContent).toContain('Idempotency Entries');
+		expect(document.body.textContent).not.toContain('transcriptEvents');
 
 		unmount(component);
 	});
@@ -226,6 +263,23 @@ describe('RunTimeline', () => {
 		const taskQueueRow = document.querySelector('[data-task-queue]');
 		expect(taskQueueRow).not.toBeNull();
 		expect(taskQueueRow?.textContent).toContain(TASK_QUEUE_ORCHESTRATOR);
+
+		unmount(component);
+	});
+
+	it('links to Temporal Web without rendering the raw URL in engineer overlay', () => {
+		const component = mount(RunTimeline, {
+			target: document.body,
+			props: { projection, engineerView: true }
+		});
+
+		const workflowLink = document.querySelector<HTMLButtonElement>(
+			'[data-temporal-workflow-link] button'
+		);
+		const engineerOverlay = document.querySelector('[data-engineer-overlay]');
+		expect(workflowLink).not.toBeNull();
+		expect(workflowLink?.textContent).toContain('Open workflow in Temporal Web');
+		expect(engineerOverlay?.textContent).not.toContain(projection.temporalWebUrl);
 
 		unmount(component);
 	});

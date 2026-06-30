@@ -627,11 +627,20 @@
 						<DurabilityRibbon />
 					</div>
 
-					<div class="inspector-chips">
-						<span class="chip">activity agentSession</span>
-						<span class="chip">queue agent-main</span>
-						<span class="chip">attempt 1</span>
-					</div>
+					<dl class="inspector-metadata" aria-label="Run execution metadata">
+						<div class="inspector-metadata-item">
+							<dt>Activity</dt>
+							<dd>agentSession</dd>
+						</div>
+						<div class="inspector-metadata-item">
+							<dt>Task queue</dt>
+							<dd>agent-main</dd>
+						</div>
+						<div class="inspector-metadata-item">
+							<dt>Attempt</dt>
+							<dd>1</dd>
+						</div>
+					</dl>
 
 					<div class="budget-bar">
 						<div class="budget-row">
@@ -648,7 +657,7 @@
 					</div>
 
 					<div class="inspector-body">
-						<RunTimeline projection={inspector} engineerView={viewMode.mode === 'engineer'} />
+						<RunTimeline projection={inspector} engineerView={viewMode.isEngineer} />
 					</div>
 
 					<div class="inspector-status-bar">
@@ -1002,23 +1011,41 @@
 		color: var(--cinder-text);
 	}
 
-	.inspector-chips {
-		display: flex;
-		gap: 6px;
-		flex-wrap: wrap;
-		padding: 8px 14px;
+	.inspector-metadata {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		margin: 0;
 		border-bottom: 1px solid var(--cinder-border-muted);
+		background: var(--cinder-surface-inset);
 		flex: none;
 	}
 
-	.chip {
-		font: 500 11px system-ui;
-		font-family: var(--cinder-font-mono);
+	.inspector-metadata-item {
+		min-width: 0;
+		padding: 8px 12px;
+		border-right: 1px solid var(--cinder-border-muted);
+	}
+
+	.inspector-metadata-item:last-child {
+		border-right: 0;
+	}
+
+	.inspector-metadata dt {
+		margin: 0;
+		font: 700 10px system-ui;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
 		color: var(--cinder-text-subtle);
-		padding: 3px 8px;
-		background: var(--cinder-surface-inset);
-		border: 1px solid var(--cinder-border-muted);
-		border-radius: var(--cinder-radius-sm);
+	}
+
+	.inspector-metadata dd {
+		margin: 2px 0 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font: 500 12px system-ui;
+		font-family: var(--cinder-font-mono);
+		color: var(--cinder-text);
 	}
 
 	.budget-bar {
@@ -1156,7 +1183,7 @@
 		/* Desktop-only elements hidden on tablet */
 		.pane-header,
 		.inspector-header,
-		.inspector-chips,
+		.inspector-metadata,
 		.budget-bar,
 		.inspector-durability-wrapper,
 		.inspector-toggle {

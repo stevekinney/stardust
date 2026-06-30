@@ -1,26 +1,32 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import Button from '@lostgradient/cinder/button';
+	import Input from '@lostgradient/cinder/input';
+	import Textarea from '@lostgradient/cinder/textarea';
 	import PageHeader from '$lib/components/page-header.svelte';
+	import type { ScheduleProjection } from '$lib/types';
 
-	type Schedule = {
-		id: string;
-		temporalScheduleId: string;
-		targetSessionKey: string;
+	type ScheduleForm = {
 		name: string;
-		description: string | null;
+		description: string;
 		cronExpression: string;
 		prompt: string;
-		status: 'active' | 'paused' | 'deleted';
-		lastRunAt: string | null;
-		nextRunAt: string | null;
-		createdAt: string;
-		updatedAt: string;
 	};
 
-	let schedules = $state<Schedule[]>([]);
-	let selected = $state<Schedule | null>(null);
+	const emptyForm: ScheduleForm = {
+		name: '',
+		description: '',
+		cronExpression: '0 9 * * 1',
+		prompt: ''
+	};
+
+	let schedules = $state<ScheduleProjection[]>([]);
+	let selected = $state<ScheduleProjection | null>(null);
 	let loading = $state(true);
+	let showCreateForm = $state(false);
+	let saving = $state(false);
+	let formError = $state<string | null>(null);
+	let form = $state<ScheduleForm>({ ...emptyForm });
 
 	let activeCount = $derived(schedules.filter((s) => s.status === 'active').length);
 	let headerMeta = $derived.by(() => {
@@ -75,6 +81,57 @@
 		await loadSchedules();
 	}
 
+	function resetForm() {
+		form = { ...emptyForm };
+		formError = null;
+	}
+
+	function selectSchedule(schedule: ScheduleProjection) {
+		selected = schedule;
+	}
+
+	function upsertSchedule(nextSchedule: ScheduleProjection) {
+		const index = schedules.findIndex(
+			(schedule) => schedule.temporalScheduleId === nextSchedule.temporalScheduleId
+		);
+		if (index === -1) {
+			schedules = [...schedules, nextSchedule];
+			return;
+		}
+		schedules = schedules.map((schedule, currentIndex) =>
+			currentIndex === index ? nextSchedule : schedule
+		);
+	}
+
+	async function createSchedule() {
+		saving = true;
+		formError = null;
+		try {
+			const response = await fetch('/api/schedules', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					name: form.name,
+					description: form.description,
+					cronExpression: form.cronExpression,
+					prompt: form.prompt
+				})
+			});
+
+			if (!response.ok) throw new Error(await response.text());
+
+			const body = (await response.json()) as { schedule: ScheduleProjection };
+			upsertSchedule(body.schedule);
+			selectSchedule(body.schedule);
+			showCreateForm = false;
+			resetForm();
+		} catch (caught) {
+			formError = caught instanceof Error ? caught.message : 'Failed to create schedule';
+		} finally {
+			saving = false;
+		}
+	}
+
 	async function loadSchedules() {
 		try {
 			const controller = new AbortController();
@@ -82,12 +139,15 @@
 			const response = await fetch('/api/schedules', { signal: controller.signal });
 			clearTimeout(timeout);
 			if (response.ok) {
-				const body = (await response.json()) as { schedules: Schedule[] };
+				const body = (await response.json()) as { schedules: ScheduleProjection[] };
 				schedules = body.schedules;
 				if (!selected && schedules.length > 0) {
 					selected = schedules[0];
 				} else if (selected) {
-					selected = schedules.find((s) => s.id === selected!.id) ?? selected;
+					selected =
+						schedules.find(
+							(schedule) => schedule.temporalScheduleId === selected!.temporalScheduleId
+						) ?? selected;
 				}
 			}
 		} catch {
@@ -110,7 +170,7 @@
 
 <div class="page">
 	<PageHeader title="Schedules" meta={headerMeta}>
-		<Button variant="primary" size="sm">
+		<Button variant="primary" size="sm" onclick={() => (showCreateForm = true)}>
 			<span style="display:inline-flex;align-items:center;gap:7px">
 				<svg
 					width="15"
@@ -129,6 +189,71 @@
 			</span>
 		</Button>
 	</PageHeader>
+
+	{#if showCreateForm}
+		<section class="create-panel" aria-labelledby="create-schedule-heading">
+			<div class="create-panel-header">
+				<div>
+					<h2 id="create-schedule-heading" class="create-heading">Create schedule</h2>
+					<p class="create-description">Run a recurring agent task on a Temporal schedule.</p>
+				</div>
+				<Button
+					variant="secondary"
+					size="sm"
+					label="Cancel"
+					onclick={() => {
+						showCreateForm = false;
+						resetForm();
+					}}
+				/>
+			</div>
+
+			{#if formError}
+				<p class="form-error" role="alert">{formError}</p>
+			{/if}
+
+			<form
+				class="create-form"
+				onsubmit={(event) => {
+					event.preventDefault();
+					void createSchedule();
+				}}
+			>
+				<div class="form-grid">
+					<Input
+						id="schedule-name"
+						label="Name"
+						bind:value={form.name}
+						required
+						autocomplete="off"
+					/>
+					<Input
+						id="schedule-cron"
+						label="Cron expression"
+						bind:value={form.cronExpression}
+						required
+						autocomplete="off"
+					/>
+				</div>
+				<Input
+					id="schedule-description"
+					label="Description"
+					bind:value={form.description}
+					autocomplete="off"
+				/>
+				<Textarea id="schedule-prompt" label="Prompt" bind:value={form.prompt} required rows={4} />
+				<div class="form-actions">
+					<span class="spacer"></span>
+					<Button
+						label={saving ? 'Creating…' : 'Create schedule'}
+						variant="primary"
+						type="submit"
+						disabled={saving}
+					/>
+				</div>
+			</form>
+		</section>
+	{/if}
 
 	{#if loading}
 		<div class="page-center"><span class="page-meta">Loading…</span></div>
@@ -173,7 +298,7 @@
 						class="sched-card"
 						class:active={selected?.id === schedule.id}
 						class:paused={schedule.status === 'paused'}
-						onclick={() => (selected = schedule)}
+						onclick={() => selectSchedule(schedule)}
 					>
 						<div class="sched-top">
 							<svg
@@ -249,21 +374,21 @@
 								variant="primary"
 								size="sm"
 								label="Trigger now"
-								onclick={() => triggerSchedule(selected!.id)}
+								onclick={() => triggerSchedule(selected!.temporalScheduleId)}
 							/>
 							{#if selected.status === 'active'}
 								<Button
 									variant="secondary"
 									size="sm"
 									label="Pause"
-									onclick={() => pauseSchedule(selected!.id)}
+									onclick={() => pauseSchedule(selected!.temporalScheduleId)}
 								/>
 							{:else}
 								<Button
 									variant="secondary"
 									size="sm"
 									label="Resume"
-									onclick={() => resumeSchedule(selected!.id)}
+									onclick={() => resumeSchedule(selected!.temporalScheduleId)}
 								/>
 							{/if}
 						</div>
@@ -316,6 +441,58 @@
 		display: flex;
 		flex-direction: column;
 		height: 100%;
+	}
+
+	.create-panel {
+		flex: none;
+		margin: 16px 24px 0;
+		padding: 16px;
+		border: 1px solid var(--cinder-border);
+		border-radius: 10px;
+		background: var(--cinder-surface);
+	}
+
+	.create-panel-header {
+		display: flex;
+		align-items: flex-start;
+		gap: 14px;
+		margin-bottom: 14px;
+	}
+
+	.create-heading {
+		font: 650 15px/1.25 system-ui;
+		color: var(--cinder-text);
+		margin: 0;
+	}
+
+	.create-description {
+		font: 400 12px/1.45 system-ui;
+		color: var(--cinder-text-muted);
+		margin: 4px 0 0;
+	}
+
+	.create-form {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.form-grid {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(12rem, 0.45fr);
+		gap: 12px;
+	}
+
+	.form-actions {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+
+	.form-error {
+		margin: 0 0 12px;
+		color: var(--cinder-color-danger-fg);
+		font: 500 12px/1.4 system-ui;
 	}
 
 	.spacer {
@@ -596,5 +773,21 @@
 	.badge-success {
 		background: var(--cinder-color-success-bg);
 		color: var(--cinder-color-success-fg);
+	}
+
+	@media (max-width: 780px) {
+		.create-panel {
+			margin: 12px 16px 0;
+		}
+
+		.create-panel-header,
+		.form-actions {
+			flex-direction: column;
+			align-items: stretch;
+		}
+
+		.form-grid {
+			grid-template-columns: 1fr;
+		}
 	}
 </style>

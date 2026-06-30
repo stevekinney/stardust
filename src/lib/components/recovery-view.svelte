@@ -34,7 +34,7 @@
 					the in-flight work to a second worker, which resumed from durable history. No transcript
 					events were dropped and nothing ran twice.
 				</div>
-				{#if viewMode.mode === 'engineer'}
+				{#if viewMode.isEngineer}
 					<div class="banner-chips">
 						<span class="banner-chip">resumed from event #243</span>
 						<span class="banner-chip">same run wf_b0d4</span>

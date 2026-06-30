@@ -1,13 +1,11 @@
 <script lang="ts">
-	import '@lostgradient/cinder/styles';
+	import '@lostgradient/cinder/styles/all';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { resolve } from '$app/paths';
 	import Badge from '@lostgradient/cinder/badge';
 	import StatusDot from '@lostgradient/cinder/status-dot';
-	import Toggle from '@lostgradient/cinder/toggle';
-	import { viewMode } from '$lib/view-mode.svelte';
 	import type { SessionRow } from '$lib/components/session-list.svelte';
 	import favicon from '$lib/assets/favicon.svg';
 
@@ -17,7 +15,9 @@
 	let sessionsLoading = $state(false);
 	let sessionsError = $state<string | null>(null);
 	let railOpen = $state(false);
+	let temporalUiOpen = $state(false);
 
+	const TEMPORAL_UI_URL = 'http://localhost:7778';
 	const currentSessionKey = $derived($page.params.sessionKey ?? null);
 
 	const activeSessions = $derived(sessions.filter((s) => !s.archivedAt));
@@ -155,14 +155,14 @@
 
 		<StatusDot connectionState="connected" label="Worker" size="sm" />
 
-		<Toggle
-			id="view-mode-toggle"
-			label="Under the hood"
-			checked={viewMode.mode === 'engineer'}
-			onValueChange={(next) => {
-				viewMode.set(next ? 'engineer' : 'operator');
-			}}
-		/>
+		<button
+			type="button"
+			class="top-link"
+			aria-pressed={temporalUiOpen}
+			onclick={() => (temporalUiOpen = !temporalUiOpen)}
+		>
+			Temporal UI
+		</button>
 
 		<a href={resolve('/settings')} class="icon-button" aria-label="Settings">
 			<svg
@@ -182,6 +182,38 @@
 			</svg>
 		</a>
 	</header>
+
+	{#if temporalUiOpen}
+		<section class="temporal-ui-panel" aria-label="Temporal UI">
+			<div class="temporal-ui-bar">
+				<div>
+					<div class="temporal-ui-title">Temporal UI</div>
+					<div class="temporal-ui-url">{TEMPORAL_UI_URL}</div>
+				</div>
+				<button
+					type="button"
+					class="icon-button"
+					aria-label="Close Temporal UI"
+					onclick={() => (temporalUiOpen = false)}
+				>
+					<svg
+						width="16"
+						height="16"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					>
+						<path d="M18 6 6 18" />
+						<path d="m6 6 12 12" />
+					</svg>
+				</button>
+			</div>
+			<iframe class="temporal-ui-frame" title="Temporal UI" src={TEMPORAL_UI_URL}></iframe>
+		</section>
+	{/if}
 
 	<div class="body">
 		{#if railOpen}
@@ -252,11 +284,9 @@
 					{/each}
 				{/if}
 
-				<div class="rail-heading" style="margin-top: 18px;">Global</div>
-
 				<a
 					href={resolve('/approvals')}
-					class="rail-nav-item"
+					class="rail-nav-item rail-nav-item-first"
 					aria-current={$page.url.pathname === '/approvals' ? 'page' : undefined}
 				>
 					<!-- shield-alert -->
@@ -379,6 +409,7 @@
 	}
 
 	.app {
+		position: relative;
 		display: flex;
 		flex-direction: column;
 		height: 100dvh;
@@ -444,6 +475,33 @@
 		flex: 1;
 	}
 
+	.top-link {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		height: 30px;
+		padding: 0 10px;
+		border: 1px solid var(--cinder-border);
+		border-radius: var(--cinder-radius-md);
+		background: var(--cinder-surface-inset);
+		color: var(--cinder-text-subtle);
+		font: 600 12px system-ui;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+
+	.top-link:hover,
+	.top-link[aria-pressed='true'] {
+		border-color: var(--cinder-accent);
+		background: color-mix(in oklch, var(--cinder-accent), transparent 88%);
+		color: var(--cinder-text);
+	}
+
+	.top-link:focus-visible {
+		outline: 2px solid var(--cinder-accent);
+		outline-offset: 2px;
+	}
+
 	.icon-button {
 		display: flex;
 		align-items: center;
@@ -460,6 +518,45 @@
 	.icon-button:hover {
 		background: var(--cinder-surface-hover);
 		color: var(--cinder-text);
+	}
+
+	.temporal-ui-panel {
+		position: absolute;
+		inset: 52px 0 0 0;
+		z-index: 20;
+		display: flex;
+		flex-direction: column;
+		background: var(--cinder-bg);
+	}
+
+	.temporal-ui-bar {
+		flex: none;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		min-height: 48px;
+		padding: 8px 14px;
+		border-bottom: 1px solid var(--cinder-border);
+		background: var(--cinder-surface);
+	}
+
+	.temporal-ui-title {
+		font: 700 13px system-ui;
+		color: var(--cinder-text);
+	}
+
+	.temporal-ui-url {
+		margin-top: 2px;
+		font: 500 11px var(--cinder-font-mono);
+		color: var(--cinder-text-muted);
+	}
+
+	.temporal-ui-frame {
+		flex: 1;
+		width: 100%;
+		border: 0;
+		background: white;
 	}
 
 	/* ── Body (rail + main) ──────────────────────────────────── */
@@ -614,6 +711,10 @@
 		color: var(--cinder-text-subtle);
 		text-decoration: none;
 		font-size: var(--cinder-text-sm);
+	}
+
+	.rail-nav-item-first {
+		margin-top: 16px;
 	}
 
 	.rail-nav-item:hover {

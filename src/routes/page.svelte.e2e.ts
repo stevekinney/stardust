@@ -36,6 +36,18 @@ test('home page shows welcome screen when there are no sessions', async ({ page 
 	await expect(page.getByRole('heading', { name: 'What should the agent work on?' })).toBeVisible();
 	await expect(page.getByLabel('Session navigation')).toBeVisible();
 	await expect(page.getByLabel('Describe a task')).toBeVisible();
+	await expect(page.getByText('Worker')).toBeVisible();
+	await expect(page.getByText('Under the hood')).toHaveCount(0);
+
+	await page.getByRole('button', { name: 'Temporal UI' }).click();
+	await expect(page.getByRole('region', { name: 'Temporal UI' })).toBeVisible();
+	await expect(page.locator('iframe[title="Temporal UI"]')).toHaveAttribute(
+		'src',
+		'http://localhost:7778'
+	);
+
+	await page.getByRole('button', { name: 'Close Temporal UI' }).click();
+	await expect(page.getByRole('region', { name: 'Temporal UI' })).toHaveCount(0);
 });
 
 test('create → submit → stream: navigates to a conversation and renders the stream', async ({
@@ -140,6 +152,8 @@ test('home page shows the session list when sessions exist', async ({ page }) =>
 	// getByText matches both the rail card and the main session card.
 	const main = page.getByRole('main');
 	await expect(main.getByText('Refactor auth guards')).toBeVisible();
+	await expect(main.getByText('my-test-session', { exact: true })).toBeVisible();
+	await expect(main.getByText('Ready to resume where you left off.')).toHaveCount(0);
 	await expect(main.getByRole('searchbox')).toBeVisible();
 });
 

@@ -5,8 +5,9 @@
 	import Button from '@lostgradient/cinder/button';
 	import Badge from '@lostgradient/cinder/badge';
 	import Textarea from '@lostgradient/cinder/textarea';
-	import { FacetedFilterBar } from '@lostgradient/cinder/faceted-filter-bar';
-	import type { FacetDefinition, AppliedFilter } from '@lostgradient/cinder/faceted-filter-bar';
+	import SearchField from '@lostgradient/cinder/search-field';
+	import Select from '@lostgradient/cinder/select';
+	import type { SelectOption } from '@lostgradient/cinder/select';
 	import type { SessionRow } from '$lib/components/session-list.svelte';
 	import { viewMode } from '$lib/view-mode.svelte';
 
@@ -17,7 +18,7 @@
 
 	// ── Filter state ───────────────────────────────────────────────
 	let searchQuery = $state('');
-	let appliedFilters = $state<AppliedFilter[]>([]);
+	let statusFilter = $state('');
 
 	// ── Welcome form state ─────────────────────────────────────────
 	let message = $state('');
@@ -40,48 +41,27 @@
 			});
 		}
 
-		for (const filter of appliedFilters) {
-			if (filter.key === 'status') {
-				result = result.filter((s) => s.status === filter.value);
-			}
-			// 'started_by' is not a field on SessionRow; treat as no-op
+		if (statusFilter) {
+			result = result.filter((s) => s.status === statusFilter);
 		}
 
 		return result;
 	});
 
-	// ── Facet definitions ──────────────────────────────────────────
-	const FACETS: FacetDefinition[] = [
-		{
-			type: 'select',
-			key: 'status',
-			label: 'Status',
-			placeholder: 'All statuses',
-			options: [
-				{ value: 'running', label: 'Running' },
-				{ value: 'streaming', label: 'Streaming' },
-				{ value: 'loading', label: 'Loading' },
-				{ value: 'waiting_approval', label: 'Waiting approval' },
-				{ value: 'disconnected', label: 'Disconnected' },
-				{ value: 'recovered', label: 'Recovered' },
-				{ value: 'complete', label: 'Complete' },
-				{ value: 'failed', label: 'Failed' },
-				{ value: 'cancelled', label: 'Cancelled' },
-				{ value: 'active', label: 'Active' },
-				{ value: 'idle', label: 'Idle' }
-			]
-		},
-		{
-			type: 'select',
-			key: 'started_by',
-			label: 'Started by',
-			placeholder: 'Anyone',
-			options: [
-				{ value: 'user', label: 'You' },
-				{ value: 'schedule', label: 'Schedule' },
-				{ value: 'api', label: 'API' }
-			]
-		}
+	// ── Filter options ─────────────────────────────────────────────
+	const STATUS_OPTIONS: SelectOption[] = [
+		{ value: '', label: 'All statuses' },
+		{ value: 'running', label: 'Running' },
+		{ value: 'streaming', label: 'Streaming' },
+		{ value: 'loading', label: 'Loading' },
+		{ value: 'waiting_approval', label: 'Waiting approval' },
+		{ value: 'disconnected', label: 'Disconnected' },
+		{ value: 'recovered', label: 'Recovered' },
+		{ value: 'complete', label: 'Complete' },
+		{ value: 'failed', label: 'Failed' },
+		{ value: 'cancelled', label: 'Cancelled' },
+		{ value: 'active', label: 'Active' },
+		{ value: 'idle', label: 'Idle' }
 	];
 
 	// ── Example prompts (welcome view) ─────────────────────────────
@@ -147,37 +127,6 @@
 		return session.name ?? session.sessionKey;
 	}
 
-	function sessionSummary(session: SessionRow): string {
-		switch (session.status) {
-			case 'running':
-				return 'Agent is actively working on this task.';
-			case 'streaming':
-				return 'Agent is writing — tokens arriving live.';
-			case 'loading':
-				return 'Re-attaching to session — loading transcript.';
-			case 'waiting_approval':
-				return 'Paused — waiting for your approval before proceeding.';
-			case 'disconnected':
-				return 'Live updates paused — reconnecting. Viewing last saved transcript.';
-			case 'complete':
-				return 'All steps completed successfully.';
-			case 'recovered':
-				return 'Worker recovered from a crash — nothing lost.';
-			case 'failed':
-				return 'Stopped due to an error. Review the run for details.';
-			case 'cancelled':
-				return 'Cancelled before completion.';
-			default:
-				return 'Ready to resume where you left off.';
-		}
-	}
-
-	function sessionActionLabel(status: string): string {
-		if (['active', 'running', 'streaming', 'waiting_approval'].includes(status)) return 'Resume';
-		if (['complete', 'failed', 'cancelled'].includes(status)) return 'Review';
-		return 'Open';
-	}
-
 	function statusDotClass(status: string): string {
 		switch (status) {
 			case 'complete':
@@ -202,72 +151,9 @@
 		}
 	}
 
-	function statusBadgeVariant(
-		status: string
-	): 'neutral' | 'success' | 'warning' | 'danger' | 'info' | 'accent' {
-		switch (status) {
-			case 'complete':
-			case 'recovered':
-				return 'success';
-			case 'failed':
-				return 'danger';
-			case 'waiting_approval':
-			case 'disconnected':
-				return 'warning';
-			case 'streaming':
-			case 'loading':
-				return 'info';
-			case 'running':
-			case 'active':
-				return 'accent';
-			case 'cancelled':
-			default:
-				return 'neutral';
-		}
-	}
-
-	function formatStatus(status: string): string {
-		return status.replace(/_/g, ' ');
-	}
-
 	function cardBorderColor(status: string): string {
 		if (status === 'waiting_approval') return 'var(--cinder-warning)';
 		return 'var(--cinder-border)';
-	}
-
-	function relativeTime(dateString: string): string {
-		const now = Date.now();
-		const then = new Date(dateString).getTime();
-		const seconds = Math.floor((now - then) / 1000);
-		if (seconds < 60) return 'just now';
-		const minutes = Math.floor(seconds / 60);
-		if (minutes < 60) return `${minutes}m ago`;
-		const hours = Math.floor(minutes / 60);
-		if (hours < 24) return `${hours}h ago`;
-		const days = Math.floor(hours / 24);
-		return `${days}d ago`;
-	}
-
-	// ── Filter callbacks ───────────────────────────────────────────
-	function handleFacetChange(key: string, value: string) {
-		const facet = FACETS.find((f) => f.key === key);
-		if (!value) {
-			appliedFilters = appliedFilters.filter((f) => f.key !== key);
-			return;
-		}
-		appliedFilters = [
-			...appliedFilters.filter((f) => f.key !== key),
-			{ key, value, label: facet?.label ?? key }
-		];
-	}
-
-	function handleFilterRemove(key: string) {
-		appliedFilters = appliedFilters.filter((f) => f.key !== key);
-	}
-
-	function handleClearAll() {
-		appliedFilters = [];
-		searchQuery = '';
 	}
 
 	// ── Welcome form handlers ──────────────────────────────────────
@@ -321,10 +207,14 @@
 	<!-- ── Populated sessions view ──────────────────────────────── -->
 	<div class="sessions">
 		<div class="sessions-header">
-			<h1 class="sessions-title">Sessions</h1>
-			<span class="sessions-count">
-				{activeSessions.length} active{waitingCount > 0 ? ` · ${waitingCount} waiting on you` : ''}
-			</span>
+			<div class="sessions-heading">
+				<h1 class="sessions-title">Sessions</h1>
+				<span class="sessions-count">
+					{activeSessions.length} active{waitingCount > 0
+						? ` · ${waitingCount} waiting on you`
+						: ''}
+				</span>
+			</div>
 			<span class="header-spacer"></span>
 			<Button variant="primary" size="sm" label="New session" onclick={handleNewSession}>
 				<span class="new-session-content">
@@ -347,18 +237,22 @@
 		</div>
 
 		<div class="filter-bar">
-			<FacetedFilterBar
-				aria-label="Filter sessions"
-				searchPlaceholder="Search sessions…"
-				searchAriaLabel="Search sessions"
-				facets={FACETS}
-				{appliedFilters}
-				{searchQuery}
-				onsearchchange={(q) => (searchQuery = q)}
-				onfacetchange={handleFacetChange}
-				onfilterremove={handleFilterRemove}
-				onclearall={handleClearAll}
-			/>
+			<div class="session-search-control">
+				<SearchField
+					value={searchQuery}
+					placeholder="Search sessions…"
+					aria-label="Search sessions"
+					oninput={(query) => (searchQuery = query)}
+				/>
+			</div>
+			<div class="session-status-control">
+				<Select
+					id="session-status-filter"
+					label="Status"
+					bind:value={statusFilter}
+					options={STATUS_OPTIONS}
+				/>
+			</div>
 		</div>
 
 		<div class="sessions-list">
@@ -377,7 +271,6 @@
 							<span class="session-name">{displayLabel(session)}</span>
 							<span class="session-id">{session.sessionKey}</span>
 						</div>
-						<p class="session-summary">{sessionSummary(session)}</p>
 						{#if session.status === 'complete'}
 							<div class="session-chips">
 								<span class="chip chip-success">0 events lost</span>
@@ -399,28 +292,11 @@
 						{/if}
 					</div>
 
-					{#if viewMode.mode === 'engineer'}
+					{#if viewMode.isEngineer}
 						<div class="session-eng">
 							<Badge variant="neutral" mono size="sm">{session.workflowId}</Badge>
 						</div>
 					{/if}
-
-					<div class="session-status">
-						<Badge variant={statusBadgeVariant(session.status)}>
-							{formatStatus(session.status)}
-						</Badge>
-						<span class="session-time">{relativeTime(session.updatedAt)}</span>
-					</div>
-
-					<Button
-						label={sessionActionLabel(session.status)}
-						variant="secondary"
-						size="sm"
-						onclick={(e: MouseEvent) => {
-							e.stopPropagation();
-							navigateToSession(session.sessionKey);
-						}}
-					/>
 				</div>
 			{/each}
 
@@ -594,6 +470,13 @@
 		gap: 14px;
 	}
 
+	.sessions-heading {
+		display: flex;
+		align-items: baseline;
+		gap: 12px;
+		min-width: 0;
+	}
+
 	.sessions-title {
 		font: 650 21px/1.2 system-ui;
 		letter-spacing: -0.01em;
@@ -619,6 +502,18 @@
 	.filter-bar {
 		flex: none;
 		padding: 16px 24px 4px;
+		display: flex;
+		align-items: end;
+		gap: 12px;
+	}
+
+	.session-search-control {
+		flex: 1 1 18rem;
+		min-width: 14rem;
+	}
+
+	.session-status-control {
+		flex: 0 0 10rem;
 	}
 
 	.sessions-list {
@@ -681,31 +576,8 @@
 		flex-shrink: 0;
 	}
 
-	.session-summary {
-		font: 400 12.5px system-ui;
-		color: var(--cinder-text-muted);
-		margin: 4px 0 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
 	.session-eng {
 		flex: none;
-	}
-
-	.session-status {
-		flex: none;
-		text-align: right;
-		min-width: 120px;
-	}
-
-	.session-time {
-		display: block;
-		font-family: var(--cinder-font-mono);
-		font-size: 10.5px;
-		color: var(--cinder-text-subtle);
-		margin-top: 5px;
 	}
 
 	.no-results {

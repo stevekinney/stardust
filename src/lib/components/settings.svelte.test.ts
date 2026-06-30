@@ -1,18 +1,15 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import Settings from './settings.svelte';
-import { viewMode } from '$lib/view-mode.svelte';
 
 describe('Settings', () => {
 	beforeEach(() => {
 		localStorage.clear();
-		viewMode.set('operator');
 	});
 
 	afterEach(() => {
 		document.body.innerHTML = '';
 		localStorage.clear();
-		viewMode.set('operator');
 		document.documentElement.removeAttribute('data-theme');
 	});
 
@@ -74,7 +71,7 @@ describe('Settings', () => {
 		unmount(component);
 	});
 
-	it('renders default view control with operator/engineer options', () => {
+	it('does not render a default view control', () => {
 		const component = mount(Settings, {
 			target: document.body,
 			props: { open: true }
@@ -82,8 +79,10 @@ describe('Settings', () => {
 		flushSync();
 
 		const text = document.body.textContent ?? '';
-		expect(text).toContain('Operator');
-		expect(text).toContain('Engineer');
+		expect(text).toContain('Under-the-hood details are always shown.');
+		expect(text).not.toContain('Default view');
+		expect(text).not.toContain('Operator');
+		expect(text).not.toContain('Engineer');
 
 		unmount(component);
 	});

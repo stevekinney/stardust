@@ -15,6 +15,12 @@
 		isError: boolean;
 	};
 
+	type JsonToken = {
+		id: string;
+		kind: 'key' | 'string' | 'number' | 'boolean' | 'null' | 'punctuation' | 'plain';
+		value: string;
+	};
+
 	type Props = {
 		projection: RunInspectorProjection;
 		onTemporalWeb?: () => void;
@@ -55,6 +61,40 @@
 
 	function kindLabel(kind: string): string {
 		return kind.replace(/_/g, ' ');
+	}
+
+	function metricLabel(label: string): string {
+		return label
+			.replace(/([a-z])([A-Z])/g, '$1 $2')
+			.replace(/^./, (character) => character.toUpperCase());
+	}
+
+	function isFlatPrimitiveObject(value: unknown): value is Record<string, unknown> {
+		if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+		return Object.values(value).every((item) => item === null || typeof item !== 'object');
+	}
+
+	function formatStepPayload(value: unknown): string {
+		if (typeof value === 'string') return value;
+		return JSON.stringify(value, null, isFlatPrimitiveObject(value) ? 0 : 2);
+	}
+
+	function highlightedStepPayload(value: unknown): JsonToken[] {
+		const formatted = formatStepPayload(value);
+		const tokenPattern =
+			/("(?:\\.|[^"\\])*")(?=\s*:)|("(?:\\.|[^"\\])*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false)\b|\bnull\b|([{}[\]:,])|(\s+)|([^\s{}[\]:,]+)/g;
+		return [...formatted.matchAll(tokenPattern)].map((match) => {
+			const start = match.index ?? 0;
+			const value = match[0];
+			let kind: JsonToken['kind'] = 'plain';
+			if (match[1]) kind = 'key';
+			else if (match[2]) kind = 'string';
+			else if (match[3]) kind = 'number';
+			else if (match[4]) kind = 'boolean';
+			else if (match[5]) kind = 'null';
+			else if (match[6]) kind = 'punctuation';
+			return { id: `${start}-${kind}`, kind, value };
+		});
 	}
 
 	function isRecoveryMarker(event: RunInspectorProjection['transcript'][number]): boolean {
@@ -141,12 +181,19 @@
 		if (!resultEvent) return undefined;
 		return isToolResultPayload(resultEvent.payload) ? resultEvent.payload.content : undefined;
 	});
+
+	function openTemporalWeb() {
+		if (onTemporalWeb) {
+			onTemporalWeb();
+		} else {
+			window.open(temporalWebUrl, '_blank', 'noreferrer');
+		}
+	}
 </script>
 
-<section class="run-timeline" aria-labelledby="run-timeline-heading">
+<section class="run-timeline" aria-label="Run inspector timeline">
 	<div class="timeline-header">
 		<div>
-			<h2 id="run-timeline-heading">Run Inspector</h2>
 			<p class="muted">{run.workflowId}</p>
 		</div>
 		<div class="header-meta">
@@ -154,18 +201,7 @@
 			{#if run.model}
 				<span class="model-badge">{run.model}</span>
 			{/if}
-			<Button
-				variant="secondary"
-				size="sm"
-				data-temporal-web
-				onclick={() => {
-					if (onTemporalWeb) {
-						onTemporalWeb();
-					} else {
-						window.open(temporalWebUrl, '_blank', 'noreferrer');
-					}
-				}}
-			>
+			<Button variant="secondary" size="sm" data-temporal-web onclick={openTemporalWeb}>
 				<span class="btn-inner">
 					<!-- lucide external-link -->
 					<svg
@@ -218,8 +254,8 @@
 		<summary>Action Meter</summary>
 		<dl class="breakdown">
 			{#each Object.entries(actionMeter.breakdown) as [label, count] (label)}
-				<div>
-					<dt>{label}</dt>
+				<div class="breakdown-item" data-action-meter-item>
+					<dt>{metricLabel(label)}</dt>
 					<dd>{count}</dd>
 				</div>
 			{/each}
@@ -246,9 +282,14 @@
 					<dt>Tool invocations</dt>
 					<dd>{toolInvocations.length}</dd>
 				</div>
-				<div>
-					<dt>Temporal Web</dt>
-					<dd><code class="eng-url">{temporalWebUrl}</code></dd>
+				<div class="eng-link-row" data-temporal-workflow-link>
+					<dt>Workflow</dt>
+					<dd>
+						<button type="button" class="workflow-link" onclick={openTemporalWeb}>
+							Open workflow in Temporal Web
+							<span aria-hidden="true">↗</span>
+						</button>
+					</dd>
 				</div>
 			</dl>
 		</div>
@@ -332,9 +373,11 @@
 							</time>
 						</button>
 						{#if event.payload !== null && event.payload !== undefined}
-							<pre class="step-payload">{typeof event.payload === 'string'
-									? event.payload
-									: JSON.stringify(event.payload, null, 2)}</pre>
+							<pre
+								class="step-payload"
+								data-step-payload>{#each highlightedStepPayload(event.payload) as token (token.id)}<span
+										class="json-token json-token-{token.kind}">{token.value}</span
+									>{/each}</pre>
 						{/if}
 						{#if engineerView}
 							<Button
@@ -471,12 +514,8 @@
 		gap: 0.75rem;
 	}
 
-	h2,
 	h3 {
 		margin: 0 0 0.25rem;
-	}
-
-	h3 {
 		font-size: 0.95rem;
 	}
 
@@ -561,23 +600,35 @@
 	}
 
 	.breakdown {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.75rem;
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+		gap: 0.5rem;
 		margin: 0.5rem 0 0;
+	}
+
+	.breakdown-item {
+		display: grid;
+		gap: 0.25rem;
+		min-width: 0;
+		border: 1px solid var(--cinder-border-muted);
+		border-radius: 6px;
+		padding: 0.55rem 0.65rem;
+		background: var(--cinder-surface-inset);
 	}
 
 	.breakdown dt {
 		color: var(--cinder-text-subtle);
-		font-size: 0.72rem;
+		overflow-wrap: anywhere;
+		font-size: 0.68rem;
 		font-weight: 700;
-		text-transform: uppercase;
+		line-height: 1.25;
 	}
 
 	.breakdown dd {
 		margin: 0;
-		font-size: 0.9rem;
+		font-size: 1rem;
 		font-weight: 700;
+		font-family: var(--cinder-font-mono);
 	}
 
 	.subagent-lanes {
@@ -750,6 +801,24 @@
 		line-height: 1.4;
 	}
 
+	.json-token-key {
+		color: var(--cinder-accent-text);
+	}
+
+	.json-token-string {
+		color: var(--cinder-color-success-fg);
+	}
+
+	.json-token-number,
+	.json-token-boolean,
+	.json-token-null {
+		color: var(--cinder-color-info-fg);
+	}
+
+	.json-token-punctuation {
+		color: var(--cinder-text-subtle);
+	}
+
 	.empty {
 		margin-top: 0.5rem;
 	}
@@ -764,10 +833,14 @@
 	}
 
 	.eng-meta {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.75rem 1.5rem;
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+		gap: 0.75rem;
 		margin: 0.5rem 0 0;
+	}
+
+	.eng-meta > div {
+		min-width: 0;
 	}
 
 	.eng-meta dt {
@@ -778,13 +851,37 @@
 	}
 
 	.eng-meta dd {
+		min-width: 0;
 		margin: 0;
 		font-size: 0.85rem;
+		overflow-wrap: anywhere;
 	}
 
-	.eng-url {
-		word-break: break-all;
-		font-size: 0.72rem;
+	.eng-meta code {
+		white-space: normal;
+		overflow-wrap: anywhere;
+	}
+
+	.eng-link-row {
+		grid-column: 1 / -1;
+	}
+
+	.workflow-link {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		border: 0;
+		padding: 0;
+		background: transparent;
+		color: var(--cinder-accent-text);
+		font: inherit;
+		font-weight: 600;
+		text-decoration: none;
+		cursor: pointer;
+	}
+
+	.workflow-link:hover {
+		text-decoration: underline;
 	}
 
 	/* — per-kind engineer markers — */

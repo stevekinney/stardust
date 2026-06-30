@@ -5,7 +5,6 @@
 	import Select from '@lostgradient/cinder/select';
 	import SegmentedControl from '@lostgradient/cinder/segmented-control';
 	import Segment from '@lostgradient/cinder/segment';
-	import { viewMode, type ViewMode } from '$lib/view-mode.svelte';
 
 	type Theme = 'system' | 'light' | 'dark';
 
@@ -63,7 +62,6 @@
 		model = MODEL_OPTIONS[0].value;
 		theme = 'system';
 		maxBudgetUsd = 5;
-		viewMode.set('operator');
 		applyTheme('system');
 	}
 
@@ -72,7 +70,6 @@
 	let model = $state<ModelId>(initial.model);
 	let theme = $state<Theme>(initial.theme);
 	let maxBudgetUsd = $state(initial.maxBudgetUsd);
-	let defaultView = $derived<ViewMode>(viewMode.mode);
 
 	// Re-apply the persisted theme on mount so the preference survives page reloads.
 	$effect(() => {
@@ -84,12 +81,6 @@
 	};
 
 	let { open = $bindable(false) }: Props = $props();
-
-	function handleDefaultViewChange(value: string) {
-		if (value === 'operator' || value === 'engineer') {
-			viewMode.set(value);
-		}
-	}
 
 	function handleSave() {
 		saveSettings();
@@ -122,6 +113,7 @@
 
 		<section class="settings-section" aria-labelledby="appearance-section-heading">
 			<h3 id="appearance-section-heading" class="settings-section-title">Appearance</h3>
+			<p class="field-hint">Under-the-hood details are always shown.</p>
 
 			<div class="field-group">
 				<span class="field-label" id="theme-label">Theme</span>
@@ -137,20 +129,6 @@
 					<Segment value="system">System</Segment>
 					<Segment value="light">Light</Segment>
 					<Segment value="dark">Dark</Segment>
-				</SegmentedControl>
-			</div>
-
-			<div class="field-group">
-				<span class="field-label" id="view-label">Default view</span>
-				<SegmentedControl
-					id="default-view-control"
-					label="Default view"
-					hideLabel
-					value={defaultView}
-					onchange={handleDefaultViewChange}
-				>
-					<Segment value="operator">Operator</Segment>
-					<Segment value="engineer">Engineer</Segment>
 				</SegmentedControl>
 			</div>
 		</section>

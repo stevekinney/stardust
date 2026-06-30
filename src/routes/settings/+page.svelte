@@ -1,8 +1,6 @@
 <script lang="ts">
-	import Button from '@lostgradient/cinder/button';
 	import PageHeader from '$lib/components/page-header.svelte';
 	import Select from '@lostgradient/cinder/select';
-	import { viewMode, type ViewMode } from '$lib/view-mode.svelte';
 
 	type Theme = 'system' | 'light' | 'dark';
 
@@ -25,11 +23,6 @@
 		{ value: 'system', label: 'System' },
 		{ value: 'light', label: 'Light' },
 		{ value: 'dark', label: 'Dark' }
-	];
-
-	const VIEW_OPTIONS = [
-		{ value: 'operator', label: 'Operator' },
-		{ value: 'engineer', label: 'Engineer' }
 	];
 
 	function loadSettings() {
@@ -92,7 +85,6 @@
 		theme = 'dark';
 		maxBudgetUsd = 5;
 		tokensPerRun = 200000;
-		viewMode.set('operator');
 		applyTheme('dark');
 	}
 
@@ -102,18 +94,11 @@
 	let theme = $state<Theme>(initial.theme);
 	let maxBudgetUsd = $state(initial.maxBudgetUsd);
 	let tokensPerRun = $state(initial.tokensPerRun);
-	let defaultView = $derived<ViewMode>(viewMode.mode);
 
 	$effect(() => {
 		void [model, theme, maxBudgetUsd, tokensPerRun];
 		saveSettings();
 	});
-
-	function handleDefaultViewChange(value: string) {
-		if (value === 'operator' || value === 'engineer') {
-			viewMode.set(value);
-		}
-	}
 </script>
 
 <svelte:head>
@@ -175,22 +160,11 @@
 
 			<section class="section">
 				<div class="section-title">Appearance & defaults</div>
+				<div class="section-desc">
+					Set the default theme. Under-the-hood details are always shown.
+				</div>
 				<div class="section-fields">
-					<div class="section-fields-grid">
-						<Select id="theme-select" label="Theme" options={THEME_OPTIONS} bind:value={theme} />
-						<Select
-							id="view-select"
-							label="Default view"
-							options={VIEW_OPTIONS}
-							value={defaultView}
-							onchange={(event) => {
-								const target = event.currentTarget;
-								if (target instanceof HTMLSelectElement) {
-									handleDefaultViewChange(target.value);
-								}
-							}}
-						/>
-					</div>
+					<Select id="theme-select" label="Theme" options={THEME_OPTIONS} bind:value={theme} />
 				</div>
 			</section>
 
@@ -221,6 +195,7 @@
 						width="17"
 						height="17"
 						viewBox="0 0 24 24"
+						aria-hidden="true"
 						fill="none"
 						stroke="currentColor"
 						stroke-width="1.5"
@@ -241,7 +216,9 @@
 							memory, and schedules are gone. This cannot be undone.
 						</div>
 					</div>
-					<Button variant="soft-danger" size="sm" label="Reset…" onclick={clearLocalData} />
+					<button type="button" class="danger-action" onclick={clearLocalData}>
+						Reset all local state
+					</button>
 				</div>
 			</section>
 		</div>
@@ -278,7 +255,6 @@
 	.section-title {
 		font: 600 13px system-ui;
 		color: var(--cinder-text);
-		margin-bottom: -10px;
 	}
 
 	.section-desc {
@@ -334,31 +310,6 @@
 		color: var(--cinder-text-subtle);
 	}
 
-	.toggle-card {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		border: 1px solid var(--cinder-border);
-		border-radius: 10px;
-		padding: 13px 15px;
-		background: var(--cinder-surface);
-	}
-
-	.toggle-info {
-		flex: 1;
-	}
-
-	.toggle-label {
-		font: 600 12.5px system-ui;
-		color: var(--cinder-text);
-	}
-
-	.toggle-desc {
-		font: 400 11.5px system-ui;
-		color: var(--cinder-text-subtle);
-		margin-top: 2px;
-	}
-
 	.mono {
 		font-family: var(--cinder-font-mono);
 	}
@@ -409,5 +360,37 @@
 		font: 400 11px system-ui;
 		color: var(--cinder-color-danger-fg);
 		opacity: 0.9;
+	}
+
+	.danger-action {
+		flex: none;
+		min-height: 38px;
+		padding: 0 14px;
+		border: 1px solid var(--cinder-color-danger-border);
+		border-radius: var(--cinder-radius-md, 8px);
+		background: var(--cinder-color-danger-fg);
+		color: var(--cinder-color-danger-bg);
+		font: 700 12px system-ui;
+		cursor: pointer;
+	}
+
+	.danger-action:hover {
+		filter: brightness(1.08);
+	}
+
+	.danger-action:focus-visible {
+		outline: 2px solid var(--cinder-color-danger-fg);
+		outline-offset: 2px;
+	}
+
+	@media (max-width: 720px) {
+		.danger-zone {
+			align-items: stretch;
+			flex-direction: column;
+		}
+
+		.danger-action {
+			width: 100%;
+		}
 	}
 </style>
