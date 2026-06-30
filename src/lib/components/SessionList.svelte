@@ -1,4 +1,7 @@
 <script lang="ts">
+	import Button from '@lostgradient/cinder/button';
+	import SearchField from '@lostgradient/cinder/search-field';
+
 	export type SessionRow = {
 		id: string;
 		sessionKey: string;
@@ -64,15 +67,18 @@
 <div class="session-list-panel" aria-label="Sessions">
 	<div class="list-header">
 		<h2 class="list-heading">Sessions</h2>
-		<button type="button" class="new-button" onclick={onCreate} aria-label="New conversation">
-			+ New
-		</button>
+		<Button
+			label="+ New"
+			variant="primary"
+			size="sm"
+			onclick={onCreate}
+			aria-label="New conversation"
+		/>
 	</div>
 
-	<input
-		class="search-input"
-		type="search"
-		bind:value={search}
+	<SearchField
+		value={search}
+		oninput={(v) => (search = v)}
 		placeholder="Search sessions…"
 		aria-label="Search sessions"
 	/>
@@ -93,6 +99,8 @@
 		<ul class="list" role="list">
 			{#each filtered as session (session.id)}
 				<li class="session-row">
+					<!-- Raw <button> preserved: full-width list-item layout with class:selected and
+					     aria-current requires custom styling that Cinder Button can't accommodate. -->
 					<button
 						type="button"
 						class="session-item"
@@ -111,22 +119,20 @@
 					</button>
 
 					<div class="session-actions">
-						<button
-							type="button"
-							class="action-button"
+						<Button
+							label="Rename"
+							variant="ghost"
+							size="sm"
 							onclick={() => onRename?.(session)}
 							aria-label="Rename session {session.sessionKey}"
-						>
-							Rename
-						</button>
-						<button
-							type="button"
-							class="action-button action-button--archive"
+						/>
+						<Button
+							label="Archive"
+							variant="ghost-danger"
+							size="sm"
 							onclick={() => onArchive?.(session)}
 							aria-label="Archive session {session.sessionKey}"
-						>
-							Archive
-						</button>
+						/>
 					</div>
 				</li>
 			{/each}
@@ -154,41 +160,6 @@
 		font-size: 1rem;
 		font-weight: 800;
 		color: #1d252c;
-	}
-
-	.new-button {
-		padding: 6px 14px;
-		border: 1px solid #174c77;
-		border-radius: 6px;
-		background: #174c77;
-		color: #ffffff;
-		font: inherit;
-		font-size: 0.85rem;
-		font-weight: 700;
-		cursor: pointer;
-		white-space: nowrap;
-	}
-
-	.new-button:hover {
-		background: #1a5a8e;
-	}
-
-	.search-input {
-		width: 100%;
-		box-sizing: border-box;
-		padding: 8px 12px;
-		border: 1px solid #c8d0d8;
-		border-radius: 6px;
-		font: inherit;
-		font-size: 0.9rem;
-		color: #17202a;
-		background: #ffffff;
-	}
-
-	.search-input:focus {
-		outline: none;
-		border-color: #174c77;
-		box-shadow: 0 0 0 3px rgb(23 76 119 / 0.12);
 	}
 
 	.list {
@@ -290,29 +261,6 @@
 		display: flex;
 		gap: 6px;
 		padding: 0 4px;
-	}
-
-	.action-button {
-		padding: 3px 10px;
-		border: 1px solid #c8d0d8;
-		border-radius: 4px;
-		background: transparent;
-		color: #5e6f80;
-		font: inherit;
-		font-size: 0.75rem;
-		cursor: pointer;
-	}
-
-	.action-button:hover {
-		border-color: #174c77;
-		color: #174c77;
-		background: #f0f7ff;
-	}
-
-	.action-button--archive:hover {
-		border-color: #9b2c2c;
-		color: #9b2c2c;
-		background: #fff1f1;
 	}
 
 	.error {

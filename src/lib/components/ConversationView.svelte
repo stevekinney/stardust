@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { SvelteMap } from 'svelte/reactivity';
+	import Button from '@lostgradient/cinder/button';
 
 	/** A normalized stream event as produced by the SSE endpoint. */
 	export type StreamEvent = {
@@ -222,6 +223,8 @@
 					<span class="tool-status tool-running">running</span>
 				{/if}
 			</div>
+			<!-- Raw <details> preserved: Cinder Collapsible doesn't support dynamic
+			     aria-label on the trigger, which tests rely on for textContent assertions. -->
 			<details class="tool-input">
 				<summary>Input</summary>
 				<pre><code>{formatInput(tool.input)}</code></pre>
@@ -295,7 +298,13 @@
 				{/if}
 			</span>
 			{#if onRetry}
-				<button class="run-failure-retry" onclick={onRetry} type="button">Retry</button>
+				<Button
+					label="Retry"
+					variant="secondary"
+					size="sm"
+					onclick={onRetry}
+					class="run-failure-retry"
+				/>
 			{/if}
 		</div>
 	{/if}
@@ -540,22 +549,5 @@
 	.run-failure-reason {
 		display: block;
 		word-break: break-word;
-	}
-
-	.run-failure-retry {
-		flex-shrink: 0;
-		padding: 4px 12px;
-		border: 1px solid currentColor;
-		border-radius: 4px;
-		background: transparent;
-		color: inherit;
-		font-size: 0.8rem;
-		font-weight: 700;
-		cursor: pointer;
-		transition: background 0.1s;
-	}
-
-	.run-failure-retry:hover {
-		background: rgba(0, 0, 0, 0.06);
 	}
 </style>

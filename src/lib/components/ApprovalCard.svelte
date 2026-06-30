@@ -1,4 +1,6 @@
 <script lang="ts">
+	import Button from '@lostgradient/cinder/button';
+	import Textarea from '@lostgradient/cinder/textarea';
 	import type { ApprovalCardState, ApprovalResolutionInput } from '$lib/types';
 
 	type Props = {
@@ -95,6 +97,8 @@
 		<span class="status">{approval.status}</span>
 	</header>
 
+	<!-- Raw <dl> preserved: DescriptionList only supports plain string definitions;
+	     metadata uses <code> elements and conditional sub-items that require HTML. -->
 	<dl class="metadata">
 		<div>
 			<dt>Expires</dt>
@@ -145,8 +149,13 @@
 		</div>
 		<label>
 			<span>Edited arguments</span>
-			<textarea value={editedArgumentsText} disabled={!isPending} oninput={updateEditedArguments}
-			></textarea>
+			<Textarea
+				id="approval-edited-args-{approval.approvalId}"
+				value={editedArgumentsText}
+				disabled={!isPending}
+				oninput={updateEditedArguments}
+				rows={8}
+			/>
 		</label>
 	</section>
 
@@ -159,9 +168,15 @@
 
 	<label class="reason">
 		<span>Reason</span>
-		<textarea bind:value={reason} disabled={!isPending}></textarea>
+		<Textarea
+			id="approval-reason-{approval.approvalId}"
+			bind:value={reason}
+			disabled={!isPending}
+			rows={3}
+		/>
 	</label>
 
+	<!-- Raw <input type="checkbox"> preserved: Cinder has no Checkbox component. -->
 	<label class="remember">
 		<input type="checkbox" bind:checked={remember} disabled={!isPending} />
 		<span>Remember this approval boundary</span>
@@ -172,25 +187,36 @@
 	{/if}
 
 	<footer class="actions">
-		<button type="button" disabled={!isPending || isResolving} onclick={() => resolve('approve')}>
-			Approve
-		</button>
-		<button
-			type="button"
+		<Button
+			label="Approve"
+			variant="primary"
+			disabled={!isPending || isResolving}
+			onclick={() => resolve('approve')}
+		/>
+		<Button
+			label="Approve with edits"
+			variant="secondary"
 			disabled={!isPending || isResolving}
 			onclick={() => resolve('approve_with_edits')}
-		>
-			Approve with edits
-		</button>
-		<button type="button" disabled={!isPending || isResolving} onclick={() => resolve('deny')}>
-			Deny
-		</button>
-		<button type="button" disabled={!isPending || isResolving} onclick={() => resolve('remember')}>
-			Remember
-		</button>
-		<button type="button" disabled={!isPending || isResolving} onclick={() => resolve('cancel')}>
-			Cancel run
-		</button>
+		/>
+		<Button
+			label="Deny"
+			variant="danger"
+			disabled={!isPending || isResolving}
+			onclick={() => resolve('deny')}
+		/>
+		<Button
+			label="Remember"
+			variant="secondary"
+			disabled={!isPending || isResolving}
+			onclick={() => resolve('remember')}
+		/>
+		<Button
+			label="Cancel run"
+			variant="ghost-danger"
+			disabled={!isPending || isResolving}
+			onclick={() => resolve('cancel')}
+		/>
 	</footer>
 </article>
 
@@ -268,8 +294,7 @@
 		gap: 1rem;
 	}
 
-	pre,
-	textarea {
+	pre {
 		box-sizing: border-box;
 		width: 100%;
 		min-height: 12rem;
@@ -289,36 +314,10 @@
 		overflow: auto;
 	}
 
-	.reason textarea {
-		min-height: 4.5rem;
-		font-family: inherit;
-	}
-
 	.remember {
 		display: flex;
 		gap: 0.5rem;
 		align-items: center;
-	}
-
-	.actions button {
-		min-height: 2.25rem;
-		padding: 0 0.75rem;
-		border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
-		border-radius: 6px;
-		background: Canvas;
-		color: inherit;
-		font: inherit;
-		font-weight: 650;
-	}
-
-	.actions button:first-child {
-		background: CanvasText;
-		color: Canvas;
-	}
-
-	.actions button:disabled {
-		cursor: not-allowed;
-		opacity: 0.55;
 	}
 
 	.error {

@@ -111,7 +111,8 @@ describe('SessionList', () => {
 
 		const input = getByLabel('Search sessions') as HTMLInputElement;
 		input.value = 'project';
-		input.dispatchEvent(new Event('input'));
+		// Svelte 5 delegates oninput to the document — bubbles:true is required.
+		input.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
 
 		expect(document.body.textContent).toContain('project-alpha');
@@ -131,7 +132,8 @@ describe('SessionList', () => {
 
 		const input = getByLabel('Search sessions') as HTMLInputElement;
 		input.value = 'zzz';
-		input.dispatchEvent(new Event('input'));
+		// Svelte 5 delegates oninput to the document — bubbles:true is required.
+		input.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
 
 		expect(document.body.textContent).toMatch(/No sessions match/);

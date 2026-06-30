@@ -2,6 +2,8 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import NavigationBar from '@lostgradient/cinder/navigation-bar';
+	import NavigationItem from '@lostgradient/cinder/navigation-item';
 	import SessionList, { type SessionRow } from '$lib/components/SessionList.svelte';
 	import Composer from '$lib/components/Composer.svelte';
 
@@ -102,12 +104,14 @@
 </svelte:head>
 
 <div class="home" aria-label="Stardust home">
-	<header class="home-header">
-		<span class="brand-name">Stardust</span>
-		<nav class="home-nav">
-			<a href={resolve('/ops')} class="nav-link">Operator Console</a>
-		</nav>
-	</header>
+	<NavigationBar label="Stardust navigation">
+		{#snippet brand()}
+			<span class="brand-name">Stardust</span>
+		{/snippet}
+		{#snippet items()}
+			<NavigationItem href={resolve('/ops')}>Operator Console</NavigationItem>
+		{/snippet}
+	</NavigationBar>
 
 	<main class="home-main">
 		{#if loading}
@@ -166,36 +170,11 @@
 		overflow: hidden;
 	}
 
-	.home-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 14px 24px;
-		border-bottom: 1px solid #d7dde2;
-		background: #ffffff;
-	}
-
 	.brand-name {
 		font-size: 1.1rem;
 		font-weight: 900;
 		color: #174c77;
 		letter-spacing: -0.02em;
-	}
-
-	.home-nav {
-		display: flex;
-		gap: 16px;
-	}
-
-	.nav-link {
-		color: #5e6f80;
-		text-decoration: none;
-		font-size: 0.875rem;
-		font-weight: 600;
-	}
-
-	.nav-link:hover {
-		color: #174c77;
 	}
 
 	.home-main {

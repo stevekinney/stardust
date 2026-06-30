@@ -1,4 +1,6 @@
 <script lang="ts">
+	import Button from '@lostgradient/cinder/button';
+	import EmptyState from '@lostgradient/cinder/empty-state';
 	import type { MemoryCandidate, MemoryNote } from '$lib/server/memory/memory-store';
 
 	type Props = {
@@ -32,7 +34,11 @@
 	<h2 id="memory-panel-heading">Memory</h2>
 
 	{#if isEmpty}
-		<p class="empty muted">No memory notes or candidates for this session.</p>
+		<EmptyState
+			title="No memory notes"
+			description="No memory notes or candidates for this session."
+			headingLevel={3}
+		/>
 	{:else}
 		{#if sessionNotes.length > 0}
 			<div class="layer-section" data-layer="session">
@@ -133,27 +139,24 @@
 								</div>
 							{/if}
 							<div class="candidate-actions">
-								<button
-									type="button"
-									class="approve-btn"
+								<Button
+									label="Approve"
+									size="sm"
+									variant="secondary"
 									onclick={() => onApproveCandidate?.(candidate.id)}
-								>
-									Approve
-								</button>
-								<button
-									type="button"
-									class="edit-btn"
+								/>
+								<Button
+									label="Edit"
+									size="sm"
+									variant="secondary"
 									onclick={() => onEditCandidate?.(candidate.id)}
-								>
-									Edit
-								</button>
-								<button
-									type="button"
-									class="discard-btn"
+								/>
+								<Button
+									label="Discard"
+									size="sm"
+									variant="ghost-danger"
 									onclick={() => onDiscardCandidate?.(candidate.id)}
-								>
-									Discard
-								</button>
+								/>
 							</div>
 						</li>
 					{/each}
@@ -275,37 +278,5 @@
 		flex-wrap: wrap;
 		gap: 0.4rem;
 		margin-top: 0.5rem;
-	}
-
-	button {
-		min-height: 1.75rem;
-		padding: 0 0.6rem;
-		border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
-		border-radius: 5px;
-		background: Canvas;
-		color: inherit;
-		font: inherit;
-		font-size: 0.8rem;
-		font-weight: 650;
-		cursor: pointer;
-	}
-
-	.approve-btn {
-		border-color: #17603a;
-		color: #17603a;
-	}
-
-	.discard-btn {
-		border-color: #9b2c2c;
-		color: #9b2c2c;
-	}
-
-	.empty {
-		margin: 0;
-		font-size: 0.9rem;
-	}
-
-	.muted {
-		color: color-mix(in srgb, CanvasText 55%, transparent);
 	}
 </style>

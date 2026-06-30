@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Button from '@lostgradient/cinder/button';
 	import Drawer from '@lostgradient/cinder/drawer';
 	import type { RunInspectorProjection } from '$lib/server/observability/projection';
 
@@ -82,9 +83,10 @@
 			{#if run.model}
 				<span class="model-badge">{run.model}</span>
 			{/if}
-			<button
-				type="button"
-				class="temporal-link"
+			<Button
+				label="Temporal Web ↗"
+				variant="secondary"
+				size="sm"
 				data-temporal-web
 				onclick={() => {
 					if (onTemporalWeb) {
@@ -93,13 +95,13 @@
 						window.open(temporalWebUrl, '_blank', 'noreferrer');
 					}
 				}}
-			>
-				Temporal Web ↗
-			</button>
+			/>
 		</div>
 	</div>
 
 	{#if run.startedAt}
+		<!-- Raw <dl> preserved: DescriptionList only supports plain string definitions;
+		     run metadata entries require formatted timestamp/duration values not supported as snippets. -->
 		<dl class="run-meta">
 			<div>
 				<dt>Started</dt>
@@ -118,6 +120,10 @@
 		</dl>
 	{/if}
 
+	<!-- Raw <details> preserved: Cinder Collapsible renders an <aside> and changes
+	     focus/toggle behavior. The action-meter uses <details open> which Collapsible
+	     does not support as a stable prop. No upstream issue filed — raw <details> is
+	     correct here: this is a simple expand/collapse for a <dl>, not an interactive card. -->
 	<details class="action-meter" open>
 		<summary>Action Meter</summary>
 		<dl class="breakdown">
@@ -235,14 +241,13 @@
 									: JSON.stringify(event.payload, null, 2)}</pre>
 						{/if}
 						{#if engineerView}
-							<button
-								type="button"
-								class="raw-event-btn"
+							<Button
+								label="Raw event ↗"
+								variant="ghost"
+								size="xs"
 								data-raw-event
 								onclick={() => openRawEvent(event)}
-							>
-								Raw event ↗
-							</button>
+							/>
 						{/if}
 					</li>
 				{/each}
@@ -350,17 +355,6 @@
 		background: color-mix(in srgb, CanvasText 7%, transparent);
 		font-size: 0.75rem;
 		font-family: ui-monospace, monospace;
-	}
-
-	.temporal-link {
-		padding: 0.2rem 0.6rem;
-		border: 1px solid currentcolor;
-		border-radius: 6px;
-		color: #174c77;
-		font-size: 0.8rem;
-		font-weight: 700;
-		text-decoration: none;
-		white-space: nowrap;
 	}
 
 	.run-meta {
@@ -661,22 +655,6 @@
 
 	.eng-kind-marker[data-eng-kind='lifecycle'] {
 		color: #6b7280;
-	}
-
-	.raw-event-btn {
-		margin-top: 0.35rem;
-		padding: 0.1rem 0.4rem;
-		border: 1px solid #7c3aed;
-		border-radius: 4px;
-		color: #7c3aed;
-		font-size: 0.7rem;
-		font-weight: 600;
-		background: transparent;
-		cursor: pointer;
-	}
-
-	.raw-event-btn:hover {
-		background: color-mix(in srgb, #7c3aed 8%, transparent);
 	}
 
 	.raw-event-content {
