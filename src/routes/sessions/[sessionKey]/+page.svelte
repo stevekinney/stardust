@@ -4,6 +4,9 @@
 	import { resolve } from '$app/paths';
 	import ConversationView, { type StreamEvent } from '$lib/components/ConversationView.svelte';
 	import Composer from '$lib/components/Composer.svelte';
+	import RunTimeline from '$lib/components/RunTimeline.svelte';
+	import type { RunInspectorProjection } from '$lib/server/observability/projection';
+	import { viewMode } from '$lib/view-mode.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -14,6 +17,8 @@
 	let events = $state<StreamEvent[]>([]);
 	let currentUserMessage = $state<string | null>(null);
 	let errorMessage = $state<string | null>(null);
+	let inspector = $state.raw<RunInspectorProjection | null>(null);
+	let inspectorOpen = $state(true);
 
 	let abortController: AbortController | null = null;
 
@@ -22,7 +27,7 @@
 			void goto(resolve(`/sessions/${encodeURIComponent(sessionKey)}`), { replaceState: true });
 			void handleSubmit(data.startMessage);
 		} else {
-			void loadTranscript();
+			void loadTranscript().then(() => loadLatestRunInspector());
 		}
 	});
 
@@ -131,6 +136,7 @@
 		} finally {
 			running = false;
 			abortController = null;
+			void loadLatestRunInspector();
 		}
 	}
 
@@ -189,6 +195,30 @@
 		events = [...events, { id: id ?? events.length, kind, payload: data }];
 	}
 
+	async function loadLatestRunInspector() {
+		try {
+			const runsResponse = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/runs`);
+			if (!runsResponse.ok) return;
+			const runsBody = (await runsResponse.json()) as {
+				runs: Array<{ id: string; createdAt: string }>;
+			};
+			if (runsBody.runs.length === 0) return;
+
+			const sorted = [...runsBody.runs].sort(
+				(a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+			);
+			const latestRunId = sorted[0].id;
+
+			const inspectorResponse = await fetch(
+				`/api/sessions/${encodeURIComponent(sessionKey)}/runs/${encodeURIComponent(latestRunId)}/inspector`
+			);
+			if (!inspectorResponse.ok) return;
+			inspector = (await inspectorResponse.json()) as RunInspectorProjection;
+		} catch {
+			// Non-fatal
+		}
+	}
+
 	async function handleSteer(message: string) {
 		await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/steer`, {
 			method: 'POST',
@@ -222,25 +252,66 @@
 		</div>
 	{/if}
 
-	<div class="conversation-pane">
-		<div class="stream-area" aria-label="Message stream" aria-live="polite">
-			<ConversationView
-				userMessage={currentUserMessage ? { text: currentUserMessage } : null}
-				{events}
-				{running}
-				onRetry={currentUserMessage ? () => handleSubmit(currentUserMessage!) : null}
-			/>
+	<div class="split-surface">
+		<div class="conversation-pane">
+			<div class="stream-area" aria-label="Message stream" aria-live="polite">
+				<ConversationView
+					userMessage={currentUserMessage ? { text: currentUserMessage } : null}
+					{events}
+					{running}
+					onRetry={currentUserMessage ? () => handleSubmit(currentUserMessage!) : null}
+				/>
+			</div>
+
+			<div class="composer-area">
+				<Composer
+					{running}
+					onSubmit={handleSubmit}
+					onSteer={handleSteer}
+					onInterrupt={handleInterrupt}
+				/>
+			</div>
 		</div>
 
-		<div class="composer-area">
-			<Composer
-				{running}
-				onSubmit={handleSubmit}
-				onSteer={handleSteer}
-				onInterrupt={handleInterrupt}
-			/>
-		</div>
+		{#if inspector && inspectorOpen}
+			<aside class="inspector-pane" aria-label="Run inspector">
+				<div class="inspector-header">
+					<h2 class="inspector-title">Run Inspector</h2>
+					<button
+						type="button"
+						class="inspector-close"
+						aria-label="Close inspector"
+						onclick={() => (inspectorOpen = false)}>✕</button
+					>
+				</div>
+				<div class="inspector-body">
+					<RunTimeline projection={inspector} engineerView={viewMode.mode === 'engineer'} />
+				</div>
+			</aside>
+		{/if}
 	</div>
+
+	{#if inspector && !inspectorOpen}
+		<button
+			type="button"
+			class="inspector-toggle"
+			aria-label="Open inspector"
+			onclick={() => (inspectorOpen = true)}
+		>
+			<svg
+				width="16"
+				height="16"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+			>
+				<path d="M9 18l-6-6 6-6" /><path d="M21 12H3" />
+			</svg>
+		</button>
+	{/if}
 </div>
 
 <style>
@@ -249,6 +320,7 @@
 		flex-direction: column;
 		height: 100%;
 		overflow: hidden;
+		position: relative;
 	}
 
 	.error-banner {
@@ -260,10 +332,17 @@
 		flex: none;
 	}
 
+	.split-surface {
+		display: flex;
+		flex: 1;
+		overflow: hidden;
+	}
+
 	.conversation-pane {
 		display: flex;
 		flex-direction: column;
 		flex: 1;
+		min-width: 0;
 		overflow: hidden;
 	}
 
@@ -277,5 +356,80 @@
 		flex: none;
 		border-top: 1px solid var(--cinder-border);
 		background: var(--cinder-surface);
+	}
+
+	.inspector-pane {
+		width: 420px;
+		flex: none;
+		display: flex;
+		flex-direction: column;
+		border-left: 1px solid var(--cinder-border);
+		background: var(--cinder-surface);
+		overflow: hidden;
+	}
+
+	.inspector-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 10px 14px;
+		border-bottom: 1px solid var(--cinder-border-muted);
+		flex: none;
+	}
+
+	.inspector-title {
+		margin: 0;
+		font-size: var(--cinder-text-sm);
+		font-weight: 700;
+		color: var(--cinder-text);
+	}
+
+	.inspector-close {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		border: none;
+		border-radius: var(--cinder-radius-sm);
+		background: transparent;
+		color: var(--cinder-text-subtle);
+		cursor: pointer;
+		font-size: var(--cinder-text-sm);
+	}
+
+	.inspector-close:hover {
+		background: var(--cinder-surface-hover);
+		color: var(--cinder-text);
+	}
+
+	.inspector-body {
+		flex: 1;
+		overflow-y: auto;
+		scrollbar-width: thin;
+		scrollbar-color: var(--cinder-scrollbar-thumb) var(--cinder-scrollbar-track);
+	}
+
+	.inspector-toggle {
+		position: absolute;
+		right: 0;
+		top: 50%;
+		transform: translateY(-50%);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 28px;
+		height: 48px;
+		border: 1px solid var(--cinder-border);
+		border-right: none;
+		border-radius: var(--cinder-radius-md) 0 0 var(--cinder-radius-md);
+		background: var(--cinder-surface);
+		color: var(--cinder-text-subtle);
+		cursor: pointer;
+	}
+
+	.inspector-toggle:hover {
+		background: var(--cinder-surface-hover);
+		color: var(--cinder-text);
 	}
 </style>
