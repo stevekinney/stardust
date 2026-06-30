@@ -8,6 +8,7 @@
 	import SearchField from '@lostgradient/cinder/search-field';
 	import SegmentedControl from '@lostgradient/cinder/segmented-control';
 	import Segment from '@lostgradient/cinder/segment';
+	import DurabilityRibbon from '$lib/components/DurabilityRibbon.svelte';
 	import Settings from '$lib/components/Settings.svelte';
 	import { viewMode } from '$lib/view-mode.svelte';
 	import type { SessionRow } from '$lib/components/SessionList.svelte';
@@ -180,6 +181,8 @@
 			</svg>
 		</button>
 	</header>
+
+	<DurabilityRibbon />
 
 	<div class="body">
 		<!-- Left rail -->
