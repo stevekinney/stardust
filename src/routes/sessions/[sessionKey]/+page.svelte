@@ -2,8 +2,10 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import Button from '@lostgradient/cinder/button';
 	import ConversationView, { type StreamEvent } from '$lib/components/ConversationView.svelte';
 	import Composer from '$lib/components/Composer.svelte';
+	import DurabilityRibbon from '$lib/components/DurabilityRibbon.svelte';
 	import RunTimeline from '$lib/components/RunTimeline.svelte';
 	import type { RunInspectorProjection } from '$lib/server/observability/projection';
 	import { viewMode } from '$lib/view-mode.svelte';
@@ -254,6 +256,28 @@
 
 	<div class="split-surface">
 		<div class="conversation-pane">
+			<div class="pane-header">
+				<!-- lucide messages-square -->
+				<svg
+					class="pane-icon"
+					width="16"
+					height="16"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+				>
+					<path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z" />
+					<path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" />
+				</svg>
+				<span class="pane-title">Conversation</span>
+				<span class="spacer"></span>
+				{#if events.length > 0}
+					<span class="pane-meta">{events.length} events</span>
+				{/if}
+			</div>
 			<div class="stream-area" aria-label="Message stream" aria-live="polite">
 				<ConversationView
 					userMessage={currentUserMessage ? { text: currentUserMessage } : null}
@@ -276,16 +300,89 @@
 		{#if inspector && inspectorOpen}
 			<aside class="inspector-pane" aria-label="Run inspector">
 				<div class="inspector-header">
-					<h2 class="inspector-title">Run Inspector</h2>
+					<!-- lucide activity -->
+					<svg
+						class="pane-icon"
+						width="16"
+						height="16"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					>
+						<path
+							d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"
+						/>
+					</svg>
+					<span class="pane-title">Run inspector</span>
+					<span class="spacer"></span>
+					<span class="inspector-chip">wf_{sessionKey.slice(0, 4)}</span>
 					<button
 						type="button"
-						class="inspector-close"
-						aria-label="Close inspector"
-						onclick={() => (inspectorOpen = false)}>✕</button
+						class="icon-btn"
+						aria-label="Maximize inspector"
+						onclick={() => (inspectorOpen = false)}
 					>
+						<!-- lucide maximize-2 -->
+						<svg
+							width="15"
+							height="15"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						>
+							<polyline points="15 3 21 3 21 9" />
+							<polyline points="9 21 3 21 3 15" />
+							<line x1="21" y1="3" x2="14" y2="10" />
+							<line x1="3" y1="21" x2="10" y2="14" />
+						</svg>
+					</button>
 				</div>
+
+				<DurabilityRibbon />
+
+				<div class="inspector-chips">
+					<span class="chip">activity agentSession</span>
+					<span class="chip">queue agent-main</span>
+					<span class="chip">attempt 1</span>
+				</div>
+
 				<div class="inspector-body">
 					<RunTimeline projection={inspector} engineerView={viewMode.mode === 'engineer'} />
+				</div>
+
+				<div class="inspector-status-bar">
+					{#if running}
+						<span class="status-dot dot-live"></span>
+						<span class="status-text">Streaming live · steer or interrupt anytime</span>
+						<span class="spacer"></span>
+						<Button variant="danger" size="sm" onclick={handleInterrupt}>
+							<span class="btn-content">
+								<!-- lucide square -->
+								<svg
+									width="13"
+									height="13"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								>
+									<rect x="3" y="3" width="18" height="18" rx="2" />
+								</svg>
+								Interrupt
+							</span>
+						</Button>
+					{:else}
+						<span class="status-dot dot-idle"></span>
+						<span class="status-text">Idle</span>
+					{/if}
 				</div>
 			</aside>
 		{/if}
@@ -298,6 +395,7 @@
 			aria-label="Open inspector"
 			onclick={() => (inspectorOpen = true)}
 		>
+			<!-- lucide chevron-left -->
 			<svg
 				width="16"
 				height="16"
@@ -308,7 +406,7 @@
 				stroke-linecap="round"
 				stroke-linejoin="round"
 			>
-				<path d="M9 18l-6-6 6-6" /><path d="M21 12H3" />
+				<path d="m15 18-6-6 6-6" />
 			</svg>
 		</button>
 	{/if}
@@ -344,6 +442,39 @@
 		flex: 1;
 		min-width: 0;
 		overflow: hidden;
+		border-right: 1px solid var(--cinder-border);
+	}
+
+	.pane-header {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 10px 14px;
+		border-bottom: 1px solid var(--cinder-border-muted);
+		flex: none;
+	}
+
+	.pane-icon {
+		color: var(--cinder-text-subtle);
+		flex-shrink: 0;
+	}
+
+	.pane-title {
+		font: 600 13px system-ui;
+		color: var(--cinder-text);
+	}
+
+	.pane-meta {
+		font: 500 11px system-ui;
+		font-family: var(--cinder-font-mono);
+		color: var(--cinder-text-subtle);
+		padding: 2px 8px;
+		background: var(--cinder-surface-inset);
+		border-radius: var(--cinder-radius-sm);
+	}
+
+	.spacer {
+		flex: 1;
 	}
 
 	.stream-area {
@@ -359,11 +490,10 @@
 	}
 
 	.inspector-pane {
-		width: 420px;
+		width: 556px;
 		flex: none;
 		display: flex;
 		flex-direction: column;
-		border-left: 1px solid var(--cinder-border);
 		background: var(--cinder-surface);
 		overflow: hidden;
 	}
@@ -371,43 +501,110 @@
 	.inspector-header {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
+		gap: 8px;
 		padding: 10px 14px;
 		border-bottom: 1px solid var(--cinder-border-muted);
 		flex: none;
 	}
 
-	.inspector-title {
-		margin: 0;
-		font-size: var(--cinder-text-sm);
-		font-weight: 700;
-		color: var(--cinder-text);
+	.inspector-chip {
+		font: 500 11px system-ui;
+		font-family: var(--cinder-font-mono);
+		color: var(--cinder-text-subtle);
+		padding: 2px 8px;
+		background: var(--cinder-surface-inset);
+		border-radius: var(--cinder-radius-sm);
 	}
 
-	.inspector-close {
+	.icon-btn {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 24px;
-		height: 24px;
+		width: 28px;
+		height: 28px;
 		border: none;
 		border-radius: var(--cinder-radius-sm);
 		background: transparent;
 		color: var(--cinder-text-subtle);
 		cursor: pointer;
-		font-size: var(--cinder-text-sm);
 	}
 
-	.inspector-close:hover {
+	.icon-btn:hover {
 		background: var(--cinder-surface-hover);
 		color: var(--cinder-text);
+	}
+
+	.inspector-chips {
+		display: flex;
+		gap: 6px;
+		flex-wrap: wrap;
+		padding: 8px 14px;
+		border-bottom: 1px solid var(--cinder-border-muted);
+		flex: none;
+	}
+
+	.chip {
+		font: 500 11px system-ui;
+		font-family: var(--cinder-font-mono);
+		color: var(--cinder-text-subtle);
+		padding: 3px 8px;
+		background: var(--cinder-surface-inset);
+		border: 1px solid var(--cinder-border-muted);
+		border-radius: var(--cinder-radius-sm);
 	}
 
 	.inspector-body {
 		flex: 1;
 		overflow-y: auto;
+		padding: 16px 14px;
 		scrollbar-width: thin;
 		scrollbar-color: var(--cinder-scrollbar-thumb) var(--cinder-scrollbar-track);
+	}
+
+	.inspector-status-bar {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 10px 14px;
+		border-top: 1px solid var(--cinder-border);
+		flex: none;
+	}
+
+	.status-dot {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		flex-shrink: 0;
+	}
+
+	.dot-live {
+		background: var(--cinder-info);
+		animation: pulse 2s ease-in-out infinite;
+	}
+
+	.dot-idle {
+		background: var(--cinder-text-disabled);
+	}
+
+	@keyframes pulse {
+		0%,
+		100% {
+			opacity: 1;
+		}
+		50% {
+			opacity: 0.4;
+		}
+	}
+
+	.status-text {
+		font: 500 11.5px system-ui;
+		color: var(--cinder-text-subtle);
+	}
+
+	.btn-content {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
 	}
 
 	.inspector-toggle {
@@ -435,7 +632,7 @@
 
 	@media (max-width: 1024px) {
 		.inspector-pane {
-			width: 320px;
+			width: 360px;
 		}
 	}
 

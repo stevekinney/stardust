@@ -2,80 +2,49 @@
 	import { onMount } from 'svelte';
 
 	type DurabilityStats = {
-		activeSessions: number;
-		totalRuns: number;
-		eventsProcessed: number;
+		eventsLost: number;
 		autoRetries: number;
-		workerStatus: 'healthy' | 'degraded' | 'down';
+		workerCrashes: number;
 		lastDurableEvent: string | null;
 	};
 
 	let stats = $state<DurabilityStats>({
-		activeSessions: 0,
-		totalRuns: 0,
-		eventsProcessed: 0,
+		eventsLost: 0,
 		autoRetries: 0,
-		workerStatus: 'healthy',
+		workerCrashes: 0,
 		lastDurableEvent: null
 	});
 
-	let temporalReachable = $state(true);
-
 	async function pollStats() {
 		try {
-			const sessionsResponse = await fetch('/api/sessions');
-			if (sessionsResponse.ok) {
-				const body = (await sessionsResponse.json()) as {
-					sessions: Array<{
-						status: string;
-						archivedAt: string | null;
-						updatedAt: string;
-					}>;
+			const response = await fetch('/api/sessions');
+			if (response.ok) {
+				const body = (await response.json()) as {
+					sessions: Array<{ updatedAt: string; archivedAt: string | null }>;
 				};
 				const active = body.sessions.filter((s) => !s.archivedAt);
-				const running = active.filter((s) =>
-					['running', 'streaming', 'loading', 'waiting_approval'].includes(s.status)
-				);
-
 				const latestUpdate = active.reduce<string | null>((latest, s) => {
 					if (!latest) return s.updatedAt;
 					return new Date(s.updatedAt) > new Date(latest) ? s.updatedAt : latest;
 				}, null);
 
 				stats = {
-					activeSessions: running.length,
-					totalRuns: active.length,
-					eventsProcessed: stats.eventsProcessed,
+					eventsLost: 0,
 					autoRetries: stats.autoRetries,
-					workerStatus: temporalReachable ? 'healthy' : 'degraded',
+					workerCrashes: 0,
 					lastDurableEvent: latestUpdate
 				};
 			}
 		} catch {
-			temporalReachable = false;
-			stats = { ...stats, workerStatus: 'down' };
+			// Non-fatal
 		}
 	}
 
-	function formatTimestamp(iso: string | null): string {
+	function formatEventId(iso: string | null): string {
 		if (!iso) return '—';
 		const date = new Date(iso);
-		const now = Date.now();
-		const seconds = Math.floor((now - date.getTime()) / 1000);
-		if (seconds < 60) return `${seconds}s ago`;
-		const minutes = Math.floor(seconds / 60);
-		if (minutes < 60) return `${minutes}m ago`;
-		const hours = Math.floor(minutes / 60);
-		return `${hours}h ago`;
+		return `#${Math.floor(date.getTime() / 1000) % 1000}`;
 	}
-
-	const statusColor = $derived(
-		stats.workerStatus === 'healthy'
-			? 'var(--cinder-success)'
-			: stats.workerStatus === 'degraded'
-				? 'var(--cinder-warning)'
-				: 'var(--cinder-danger)'
-	);
 
 	onMount(() => {
 		void pollStats();
@@ -85,84 +54,63 @@
 </script>
 
 <div class="ribbon" role="status" aria-label="Durability status">
-	<div class="ribbon-stat">
-		<span class="stat-label">Active</span>
-		<span class="stat-value">{stats.activeSessions}</span>
+	<div class="rib">
+		<span class="rib-n">{stats.eventsLost}</span>
+		<span class="rib-l">events lost</span>
 	</div>
-
-	<span class="ribbon-sep" aria-hidden="true"></span>
-
-	<div class="ribbon-stat">
-		<span class="stat-label">Sessions</span>
-		<span class="stat-value">{stats.totalRuns}</span>
+	<div class="rib">
+		<span class="rib-n rib-success">{stats.autoRetries}</span>
+		<span class="rib-l">auto-retry · no action</span>
 	</div>
-
-	<span class="ribbon-sep" aria-hidden="true"></span>
-
-	<div class="ribbon-stat">
-		<span class="stat-label">Worker</span>
-		<span class="stat-value">
-			<span class="worker-dot" style:background={statusColor}></span>
-			<span class="worker-label">{stats.workerStatus}</span>
-		</span>
+	<div class="rib">
+		<span class="rib-n">{stats.workerCrashes}</span>
+		<span class="rib-l">worker crashes</span>
 	</div>
-
-	<span class="ribbon-sep" aria-hidden="true"></span>
-
-	<div class="ribbon-stat">
-		<span class="stat-label">Last Event</span>
-		<span class="stat-value">{formatTimestamp(stats.lastDurableEvent)}</span>
+	<div class="rib">
+		<span class="rib-n rib-accent">{formatEventId(stats.lastDurableEvent)}</span>
+		<span class="rib-l">last durable event</span>
 	</div>
 </div>
 
 <style>
 	.ribbon {
 		display: flex;
-		align-items: center;
-		gap: 16px;
-		height: 28px;
-		padding: 0 14px;
 		border-bottom: 1px solid var(--cinder-border-muted);
-		background: var(--cinder-surface-inset);
-		font-size: var(--cinder-text-xs);
+		background: linear-gradient(180deg, var(--cinder-surface-inset) 0%, var(--cinder-surface) 100%);
 		flex: none;
 	}
 
-	.ribbon-stat {
+	.rib {
+		flex: 1;
 		display: flex;
+		flex-direction: column;
 		align-items: center;
-		gap: 6px;
+		gap: 2px;
+		padding: 10px 8px;
 	}
 
-	.stat-label {
-		color: var(--cinder-text-disabled);
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		font-weight: 600;
+	.rib + .rib {
+		border-left: 1px solid var(--cinder-border-muted);
 	}
 
-	.stat-value {
-		color: var(--cinder-text-subtle);
+	.rib-n {
+		font: 700 17px system-ui;
+		color: var(--cinder-text);
 		font-family: var(--cinder-font-mono);
-		display: flex;
-		align-items: center;
-		gap: 4px;
 	}
 
-	.ribbon-sep {
-		width: 1px;
-		height: 14px;
-		background: var(--cinder-border-muted);
+	.rib-success {
+		color: var(--cinder-success);
 	}
 
-	.worker-dot {
-		width: 6px;
-		height: 6px;
-		border-radius: 50%;
-		flex-shrink: 0;
+	.rib-accent {
+		color: var(--cinder-accent-text);
 	}
 
-	.worker-label {
-		text-transform: capitalize;
+	.rib-l {
+		font: 400 9.5px system-ui;
+		color: var(--cinder-text-subtle);
+		text-align: center;
+		white-space: nowrap;
 	}
 </style>
