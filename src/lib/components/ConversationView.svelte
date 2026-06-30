@@ -49,6 +49,7 @@
 		const subagents = new SvelteMap<string, SubagentState>();
 		const lifecycleEvents: Array<{ status: string }> = [];
 		let terminalStatus: 'complete' | 'failed' | 'cancelled' | null = null;
+		let failureReason: string | null = null;
 		const approvalRequests: Array<{ approvalId: string; toolName: string }> = [];
 		const memoryCandidates: Array<{ content: string }> = [];
 
@@ -104,6 +105,9 @@
 					) {
 						terminalStatus = lifecycleStatus as 'complete' | 'failed' | 'cancelled';
 					}
+					if (lifecycleStatus === 'failed' && typeof payload.reason === 'string') {
+						failureReason = payload.reason;
+					}
 					break;
 				}
 
@@ -149,6 +153,7 @@
 			subagents: Array.from(subagents.values()),
 			lifecycleEvents,
 			terminalStatus,
+			failureReason,
 			approvalRequests,
 			memoryCandidates
 		};
@@ -279,9 +284,15 @@
 		>
 			<span class="run-failure-icon">{renderModel.terminalStatus === 'failed' ? '✗' : '⊘'}</span>
 			<span class="run-failure-message">
-				{renderModel.terminalStatus === 'failed'
-					? 'This run failed. See the error above for details.'
-					: 'This run was cancelled.'}
+				{#if renderModel.terminalStatus === 'failed'}
+					{#if renderModel.failureReason}
+						<span class="run-failure-reason">{renderModel.failureReason}</span>
+					{:else}
+						This run failed.
+					{/if}
+				{:else}
+					This run was cancelled.
+				{/if}
 			</span>
 			{#if onRetry}
 				<button class="run-failure-retry" onclick={onRetry} type="button">Retry</button>
@@ -524,6 +535,11 @@
 
 	.run-failure-message {
 		flex: 1;
+	}
+
+	.run-failure-reason {
+		display: block;
+		word-break: break-word;
 	}
 
 	.run-failure-retry {
