@@ -652,14 +652,19 @@
 	@media (max-width: 1024px) {
 		.rail {
 			width: 56px;
+			overflow: hidden;
 		}
 
 		.rail-top {
-			padding: 8px;
+			display: none;
 		}
 
 		.rail-sessions {
-			padding: 0 4px;
+			padding: 4px;
+		}
+
+		.rail-message {
+			display: none;
 		}
 
 		.session-card {
@@ -673,7 +678,6 @@
 
 		.card-label,
 		.card-meta,
-		.rail-top :global(.cinder-search-field),
 		.rail-nav-item span,
 		.rail-footer span:not(.temporal-dot) {
 			display: none;
@@ -733,9 +737,16 @@
 		}
 
 		/* Restore full rail content when open on phone */
+		.rail.rail-open .rail-top {
+			display: flex;
+		}
+
+		.rail.rail-open .rail-message {
+			display: block;
+		}
+
 		.rail.rail-open .card-label,
 		.rail.rail-open .card-meta,
-		.rail.rail-open :global(.cinder-search-field),
 		.rail.rail-open .rail-nav-item span,
 		.rail.rail-open .rail-footer span:not(.temporal-dot) {
 			display: revert;
