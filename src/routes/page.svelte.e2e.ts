@@ -41,10 +41,7 @@ test('home page shows welcome screen when there are no sessions', async ({ page 
 
 	await page.getByRole('button', { name: 'Temporal UI' }).click();
 	await expect(page.getByRole('region', { name: 'Temporal UI' })).toBeVisible();
-	await expect(page.locator('iframe[title="Temporal UI"]')).toHaveAttribute(
-		'src',
-		'http://localhost:7778'
-	);
+	await expect(page.locator('iframe[title="Temporal UI"]')).toHaveAttribute('src', '/temporal-ui');
 
 	await page.getByRole('button', { name: 'Close Temporal UI' }).click();
 	await expect(page.getByRole('region', { name: 'Temporal UI' })).toHaveCount(0);

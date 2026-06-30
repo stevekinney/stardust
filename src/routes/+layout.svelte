@@ -17,7 +17,8 @@
 	let railOpen = $state(false);
 	let temporalUiOpen = $state(false);
 
-	const TEMPORAL_UI_URL = 'http://localhost:7778';
+	const TEMPORAL_UI_DISPLAY_URL = 'http://localhost:7778';
+	const TEMPORAL_UI_EMBED_URL = resolve('/temporal-ui');
 	const currentSessionKey = $derived($page.params.sessionKey ?? null);
 
 	const activeSessions = $derived(sessions.filter((s) => !s.archivedAt));
@@ -188,7 +189,7 @@
 			<div class="temporal-ui-bar">
 				<div>
 					<div class="temporal-ui-title">Temporal UI</div>
-					<div class="temporal-ui-url">{TEMPORAL_UI_URL}</div>
+					<div class="temporal-ui-url">{TEMPORAL_UI_DISPLAY_URL}</div>
 				</div>
 				<button
 					type="button"
@@ -211,7 +212,7 @@
 					</svg>
 				</button>
 			</div>
-			<iframe class="temporal-ui-frame" title="Temporal UI" src={TEMPORAL_UI_URL}></iframe>
+			<iframe class="temporal-ui-frame" title="Temporal UI" src={TEMPORAL_UI_EMBED_URL}></iframe>
 		</section>
 	{/if}
 
