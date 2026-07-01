@@ -101,3 +101,22 @@ You MUST use this tool whenever writing Svelte code before sending it to the use
 
 Generates a Svelte Playground link with the provided code.
 After completing the code, ask the user if they want a playground link. Only call this tool after user confirmation and NEVER if code was written to files in their project.
+
+## Preview Browser Is a Single Shared Resource
+
+The Claude Preview tool gives one session exactly one shared browser tab—every `preview_start` call returns a new `serverId`, but they all drive the same underlying tab. There is no way to get an independent tab per agent. Two agents (or the main thread plus a background agent) calling `preview_navigate` / `preview_eval` / `preview_screenshot` concurrently will yank the tab out from under each other, surfacing as `target closed while handling command` or `Server not found. No running servers for this workspace`—not a real outage, just contention.
+
+- **Background agents doing parallel code edits do not touch `preview_*` tools.** Verify their work with `bun run typecheck`, `bun run lint`, and `bun run test:unit`—deterministic, no shared resource, safe under concurrency.
+- **Live visual verification is single-owner.** Do it from the orchestrating thread in one consolidated pass after parallel edit-agents finish, not from N agents each independently poking the browser.
+- If an agent genuinely needs live visual verification mid-flight (a UX-focused task where source-level review isn't enough), gate it behind an atomic lock rather than skipping coordination entirely:
+  ```bash
+  # acquire (mkdir is atomic on POSIX—unlike a file-existence check)
+  mkdir /tmp/claude-preview-stardust.lock 2>/dev/null && echo acquired || echo busy
+  # if busy and the lock is older than 10 minutes, treat it as orphaned from a crashed agent and clear it
+  find /tmp/claude-preview-stardust.lock -maxdepth 0 -mmin +10 -exec rmdir {} \;
+  # release when done
+  rmdir /tmp/claude-preview-stardust.lock
+  ```
+  An agent that finds the lock held and not stale should skip browser verification, rely on typecheck/lint/test, and say so in its report rather than fighting for the tab.
+
+Do not treat repeated preview-tool failures during concurrent work as a broken dev server—check for other agents in flight before restarting or killing anything.
