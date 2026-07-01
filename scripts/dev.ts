@@ -27,7 +27,7 @@ import { join } from 'node:path';
 import { Connection } from '@temporalio/client';
 import { TEMPORAL_ADDRESS } from '../src/lib/server/config';
 
-const [preferredTemporalHost, preferredTemporalPortRaw] = TEMPORAL_ADDRESS.split(':');
+const [, preferredTemporalPortRaw] = TEMPORAL_ADDRESS.split(':');
 const preferredTemporalPort = Number(preferredTemporalPortRaw ?? 7776);
 const preferredUiPort = Number(process.env.TEMPORAL_WEB_PORT ?? 7778);
 const preferredAppPort = Number(process.env.APP_PORT ?? 7777);
@@ -149,7 +149,11 @@ async function main() {
 	} else {
 		const port = await reserveFreePort(preferredTemporalPort);
 		temporalUiPort = await reserveFreePort(preferredUiPort);
-		temporalAddress = `${preferredTemporalHost}:${port}`;
+		// The server we're about to start always binds locally, regardless of what
+		// host TEMPORAL_ADDRESS named (e.g. a Temporal Cloud endpoint that turned
+		// out to be unreachable) — reusing that host here would point the worker/web
+		// processes at a server that isn't actually there.
+		temporalAddress = `localhost:${port}`;
 		mkdirSync(join(homedir(), '.stardust'), { recursive: true });
 		console.log(
 			`[dev] Starting Temporal dev server on ${temporalAddress} (UI ${temporalUiPort}) ...`

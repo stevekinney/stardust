@@ -3,9 +3,10 @@
 	"configurations": [
 		{
 			"name": "web",
-			"runtimeExecutable": "bunx",
-			"runtimeArgs": ["vite", "dev"],
-			"port": 7777
+			"runtimeExecutable": "bun",
+			"runtimeArgs": ["run", "dev"],
+			"port": 7777,
+			"autoPort": true
 		}
 	]
 }
