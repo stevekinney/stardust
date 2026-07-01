@@ -1,11 +1,11 @@
 // Framework-agnostic server configuration — safe to import from Worker (no SvelteKit virtuals).
 
-export const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS ?? 'localhost:7776';
+export const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
 export const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE ?? 'default';
 export const DATABASE_URL = process.env.DATABASE_URL ?? 'file:~/.stardust/stardust.db';
 
 /** Port the Temporal Web UI is served on. */
-export const TEMPORAL_WEB_PORT = process.env.TEMPORAL_WEB_PORT ?? '7778';
+export const TEMPORAL_WEB_PORT = process.env.TEMPORAL_WEB_PORT ?? '8233';
 /** Base URL of the Temporal Web UI, used to build run-inspector deep links. */
 export const TEMPORAL_WEB_URL = `http://localhost:${TEMPORAL_WEB_PORT}`;
 

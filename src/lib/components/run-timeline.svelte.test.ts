@@ -55,7 +55,7 @@ const actionMeter: RunInspectorProjection['actionMeter'] = {
 
 const projection: RunInspectorProjection = {
 	run: baseRun,
-	temporalWebUrl: 'http://localhost:7778/namespaces/default/workflows/agent-run%3Arun-001/history',
+	temporalWebUrl: 'http://localhost:8233/namespaces/default/workflows/agent-run%3Arun-001/history',
 	taskQueue: TASK_QUEUE_ORCHESTRATOR,
 	taskQueues: [TASK_QUEUE_ORCHESTRATOR, 'tools-sandbox'],
 	actionMeter,

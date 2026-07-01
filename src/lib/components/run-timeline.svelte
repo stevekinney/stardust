@@ -1077,14 +1077,17 @@
 		color: var(--cinder-color-success-fg);
 	}
 
-	.json-token-number,
+	.json-token-number {
+		color: var(--cinder-color-warning-fg);
+	}
+
 	.json-token-boolean,
 	.json-token-null {
 		color: var(--cinder-color-info-fg);
 	}
 
 	.json-token-punctuation {
-		color: var(--cinder-text-subtle);
+		color: var(--cinder-text-muted);
 	}
 
 	.empty {

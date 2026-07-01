@@ -351,7 +351,7 @@ The Operator view is calm by default. Engineer view layers on Temporal details w
 - Task queue routing.
 - Attempt counts and retries.
 - Action meter.
-- Temporal Web links to `localhost:7778`.
+- Temporal Web links to `localhost:8233`.
 - Raw event drawer for selected steps.
 
 The POC removes the sign-in flow from the UI brief. The first screen is Home or the most recent session.

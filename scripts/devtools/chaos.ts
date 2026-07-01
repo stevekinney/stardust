@@ -17,10 +17,10 @@ import * as schema from '../../src/lib/server/db/schema';
 import { readRunInspectorProjection } from '../../src/lib/server/observability/projection';
 import { getToolManifest } from '../../src/lib/server/tools/registry';
 
-const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS ?? 'localhost:7776';
-const TEMPORAL_PORT = TEMPORAL_ADDRESS.split(':').pop() ?? '7776';
+const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
+const TEMPORAL_PORT = TEMPORAL_ADDRESS.split(':').pop() ?? '7233';
 const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE ?? 'default';
-const TEMPORAL_WEB_PORT = process.env.TEMPORAL_WEB_PORT ?? '7778';
+const TEMPORAL_WEB_PORT = process.env.TEMPORAL_WEB_PORT ?? '8233';
 
 type ManagedProcess = {
 	name: string;

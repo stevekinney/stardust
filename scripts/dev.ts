@@ -9,10 +9,13 @@
  *   2. Apply database migrations.
  *   3. Start the SvelteKit web process and the Temporal Worker process together.
  *
- * Preferred ports are 7776 (Temporal frontend), 7778 (Temporal Web UI), and 7777
- * (app). If any is taken, the orchestrator selects the next free port and passes
- * the choice to the child processes via the environment — inherited env wins over
- * `.env`, so the chosen ports take effect even when `.env` names the defaults.
+ * Preferred ports are Temporal's own defaults — 7233 (frontend) and 8233 (Temporal
+ * Web UI) — plus 7777 (app). Reusing the defaults means a Temporal dev server or
+ * UI already running for another project is picked up automatically. If a
+ * preferred port is taken by something that isn't Temporal, the orchestrator
+ * selects the next free port and passes the choice to the child processes via the
+ * environment — inherited env wins over `.env`, so the chosen ports take effect
+ * even when `.env` names the defaults.
  *
  * Invoke it through `bun run dev`. Teardown owns only what it started: Ctrl-C (or
  * any child exiting) tears down the web/worker processes, and the Temporal dev
@@ -28,8 +31,8 @@ import { Connection } from '@temporalio/client';
 import { TEMPORAL_ADDRESS } from '../src/lib/server/config';
 
 const [, preferredTemporalPortRaw] = TEMPORAL_ADDRESS.split(':');
-const preferredTemporalPort = Number(preferredTemporalPortRaw ?? 7776);
-const preferredUiPort = Number(process.env.TEMPORAL_WEB_PORT ?? 7778);
+const preferredTemporalPort = Number(preferredTemporalPortRaw ?? 7233);
+const preferredUiPort = Number(process.env.TEMPORAL_WEB_PORT ?? 8233);
 const preferredAppPort = Number(process.env.APP_PORT ?? 7777);
 
 type ManagedProcess = { name: string; child: ChildProcess };
