@@ -32,7 +32,12 @@ import {
 	setHandler
 } from '@temporalio/workflow';
 import { ApplicationFailure } from '@temporalio/common';
-import { getAgentRunStateQuery, resolveApprovalUpdate, steeringSignal } from './approval-contracts';
+import {
+	getAgentRunStateQuery,
+	interruptRunSignal,
+	resolveApprovalUpdate,
+	steeringSignal
+} from './approval-contracts';
 import { codeSubagentWorkflow } from './subagents/code-subagent.workflow';
 import { criticSubagentWorkflow } from './subagents/critic-subagent.workflow';
 import { researchSubagentWorkflow } from './subagents/research-subagent.workflow';
@@ -249,6 +254,124 @@ function isDelegateToolName(
 
 function isDelegateParallelToolName(name: string): name is 'delegate.parallel' {
 	return name === 'delegate.parallel';
+}
+
+function isTimerWaitToolName(name: string): name is 'timer.wait' {
+	return name === 'timer.wait';
+}
+
+/** Longest duration `timer.wait` accepts: 30 days, in milliseconds. Mirrors `timerWaitInput`'s cap. */
+const TIMER_WAIT_MAX_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Defensively re-reads `timer.wait` arguments. The policy activity already
+ * validated these against `timerWaitInput` (a zod schema in
+ * `$lib/server/tools/timer-tool`), but workflow code cannot import from
+ * `$lib/server/*` (see `eslint.config.js`'s `no-restricted-imports` for
+ * `src/workflows/**`), so the shape is re-checked here by hand — the same
+ * pattern `readDelegateArguments` uses for `delegate.*` tool calls.
+ */
+function readTimerWaitArguments(argumentsValue: unknown): { durationMs: number; reason?: string } {
+	if (!argumentsValue || typeof argumentsValue !== 'object') {
+		throw ApplicationFailure.nonRetryable('timer.wait arguments must be an object');
+	}
+	const record = argumentsValue as { durationMs?: unknown; reason?: unknown };
+	if (
+		typeof record.durationMs !== 'number' ||
+		!Number.isInteger(record.durationMs) ||
+		record.durationMs <= 0 ||
+		record.durationMs > TIMER_WAIT_MAX_DURATION_MS
+	) {
+		throw ApplicationFailure.nonRetryable(
+			'timer.wait durationMs must be a positive integer no greater than 30 days in milliseconds'
+		);
+	}
+	if (record.reason !== undefined) {
+		if (typeof record.reason !== 'string' || record.reason.length === 0) {
+			throw ApplicationFailure.nonRetryable(
+				'timer.wait reason must be a non-empty string when provided'
+			);
+		}
+		return { durationMs: record.durationMs, reason: record.reason };
+	}
+	return { durationMs: record.durationMs };
+}
+
+/**
+ * Executes `timer.wait` as a durable wait owned by the orchestrator workflow
+ * itself, never a tool activity — the same interception pattern used for
+ * `delegate.*` tool calls. The wait is backed by Temporal's durable
+ * `condition(predicate, timeoutMs)`; this mirrors the approval TTL wait a few
+ * functions up (`condition(() => state.approvalResolution !== null,
+ * approvalTtlMs)`).
+ *
+ * `isInterrupted` reads the run's in-band interrupt flag (set by
+ * `interruptRunSignal`, see `agentRunWorkflow`). Because it's an ordinary
+ * `condition()` predicate — not a Temporal cancellation — `condition` resolves
+ * normally (no exception) either way:
+ *  - `false` (timeout: the full `durationMs` elapsed without an interrupt) →
+ *    returns `{completed: true, durationMs, reason?}`.
+ *  - `true` (the flag flipped before the timeout) → returns
+ *    `{completed: false, waitedApproximatelyMs, durationMs, reason?}`. The
+ *    caller (`handleToolCall` → `agentRunWorkflow`'s main loop) persists this
+ *    like any other tool result and then ends the run with status
+ *    'cancelled' — all through completely ordinary, non-cancelled control
+ *    flow. An earlier version of this instead reacted to a genuine Temporal
+ *    `CancelledFailure` (real hard cancellation) and tried to persist a
+ *    partial result from inside the cancellation teardown itself, which was
+ *    flaky: scheduling a *new* activity call while the workflow's scope is
+ *    being cancelled races the teardown. Persisting during ordinary,
+ *    uncancelled control flow (this version) has no such race.
+ *
+ * A hard, external Temporal cancellation of the run (the session's fallback
+ * safety net, issued right after `interruptRunSignal`) still rejects this
+ * `condition()` call with `CancelledFailure` exactly as before, propagating
+ * untouched to the workflow's top-level `catch (isCancellation(e)) throw e;`.
+ * That path is unchanged and persists nothing — this in-band flag is what
+ * makes the graceful, partial-result-persisting path possible instead.
+ */
+async function executeTimerWaitToolCall(
+	toolCall: ToolCallInput,
+	isInterrupted: () => boolean
+): Promise<{ result: ToolExecutionResult; interrupted: boolean }> {
+	const args = readTimerWaitArguments(toolCall.arguments);
+	// Date.now() is intercepted by Temporal's sandbox and returns deterministic
+	// workflow time, making this replay-safe.
+	const waitStartMs = Date.now();
+
+	const interrupted = await condition(isInterrupted, args.durationMs);
+
+	if (interrupted) {
+		const waitedApproximatelyMs = Date.now() - waitStartMs;
+		return {
+			interrupted: true,
+			result: {
+				callId: toolCall.id,
+				toolName: toolCall.name,
+				outcome: 'success',
+				content: {
+					completed: false,
+					waitedApproximatelyMs,
+					durationMs: args.durationMs,
+					...(args.reason !== undefined ? { reason: args.reason } : {})
+				}
+			}
+		};
+	}
+
+	return {
+		interrupted: false,
+		result: {
+			callId: toolCall.id,
+			toolName: toolCall.name,
+			outcome: 'success',
+			content: {
+				completed: true,
+				durationMs: args.durationMs,
+				...(args.reason !== undefined ? { reason: args.reason } : {})
+			}
+		}
+	};
 }
 
 function delegateKindForToolName(
@@ -793,16 +916,21 @@ async function executeDelegateParallelToolCall(
 
 /**
  * Runs policy evaluation → durable approval wait → tool execution for a single
- * tool call. Returns the `ToolExecutionResult` if executed, or a terminal
- * outcome if the call was denied, cancelled, or expired.
+ * tool call. Returns the `ToolExecutionResult` if executed, a terminal outcome
+ * if the call was denied, cancelled, or expired, or `'executed-interrupted'`
+ * when an in-band `interruptRunSignal` ended a `timer.wait` call early: the
+ * caller must persist `result` exactly like an `'executed'` outcome and then
+ * end the run with status `'cancelled'` (see `agentRunWorkflow`'s main loop).
  */
 async function handleToolCall(
 	input: AgentRunInput,
 	toolCall: ToolCallInput,
 	state: MutableApprovalState,
-	delegateState: MutableDelegateState
+	delegateState: MutableDelegateState,
+	isInterrupted: () => boolean
 ): Promise<
 	| { kind: 'executed'; result: ToolExecutionResult }
+	| { kind: 'executed-interrupted'; result: ToolExecutionResult }
 	| { kind: 'terminal'; status: AgentRunResult['status']; finalAnswer: string }
 > {
 	const approvalTtlMs = input.approvalTtlMs ?? APPROVAL_TTL_MS;
@@ -817,6 +945,12 @@ async function handleToolCall(
 	}
 
 	if (decision.status === 'allowed') {
+		if (isTimerWaitToolName(toolCall.name)) {
+			const outcome = await executeTimerWaitToolCall(toolCall, isInterrupted);
+			return outcome.interrupted
+				? { kind: 'executed-interrupted', result: outcome.result }
+				: { kind: 'executed', result: outcome.result };
+		}
 		const activities = toolActivitiesForTaskQueue(decision.tool.metadata.taskQueue);
 		const result = await activities.executeTool({
 			call: toolCall,
@@ -1024,6 +1158,18 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 	 */
 	const steeringBuffer: string[] = [];
 
+	/**
+	 * In-band interrupt flag set by `interruptRunSignal`. Checked via an
+	 * ordinary `condition()` predicate — not a Temporal cancellation — by any
+	 * interruptible durable wait (currently just `timer.wait`, see
+	 * `executeTimerWaitToolCall`). The session sends this signal, then falls
+	 * back to a hard cancellation of the run's workflow scope as an
+	 * unconditional safety net (see `agent-session.workflow.ts`), so this flag
+	 * only ever gets a head start on ending the run gracefully — it does not
+	 * replace hard cancellation.
+	 */
+	let interrupted = false;
+
 	void setHandler(getAgentRunStateQuery, () => ({
 		runId: input.runId,
 		status,
@@ -1032,6 +1178,10 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 
 	void setHandler(steeringSignal, (message: string) => {
 		steeringBuffer.push(message);
+	});
+
+	void setHandler(interruptRunSignal, () => {
+		interrupted = true;
 	});
 
 	void setHandler(resolveApprovalUpdate, async (resolution: ApprovalResolutionInput) => {
@@ -1178,7 +1328,13 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 				// unambiguously came from THIS tool call's approval path (not a
 				// previous one that went through the 'allowed' fast path).
 				recordedApprovalResolution = null;
-				const outcome = await handleToolCall(input, toolCall, approvalState, delegateToolState);
+				const outcome = await handleToolCall(
+					input,
+					toolCall,
+					approvalState,
+					delegateToolState,
+					() => interrupted
+				);
 
 				// Write an action-sensitive candidate when the user opted to have the
 				// approval decision remembered (remember===true). This covers both the
@@ -1233,6 +1389,24 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 					content: outcome.result.content,
 					isError: outcome.result.outcome === 'error'
 				});
+
+				// The partial-wait result above is now durably persisted through the
+				// ordinary (non-cancelled) path. End the run as cancelled — this must
+				// happen AFTER the persistToolResult call above, never before.
+				if (outcome.kind === 'executed-interrupted') {
+					await condition(allHandlersFinished, HANDLER_FINISH_TIMEOUT_MS);
+					return completeRun(
+						input,
+						{
+							runId: input.runId,
+							status: 'cancelled',
+							finalAnswer: 'Run cancelled: timer.wait was interrupted before its duration elapsed.',
+							...(memoryCandidateIds.length > 0 ? { memoryRefs: memoryCandidateIds } : {}),
+							...(memoryWriteErrors.length > 0 ? { memoryWriteErrors } : {})
+						},
+						totalUsage
+					);
+				}
 			}
 		}
 
@@ -1311,7 +1485,14 @@ export async function agentRunWorkflow(input: AgentRunInput): Promise<AgentRunRe
 	} catch (e: unknown) {
 		// Workflow-level cancellation is not a failure — the cancellation path
 		// (via cancelRunSignal) already records 'cancelled'. Re-throw so Temporal
-		// propagates the CancelledFailure to the parent session workflow.
+		// propagates the CancelledFailure to the parent session workflow. A
+		// `timer.wait` call interrupted via the in-band `interruptRunSignal` flag
+		// ends gracefully instead (see `executeTimerWaitToolCall` and the
+		// `'executed-interrupted'` handling in the loop above) and never reaches
+		// this branch; this hard-cancellation path only fires if the run is
+		// cancelled without (or faster than) that signal, in which case there is
+		// no durable partial-wait tool result — see `executeTimerWaitToolCall`'s
+		// doc comment for why persisting one from here is unsafe.
 		if (isCancellation(e)) {
 			throw e;
 		}

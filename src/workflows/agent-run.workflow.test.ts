@@ -26,7 +26,12 @@ import {
 	TASK_QUEUE_SANDBOX,
 	TASK_QUEUE_TOOLS
 } from '@src/lib/types';
-import { getAgentRunStateQuery, resolveApprovalUpdate, steeringSignal } from './approval-contracts';
+import {
+	getAgentRunStateQuery,
+	interruptRunSignal,
+	resolveApprovalUpdate,
+	steeringSignal
+} from './approval-contracts';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -314,8 +319,15 @@ describe('agentRunWorkflow approvals', () => {
 
 			// Wait for the workflow to park in waiting_approval after the model
 			// returns the tool_use block and policy evaluation triggers approval.
+			// The status flips before the recordApprovalRequest activity returns
+			// the approval card, so poll until pendingApproval is populated too —
+			// otherwise a query landing in that window sees the status without it.
 			let state = await handle.query(getAgentRunStateQuery);
-			for (let i = 0; i < 10 && state.status !== 'waiting_approval'; i++) {
+			for (
+				let i = 0;
+				i < 10 && !(state.status === 'waiting_approval' && state.pendingApproval);
+				i++
+			) {
 				await env.sleep(100);
 				state = await handle.query(getAgentRunStateQuery);
 			}
@@ -1787,6 +1799,291 @@ describe('agentRunWorkflow delegate tools', () => {
 				runLabel === 'child-budget' ? /child workflow budget exhausted/ : /action budget exhausted/
 			);
 		}
+	});
+});
+
+// ── Timer wait suite ────────────────────────────────────────────────────────────
+
+/**
+ * These tests exercise `timer.wait`: a durable wait intercepted by the
+ * orchestrator workflow itself (mirroring how `delegate.parallel` is
+ * intercepted before reaching a tool activity) rather than dispatched through
+ * `executeTool`. `timer.wait` never requires approval, so `evaluateToolCallPolicy`
+ * returns `allowed` directly.
+ */
+describe('agentRunWorkflow timer.wait', () => {
+	let env: TestWorkflowEnvironment;
+
+	beforeAll(async () => {
+		env = await TestWorkflowEnvironment.createTimeSkipping();
+	});
+
+	afterAll(async () => {
+		await env.teardown();
+	});
+
+	const timerTool: ToolManifestEntry = {
+		name: 'timer.wait',
+		description: 'Durably wait before continuing.',
+		inputSchema: {},
+		metadata: {
+			risk: 'low',
+			requiresApproval: false,
+			taskQueue: TASK_QUEUE_ORCHESTRATOR,
+			timeoutMs: 10_000,
+			retry: { maximumAttempts: 2 },
+			idempotencyBehavior: 'safe'
+		}
+	};
+
+	type TimerActivityState = {
+		toolExecutions: ToolExecutionInput[];
+		persistedToolResults: Array<{
+			sessionId: string;
+			runId: string;
+			callId: string;
+			content: unknown;
+			isError: boolean;
+		}>;
+		/**
+		 * Number of `evaluateToolCallPolicy` calls observed so far. `timer.wait`
+		 * never requires approval, so there is no `waiting_approval` query state to
+		 * poll on the way to the durable `condition()` wait (unlike the approval
+		 * suites). Polling this counter instead confirms the workflow has actually
+		 * reached — and is durably parked in — the timer wait before a test
+		 * cancels it, rather than guessing with a fixed sleep.
+		 */
+		policyEvaluations: number;
+	};
+
+	function createTimerActivityState(): TimerActivityState {
+		return { toolExecutions: [], persistedToolResults: [], policyEvaluations: 0 };
+	}
+
+	/** `toolInput` is the raw `timer.wait` tool-call arguments the mocked model returns. */
+	function createTimerActivities(state: TimerActivityState, toolInput: unknown) {
+		const modelCallCounts = new Map<string, number>();
+		return {
+			async callModel(input: ModelCallInput): Promise<ModelCallResult> {
+				const count = (modelCallCounts.get(input.runId) ?? 0) + 1;
+				modelCallCounts.set(input.runId, count);
+				const base = {
+					runId: input.runId,
+					model: input.model ?? 'claude-sonnet-4-5-20250929',
+					usage: MOCK_MODEL_USAGE
+				};
+				if (count === 1) {
+					return {
+						...base,
+						message: {
+							text: '',
+							toolCalls: [{ id: 'timer-tool-001', name: 'timer.wait', input: toolInput }]
+						}
+					};
+				}
+				return { ...base, message: { text: 'Checked back in.', toolCalls: [] } };
+			},
+			async evaluateToolCallPolicy(input: { call: ToolCallInput }): Promise<ToolPolicyDecision> {
+				state.policyEvaluations++;
+				return { status: 'allowed', tool: { ...timerTool, name: input.call.name } };
+			},
+			async recordApprovalRequest(): Promise<ApprovalCardState> {
+				throw ApplicationFailure.nonRetryable('timer.wait must not require approval');
+			},
+			async recordApprovalResolution(): Promise<ApprovalResolution> {
+				throw ApplicationFailure.nonRetryable('timer.wait must not require approval');
+			},
+			async executeTool(input: ToolExecutionInput): Promise<ToolExecutionResult> {
+				state.toolExecutions.push(input);
+				return {
+					callId: input.call.id,
+					toolName: input.call.name,
+					outcome: 'success',
+					content: { shouldNotRunForTimer: true }
+				};
+			},
+			async persistToolResult(input: {
+				sessionId: string;
+				runId: string;
+				callId: string;
+				content: unknown;
+				isError: boolean;
+			}): Promise<void> {
+				state.persistedToolResults.push(input);
+			},
+			async recordRunStarted(): Promise<void> {},
+			async recordRunCompleted(): Promise<void> {},
+			async recordSubagentStarted(): Promise<void> {},
+			async recordSubagentCompleted(): Promise<void> {},
+			async writeMemoryCandidate() {
+				return { id: 'timer-memory-candidate' };
+			},
+			async searchMemory(): Promise<[]> {
+				return [];
+			},
+			async cancelSandboxSession(): Promise<void> {}
+		};
+	}
+
+	async function runTimerWorkers<T>(
+		activities: ReturnType<typeof createTimerActivities>,
+		callback: () => Promise<T>
+	): Promise<T> {
+		const orchestrator = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_ORCHESTRATOR,
+			workflowsPath: fileURLToPath(new URL('./index.ts', import.meta.url))
+		});
+		const tools = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_TOOLS,
+			activities
+		});
+		const sandbox = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_SANDBOX,
+			activities
+		});
+		const model = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_MODEL,
+			activities
+		});
+		const memory = await Worker.create({
+			connection: env.nativeConnection,
+			namespace: 'default',
+			taskQueue: TASK_QUEUE_MEMORY,
+			activities
+		});
+
+		const task = orchestrator.runUntil(callback);
+		const [result] = await Promise.all([
+			task,
+			tools.runUntil(task.catch(() => undefined)),
+			sandbox.runUntil(task.catch(() => undefined)),
+			model.runUntil(task.catch(() => undefined)),
+			memory.runUntil(task.catch(() => undefined))
+		]);
+		return result;
+	}
+
+	it('durably waits out the full duration, never dispatches a tool activity, and persists a completed result', async () => {
+		const state = createTimerActivityState();
+		const activities = createTimerActivities(state, {
+			durationMs: 60_000,
+			reason: 'check deploy status'
+		});
+		const runId = `timer-wait-full-${Date.now()}`;
+
+		const result = await runTimerWorkers(activities, () =>
+			env.client.workflow.execute('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [{ sessionKey: 'timer-session', runId, message: 'wait then check' }]
+			})
+		);
+
+		expect(result.status).toBe('complete');
+		expect(result.finalAnswer).toBe('Checked back in.');
+		expect(state.toolExecutions).toHaveLength(0);
+		expect(state.persistedToolResults).toEqual([
+			expect.objectContaining({
+				callId: 'timer-tool-001',
+				content: { completed: true, durationMs: 60_000, reason: 'check deploy status' },
+				isError: false
+			})
+		]);
+	});
+
+	/**
+	 * Polls until `evaluateToolCallPolicy` has actually run — a fixed sleep
+	 * raced the callModel/evaluateToolCallPolicy round trip often enough to be
+	 * flaky (sometimes landing an interrupt/cancel before the workflow ever
+	 * reached the durable `condition()` wait). This confirms the workflow is
+	 * durably parked in the wait before a test interrupts or cancels it.
+	 */
+	async function waitUntilParkedInTimerWait(state: TimerActivityState): Promise<void> {
+		for (let i = 0; i < 20 && state.policyEvaluations === 0; i++) {
+			await env.sleep(50);
+		}
+		expect(state.policyEvaluations).toBeGreaterThan(0);
+	}
+
+	it('interruptRunSignal ends the wait early, persists a completed:false result through the ordinary path, and the run ends cancelled', async () => {
+		// Regression note: an earlier version of this test relied on a hard
+		// Temporal cancellation (`handle.cancel()`) and asserted a durably
+		// persisted `{ completed: false, waitedApproximatelyMs }` tool result.
+		// That required scheduling a *new* activity call while the run's
+		// cancellation was already tearing down the workflow scope, which proved
+		// unreliable under this time-skipping test harness (flaky hangs). The
+		// in-band `interruptRunSignal` flag this test exercises instead ends the
+		// `condition()` wait through *ordinary* control flow — no cancellation
+		// involved at all — so persisting the partial result and then ending the
+		// run has no such race (see `executeTimerWaitToolCall`'s doc comment).
+		const state = createTimerActivityState();
+		const activities = createTimerActivities(state, {
+			durationMs: 24 * 60 * 60 * 1000,
+			reason: 'long wait'
+		});
+		const runId = `timer-wait-interrupt-${Date.now()}`;
+
+		const result = await runTimerWorkers(activities, async () => {
+			const handle = await env.client.workflow.start('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [{ sessionKey: 'timer-session', runId, message: 'wait a day' }]
+			});
+
+			await waitUntilParkedInTimerWait(state);
+
+			await handle.signal(interruptRunSignal);
+			// Graceful path: the run ends normally (result resolves, doesn't reject).
+			return handle.result();
+		});
+
+		expect(result.status).toBe('cancelled');
+		expect(state.toolExecutions).toHaveLength(0);
+		expect(state.persistedToolResults).toEqual([
+			expect.objectContaining({
+				callId: 'timer-tool-001',
+				isError: false,
+				content: {
+					completed: false,
+					waitedApproximatelyMs: expect.any(Number),
+					durationMs: 24 * 60 * 60 * 1000,
+					reason: 'long wait'
+				}
+			})
+		]);
+	});
+
+	it('a hard cancellation without interruptRunSignal still ends the run cancelled, with no partial-wait tool result', async () => {
+		const state = createTimerActivityState();
+		const activities = createTimerActivities(state, {
+			durationMs: 24 * 60 * 60 * 1000,
+			reason: 'long wait'
+		});
+		const runId = `timer-wait-hard-cancel-${Date.now()}`;
+
+		await runTimerWorkers(activities, async () => {
+			const handle = await env.client.workflow.start('agentRunWorkflow', {
+				taskQueue: TASK_QUEUE_ORCHESTRATOR,
+				workflowId: `agent-run:${runId}`,
+				args: [{ sessionKey: 'timer-session', runId, message: 'wait a day' }]
+			});
+
+			await waitUntilParkedInTimerWait(state);
+
+			await handle.cancel();
+			await expect(handle.result()).rejects.toThrow();
+		});
+
+		expect(state.toolExecutions).toHaveLength(0);
+		expect(state.persistedToolResults).toHaveLength(0);
 	});
 });
 

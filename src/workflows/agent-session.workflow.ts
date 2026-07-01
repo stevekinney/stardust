@@ -30,7 +30,7 @@ import {
 	workflowInfo
 } from '@temporalio/workflow';
 import { ApplicationFailure } from '@temporalio/common';
-import { steeringSignal } from './approval-contracts';
+import { interruptRunSignal, steeringSignal } from './approval-contracts';
 import { DEFAULT_RUN_BUDGET, agentRunWorkflow } from './agent-run.workflow';
 import { memoryCompactionWorkflow } from './memory-compaction.workflow';
 import {
@@ -83,6 +83,25 @@ function toModelToolSchema(entry: ToolManifestEntry): ModelToolSchema {
 		display: { description: entry.description },
 		input: entry.inputSchema
 	};
+}
+
+/**
+ * Best-effort: give the active run a chance to end gracefully before the
+ * caller hard-cancels its workflow scope. Sends `interruptRunSignal` to the
+ * run and awaits the send completing (one round trip) so the run has an
+ * opportunity to process it — and, for an in-progress `timer.wait`, persist a
+ * partial-wait tool result through ordinary control flow — before the
+ * subsequent `activeRunScope?.cancel()` rejects anything still in flight.
+ * Failures are swallowed: this is a courtesy, not a requirement, and the hard
+ * cancellation immediately after remains the unconditional safety net.
+ */
+async function signalActiveRunToInterrupt(runId: string): Promise<void> {
+	try {
+		await getExternalWorkflowHandle(`agent-run:${runId}`).signal(interruptRunSignal);
+	} catch {
+		// Best-effort — the hard cancellation that follows is what guarantees
+		// the run actually ends.
+	}
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -238,21 +257,27 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 		}
 	);
 
-	void setHandler(interruptRunUpdate, (interruptInput: InterruptRunInput): InterruptRunResult => {
-		if (!activeRunId) {
-			return { interrupted: false };
+	void setHandler(
+		interruptRunUpdate,
+		async (interruptInput: InterruptRunInput): Promise<InterruptRunResult> => {
+			if (!activeRunId) {
+				return { interrupted: false };
+			}
+			// Give the run a graceful head start (see signalActiveRunToInterrupt's
+			// doc comment), then cancel the active run's scope unconditionally; the
+			// executeChild awaiting it will throw CancelledFailure, which the main
+			// loop catches and suppresses.
+			await signalActiveRunToInterrupt(activeRunId);
+			activeRunScope?.cancel();
+			if (interruptInput.replacement) {
+				submittedTurnCount++;
+				const replacementRunId = `${sessionKey}-run-${submittedTurnCount}`;
+				queue.push({ runId: replacementRunId, message: interruptInput.replacement });
+				return { interrupted: true, replacementRunId };
+			}
+			return { interrupted: true };
 		}
-		// Cancel the active run's scope; the executeChild awaiting it will throw
-		// CancelledFailure, which the main loop catches and suppresses.
-		activeRunScope?.cancel();
-		if (interruptInput.replacement) {
-			submittedTurnCount++;
-			const replacementRunId = `${sessionKey}-run-${submittedTurnCount}`;
-			queue.push({ runId: replacementRunId, message: interruptInput.replacement });
-			return { interrupted: true, replacementRunId };
-		}
-		return { interrupted: true };
-	});
+	);
 
 	void setHandler(
 		resolveApprovalUpdate,
@@ -273,8 +298,13 @@ export async function agentSessionWorkflow(input: AgentSessionInput): Promise<vo
 
 	// ── Signal handlers ──────────────────────────────────────────────────────
 
-	void setHandler(cancelRunSignal, () => {
+	void setHandler(cancelRunSignal, async () => {
 		cancelled = true;
+		if (activeRunId) {
+			// Give the run a graceful head start (see signalActiveRunToInterrupt's
+			// doc comment) before the unconditional hard cancel below.
+			await signalActiveRunToInterrupt(activeRunId);
+		}
 		// Cancel the active run scope if a run is in flight.
 		activeRunScope?.cancel();
 	});
