@@ -10,6 +10,7 @@
 	import type { SelectOption } from '@lostgradient/cinder/select';
 	import type { SessionRow } from '$lib/components/session-list.svelte';
 	import { viewMode } from '$lib/view-mode.svelte';
+	import { displayLabel, statusDotClass } from '$lib/session-display';
 
 	// ── Session fetch state ────────────────────────────────────────
 	let sessions = $state<SessionRow[]>([]);
@@ -123,34 +124,6 @@
 	}
 
 	// ── Display helpers ────────────────────────────────────────────
-	function displayLabel(session: SessionRow): string {
-		return session.name ?? session.sessionKey;
-	}
-
-	function statusDotClass(status: string): string {
-		switch (status) {
-			case 'complete':
-			case 'recovered':
-				return 'dot-success';
-			case 'failed':
-				return 'dot-danger';
-			case 'cancelled':
-				return 'dot-muted';
-			case 'running':
-				return 'dot-accent dot-pulse';
-			case 'streaming':
-			case 'loading':
-				return 'dot-info dot-pulse';
-			case 'waiting_approval':
-			case 'disconnected':
-				return 'dot-warning dot-pulse';
-			case 'active':
-				return 'dot-success dot-pulse';
-			default:
-				return 'dot-muted';
-		}
-	}
-
 	function cardBorderColor(status: string): string {
 		if (status === 'waiting_approval') return 'var(--cinder-warning)';
 		return 'var(--cinder-border)';

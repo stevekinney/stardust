@@ -57,7 +57,6 @@
 						{#if projection.run.temporalRunId}
 							<span class="banner-chip">Temporal run {projection.run.temporalRunId}</span>
 						{/if}
-						<span class="banner-chip">{projection.temporalHistorySummary.source} history</span>
 					</div>
 				{/if}
 			</div>
@@ -98,10 +97,6 @@
 					<div>
 						<dt>Temporal run ID</dt>
 						<dd>{projection?.run.temporalRunId ?? 'not available'}</dd>
-					</div>
-					<div>
-						<dt>History source</dt>
-						<dd>{projection?.temporalHistorySummary.source ?? 'not available'}</dd>
 					</div>
 				</dl>
 			</div>

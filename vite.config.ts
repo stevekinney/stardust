@@ -13,8 +13,13 @@ export default defineConfig({
 	// Cinder ships raw .svelte.ts TypeScript source files. Vite's pre-bundler can't
 	// process them as plain JS, so we exclude the package from optimization and let
 	// vite-plugin-svelte handle it on-demand through the full transform pipeline.
+	// That also skips CJS→ESM interop for Cinder's transitive deps — the Milkdown
+	// chat editor (via unified/mdast-util-from-markdown) pulls in legacy CJS-only
+	// packages that then get served raw and fail to load in the browser. Include
+	// them explicitly so Vite applies interop.
 	optimizeDeps: {
-		exclude: ['@lostgradient/cinder']
+		exclude: ['@lostgradient/cinder'],
+		include: ['debug', 'extend']
 	},
 	plugins: [
 		sveltekit({

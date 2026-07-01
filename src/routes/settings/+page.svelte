@@ -6,6 +6,9 @@
 
 	const SETTINGS_KEY = 'stardust-settings';
 
+	const RESET_LOCAL_DATA_WARNING =
+		'This will delete the database, artifacts, workspaces, and model cache. Sessions, transcripts, memory, and schedules are gone. This cannot be undone.';
+
 	type ModelId =
 		| 'claude-sonnet-4-5-20250929'
 		| 'claude-sonnet-4-6'
@@ -76,9 +79,7 @@
 
 	function clearLocalData() {
 		if (typeof window === 'undefined') return;
-		const confirmed = confirm(
-			'This will delete the database, artifacts, workspaces, and model cache. Sessions, transcripts, memory, and schedules are gone. This cannot be undone.'
-		);
+		const confirmed = confirm(RESET_LOCAL_DATA_WARNING);
 		if (!confirmed) return;
 		localStorage.clear();
 		model = MODEL_OPTIONS[0].value;
@@ -211,10 +212,7 @@
 					</svg>
 					<div class="danger-info">
 						<div class="danger-title">Reset all local state</div>
-						<div class="danger-desc">
-							Deletes the database, artifacts, workspaces, and model cache. Sessions, transcripts,
-							memory, and schedules are gone. This cannot be undone.
-						</div>
+						<div class="danger-desc">{RESET_LOCAL_DATA_WARNING}</div>
 					</div>
 					<button type="button" class="danger-action" onclick={clearLocalData}>
 						Reset all local state

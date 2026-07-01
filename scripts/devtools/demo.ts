@@ -98,12 +98,18 @@ async function seedDemo(
 	const now = new Date().toISOString();
 	const workflowId = `agent-run:${runId}`;
 	const runStatus = variant === 'approval' ? 'waiting_approval' : 'complete';
+	const sessionName = {
+		seed: 'Demonstrate Temporal durability',
+		approval: 'Approve a shell command',
+		schedule: 'Recurring durability check'
+	}[variant];
 
 	await database.insert(schema.sessions).values({
 		id: sessionKey,
 		sessionKey,
 		status: 'active',
 		workflowId: `agent-session:${sessionKey}`,
+		name: sessionName,
 		createdAt: now,
 		updatedAt: now
 	});

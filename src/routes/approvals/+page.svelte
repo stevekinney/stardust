@@ -30,7 +30,7 @@
 	});
 
 	function statusLabel(status: string): string {
-		if (status === 'pending') return 'High risk';
+		if (status === 'pending') return 'Pending';
 		if (status === 'approved') return 'Approved';
 		if (status === 'denied') return 'Denied';
 		if (status === 'remembered') return 'Remembered';
@@ -232,7 +232,6 @@
 								workingDir: '/workspace/project'
 							}}
 							env={['DATABASE_URL']}
-							snapshotId={`snap_${sel.approvalId.slice(0, 6)}`}
 							policyVersion="policy-2026-06"
 							idempotencyKey={sel.approvalId}
 							expiresAt={sel.status === 'pending' ? sel.expiresAt : undefined}

@@ -339,7 +339,6 @@
 							</span>
 						</div>
 						<div class="sched-cadence">{humanCron(schedule.cronExpression)}</div>
-						<div class="sched-cron">cron {schedule.cronExpression}</div>
 					</button>
 				{/each}
 			</div>
@@ -350,24 +349,10 @@
 						<div class="detail-info">
 							<div class="detail-name-row">
 								<h2 class="detail-name">{selected.name}</h2>
-								<span
-									class="status-badge"
-									class:status-badge-active={selected.status === 'active'}
-									class:status-badge-paused={selected.status === 'paused'}
-								>
-									<i
-										class="dot"
-										style="background:{selected.status === 'active'
-											? 'var(--cinder-success)'
-											: 'var(--cinder-text-disabled)'}"
-									></i>
-									{selected.status === 'active' ? 'Active' : 'Paused'}
-								</span>
 							</div>
 							<div class="detail-sub">
-								Runs {humanCron(selected.cronExpression).toLowerCase()} · next run in {timeUntil(
-									selected.nextRunAt
-								)} · submits into session <span class="mono">{selected.targetSessionKey}</span>
+								Next run in {timeUntil(selected.nextRunAt)} · submits into session
+								<span class="mono">{selected.targetSessionKey}</span>
 							</div>
 						</div>
 						<div class="detail-actions">
@@ -651,13 +636,6 @@
 		margin-top: 7px;
 	}
 
-	.sched-cron {
-		font: 400 10px var(--cinder-font-mono);
-		color: var(--cinder-text-subtle);
-		margin-top: 8px;
-		opacity: 0.7;
-	}
-
 	.detail {
 		flex: 1;
 		min-width: 0;
@@ -685,27 +663,6 @@
 		font: 650 19px system-ui;
 		margin: 0;
 		color: var(--cinder-text);
-	}
-
-	.status-badge {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		border-radius: 20px;
-		padding: 3px 10px;
-		font: 600 10.5px system-ui;
-	}
-
-	.status-badge-active {
-		border: 1px solid var(--cinder-color-success-border);
-		background: var(--cinder-color-success-bg);
-		color: var(--cinder-color-success-fg);
-	}
-
-	.status-badge-paused {
-		border: 1px solid var(--cinder-border);
-		background: var(--cinder-surface-inset);
-		color: var(--cinder-text-subtle);
 	}
 
 	.detail-sub {

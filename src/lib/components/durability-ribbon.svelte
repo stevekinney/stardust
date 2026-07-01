@@ -14,28 +14,31 @@
 </script>
 
 <div class="ribbon" class:compact role="status" aria-label="Durability evidence">
-	<div class="rib">
+	<div
+		class="rib"
+		title="Live-stream discontinuities rebuilt from the durable transcript — no events lost"
+	>
 		<span class="rib-n">{formatValue(evidence?.streamGapCount)}</span>
-		<span class="rib-l">stream gaps</span>
+		<span class="rib-l">stream reconnects</span>
 	</div>
-	<div class="rib">
+	<div class="rib" title="Failed attempts Temporal retried automatically — no action needed">
 		<span class="rib-n rib-success">{formatValue(evidence?.retryAttemptCount)}</span>
-		<span class="rib-l">retry attempts</span>
+		<span class="rib-l">auto-retry</span>
 	</div>
-	<div class="rib">
+	<div class="rib" title="Sandbox commands backed by a heartbeat so a crash can resume mid-command">
 		<span class="rib-n">{formatValue(evidence?.heartbeatBackedCommandCount)}</span>
 		<span class="rib-l">heartbeat commands</span>
 	</div>
-	<div class="rib">
+	<div class="rib" title="Sequence number of the most recent event Temporal has durably recorded">
 		<span class="rib-n rib-accent">{formatValue(evidence?.latestTranscriptSequence)}</span>
-		<span class="rib-l">transcript cursor</span>
+		<span class="rib-l">last durable event</span>
 	</div>
 	{#if !compact}
-		<div class="rib">
+		<div class="rib" title="Replayed idempotency ledger entries — duplicate work skipped safely">
 			<span class="rib-n">{formatValue(evidence?.idempotencyReplayCount)}</span>
 			<span class="rib-l">idempotency rows</span>
 		</div>
-		<div class="rib">
+		<div class="rib" title="Standing schedules that have fired for this session">
 			<span class="rib-n">{formatValue(evidence?.scheduleFireCount)}</span>
 			<span class="rib-l">schedule fires</span>
 		</div>

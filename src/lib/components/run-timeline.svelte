@@ -38,7 +38,6 @@
 		taskQueue,
 		taskQueues,
 		temporalConcepts,
-		temporalHistorySummary,
 		durabilityEvidence,
 		recoveryMarkers,
 		timelineLanes,
@@ -223,36 +222,42 @@
 
 <section class="run-timeline" aria-label="Run inspector timeline">
 	<div class="timeline-header">
-		<div>
+		<div class="header-identity">
 			<p class="muted">{run.workflowId}</p>
+			<div class="header-meta">
+				<span class="status-badge" data-status={run.status}>{run.status}</span>
+				{#if run.model}
+					<span class="model-badge">model {run.model}</span>
+				{/if}
+			</div>
 		</div>
-		<div class="header-meta">
-			<span class="status-badge" data-status={run.status}>{run.status}</span>
-			{#if run.model}
-				<span class="model-badge">{run.model}</span>
-			{/if}
-			<Button variant="secondary" size="sm" data-temporal-web onclick={openTemporalWeb}>
-				<span class="btn-inner">
-					<!-- lucide external-link -->
-					<svg
-						width="14"
-						height="14"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						aria-hidden="true"
-					>
-						<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-						<polyline points="15 3 21 3 21 9" />
-						<line x1="10" y1="14" x2="21" y2="3" />
-					</svg>
-					Open in Temporal Web
-				</span>
-			</Button>
-		</div>
+		<Button
+			variant="secondary"
+			size="sm"
+			class="header-action"
+			data-temporal-web
+			onclick={openTemporalWeb}
+		>
+			<span class="btn-inner">
+				<!-- lucide external-link -->
+				<svg
+					width="14"
+					height="14"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+					<polyline points="15 3 21 3 21 9" />
+					<line x1="10" y1="14" x2="21" y2="3" />
+				</svg>
+				Open in Temporal Web
+			</span>
+		</Button>
 	</div>
 
 	<section class="capability-strip" aria-label="Agent capabilities">
@@ -294,14 +299,6 @@
 			<dt>Stream cursor</dt>
 			<dd>{formatNullable(durabilityEvidence.latestStreamEventId)}</dd>
 		</div>
-		<div>
-			<dt>Transcript cursor</dt>
-			<dd>{formatNullable(durabilityEvidence.latestSessionTranscriptSequence)}</dd>
-		</div>
-		<div>
-			<dt>Temporal history</dt>
-			<dd>{temporalHistorySummary.source}</dd>
-		</div>
 	</dl>
 
 	{#if run.startedAt}
@@ -328,7 +325,6 @@
 	<section class="temporal-concepts" aria-labelledby="temporal-concepts-heading">
 		<div class="concept-header">
 			<h3 id="temporal-concepts-heading">Temporal Concepts</h3>
-			<span class="concept-source">{temporalHistorySummary.source} evidence</span>
 		</div>
 		{#if temporalConcepts.length === 0}
 			<p class="muted empty">No Temporal concept evidence recorded for this run.</p>
@@ -370,14 +366,6 @@
 		<div class="engineer-overlay" data-engineer-overlay>
 			<h3>Engineer Details</h3>
 			<dl class="eng-meta">
-				<div>
-					<dt>Run ID</dt>
-					<dd><code>{run.id}</code></dd>
-				</div>
-				<div>
-					<dt>Workflow ID</dt>
-					<dd><code>{run.workflowId}</code></dd>
-				</div>
 				<div data-task-queue>
 					<dt>Task Queue</dt>
 					<dd><code>{taskQueue}</code></dd>
@@ -608,15 +596,31 @@
 <style>
 	.run-timeline {
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 1rem;
 	}
 
 	.timeline-header {
 		display: flex;
 		flex-wrap: wrap;
-		align-items: start;
+		align-items: center;
 		justify-content: space-between;
 		gap: 0.75rem;
+	}
+
+	.header-identity {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.6rem;
+		min-width: 0;
+	}
+
+	/* Keeps the button right-aligned even when it wraps to its own line
+	   below .header-identity — justify-content: space-between only aligns
+	   a lone wrapped item to the line's start, not the container's end. */
+	:global(.header-action) {
+		margin-left: auto;
 	}
 
 	h3 {
@@ -747,12 +751,8 @@
 	.truth-strip {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
-		gap: 1px;
+		gap: 0.5rem;
 		margin: 0;
-		border: 1px solid var(--cinder-border-muted);
-		border-radius: 8px;
-		overflow: hidden;
-		background: var(--cinder-border-muted);
 	}
 
 	.truth-strip div {
@@ -761,6 +761,8 @@
 		min-width: 0;
 		padding: 0.55rem 0.65rem;
 		background: var(--cinder-surface-inset);
+		border: 1px solid var(--cinder-border-muted);
+		border-radius: 8px;
 	}
 
 	.truth-strip dt {
@@ -779,6 +781,7 @@
 
 	.temporal-concepts {
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 0.55rem;
 		border-top: 1px solid var(--cinder-border-muted);
 		padding-top: 0.75rem;
@@ -790,14 +793,9 @@
 		gap: 0.5rem;
 	}
 
-	.concept-source {
-		font: 600 0.72rem system-ui;
-		color: var(--cinder-text-subtle);
-		text-transform: uppercase;
-	}
-
 	.concept-list {
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 0.45rem;
 		margin: 0;
 		padding: 0;
@@ -899,6 +897,7 @@
 	.lanes-list,
 	.subagent-list {
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 0.4rem;
 		margin: 0.5rem 0 0;
 		padding: 0;
@@ -974,6 +973,7 @@
 
 	.steps {
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 0.5rem;
 		margin: 0.5rem 0 0;
 		padding: 0;
@@ -1193,12 +1193,14 @@
 
 	.raw-event-content {
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 1rem;
 		padding: 1rem;
 	}
 
 	.raw-event-meta {
 		display: grid;
+		grid-template-columns: minmax(0, 1fr);
 		gap: 0.5rem;
 		margin: 0;
 	}

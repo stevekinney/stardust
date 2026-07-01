@@ -48,27 +48,6 @@
 
 	let abortController: AbortController | null = null;
 
-	const demoPrompts = [
-		{
-			label: 'Verify change',
-			message: 'Run verification for the current change and summarize failures.'
-		},
-		{
-			label: 'Inspect UI',
-			message: 'Inspect the local app UI in the browser and capture evidence.'
-		},
-		{
-			label: 'Triage workflow',
-			message:
-				'Use Temporal MCP to triage the latest workflow and summarize durable execution state.'
-		},
-		{
-			label: 'Workspace diff',
-			message: 'Compare the current workspace diff and explain the risk.'
-		},
-		{ label: 'Create report', message: 'Create a run report artifact with the important evidence.' }
-	];
-
 	/** Controls which pane is active on tablet (641–1024px). */
 	let tabletView = $state<'conversation' | 'run'>('conversation');
 
@@ -249,7 +228,8 @@
 		if (!kind || !data) return;
 
 		if (kind === 'stream.gap') {
-			streamGapNotice = 'Live stream gap detected; rebuilt from transcript_events.';
+			streamGapNotice =
+				'Live view reconnected — rebuilt from the durable transcript, nothing lost.';
 			transcriptMode = 'canonical';
 			void loadTranscript().then(() => loadLatestRunInspector());
 			return;
@@ -536,8 +516,9 @@
 					<SegmentedControl
 						id="transcript-mode"
 						label="Transcript mode"
+						hideLabel
+						density="toolbar"
 						selectionMode="single"
-						size="sm"
 						bind:value={transcriptMode}
 					>
 						<Segment value="live">Live</Segment>
@@ -672,35 +653,7 @@
 					</div>
 
 					<div class="inspector-durability-wrapper">
-						<DurabilityRibbon evidence={inspector.durabilityEvidence} />
-					</div>
-
-					<dl class="inspector-metadata" aria-label="Run execution metadata">
-						<div class="inspector-metadata-item">
-							<dt>Workflow</dt>
-							<dd>{inspector.run.workflowId}</dd>
-						</div>
-						<div class="inspector-metadata-item">
-							<dt>Task queue</dt>
-							<dd>{inspector.taskQueues.join(', ')}</dd>
-						</div>
-						<div class="inspector-metadata-item">
-							<dt>Temporal run</dt>
-							<dd>{inspector.run.temporalRunId ?? 'not available'}</dd>
-						</div>
-					</dl>
-
-					<div class="demo-prompt-strip" aria-label="Demo prompts">
-						{#each demoPrompts as prompt (prompt.label)}
-							<button
-								type="button"
-								class="demo-prompt-chip"
-								disabled={running}
-								onclick={() => handleSubmit(prompt.message)}
-							>
-								{prompt.label}
-							</button>
-						{/each}
+						<DurabilityRibbon evidence={inspector.durabilityEvidence} compact />
 					</div>
 
 					<div class="budget-bar">
@@ -798,17 +751,17 @@
 				<div class="phone-ribbon-3">
 					<div class="p3rib">
 						<span class="p3rib-n">{inspector?.durabilityEvidence.streamGapCount ?? '—'}</span>
-						<span class="p3rib-l">gaps</span>
+						<span class="p3rib-l">reconnects</span>
 					</div>
 					<div class="p3rib">
 						<span class="p3rib-n p3rib-success"
 							>{inspector?.durabilityEvidence.retryAttemptCount ?? '—'}</span
 						>
-						<span class="p3rib-l">retry</span>
+						<span class="p3rib-l">auto-retry</span>
 					</div>
 					<div class="p3rib">
 						<span class="p3rib-n p3rib-accent">{phoneDurableEventId}</span>
-						<span class="p3rib-l">transcript</span>
+						<span class="p3rib-l">durable</span>
 					</div>
 				</div>
 
@@ -1092,73 +1045,6 @@
 		color: var(--cinder-text);
 	}
 
-	.inspector-metadata {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		margin: 0;
-		border-bottom: 1px solid var(--cinder-border-muted);
-		background: var(--cinder-surface-inset);
-		flex: none;
-	}
-
-	.inspector-metadata-item {
-		min-width: 0;
-		padding: 8px 12px;
-		border-right: 1px solid var(--cinder-border-muted);
-	}
-
-	.inspector-metadata-item:last-child {
-		border-right: 0;
-	}
-
-	.inspector-metadata dt {
-		margin: 0;
-		font: 700 10px system-ui;
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
-		color: var(--cinder-text-subtle);
-	}
-
-	.inspector-metadata dd {
-		margin: 2px 0 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		font: 500 12px system-ui;
-		font-family: var(--cinder-font-mono);
-		color: var(--cinder-text);
-	}
-
-	.demo-prompt-strip {
-		display: flex;
-		flex: none;
-		flex-wrap: wrap;
-		gap: 6px;
-		padding: 10px 14px;
-		border-bottom: 1px solid var(--cinder-border-muted);
-		background: var(--cinder-bg);
-	}
-
-	.demo-prompt-chip {
-		border: 1px solid var(--cinder-border-muted);
-		border-radius: 999px;
-		padding: 4px 9px;
-		background: var(--cinder-surface);
-		color: var(--cinder-text);
-		font: 650 11px / 1.2 system-ui;
-		cursor: pointer;
-	}
-
-	.demo-prompt-chip:hover:not(:disabled) {
-		border-color: var(--cinder-accent);
-		color: var(--cinder-accent-text);
-	}
-
-	.demo-prompt-chip:disabled {
-		cursor: not-allowed;
-		opacity: 0.55;
-	}
-
 	.budget-bar {
 		padding: 8px 14px;
 		border-bottom: 1px solid var(--cinder-border-muted);
@@ -1205,6 +1091,7 @@
 	.inspector-body {
 		flex: 1;
 		overflow-y: auto;
+		scrollbar-gutter: stable;
 		padding: 16px 14px;
 		scrollbar-width: thin;
 		scrollbar-color: var(--cinder-scrollbar-thumb) var(--cinder-scrollbar-track);
@@ -1294,7 +1181,6 @@
 		/* Desktop-only elements hidden on tablet */
 		.pane-header,
 		.inspector-header,
-		.inspector-metadata,
 		.budget-bar,
 		.inspector-durability-wrapper,
 		.inspector-toggle {

@@ -7,6 +7,7 @@
 	import Badge from '@lostgradient/cinder/badge';
 	import StatusDot from '@lostgradient/cinder/status-dot';
 	import type { SessionRow } from '$lib/components/session-list.svelte';
+	import { displayLabel, formatStatus, relativeTime, statusDotClass } from '$lib/session-display';
 	import favicon from '$lib/assets/favicon.svg';
 
 	let { children } = $props();
@@ -62,51 +63,6 @@
 		if (!response.ok) return;
 		const body = (await response.json()) as { sessionKey: string };
 		void goto(resolve(`/sessions/${encodeURIComponent(body.sessionKey)}`));
-	}
-
-	function displayLabel(session: SessionRow): string {
-		return session.name ?? session.sessionKey;
-	}
-
-	function formatStatus(status: string) {
-		return status.replace(/_/g, ' ');
-	}
-
-	function statusDotClass(status: string): string {
-		switch (status) {
-			case 'complete':
-			case 'recovered':
-				return 'dot-success';
-			case 'failed':
-				return 'dot-danger';
-			case 'cancelled':
-				return 'dot-muted';
-			case 'running':
-				return 'dot-accent dot-pulse';
-			case 'streaming':
-			case 'loading':
-				return 'dot-info dot-pulse';
-			case 'waiting_approval':
-			case 'disconnected':
-				return 'dot-warning dot-pulse';
-			case 'active':
-				return 'dot-success dot-pulse';
-			default:
-				return 'dot-muted';
-		}
-	}
-
-	function relativeTime(dateString: string): string {
-		const now = Date.now();
-		const then = new Date(dateString).getTime();
-		const seconds = Math.floor((now - then) / 1000);
-		if (seconds < 60) return 'just now';
-		const minutes = Math.floor(seconds / 60);
-		if (minutes < 60) return `${minutes}m ago`;
-		const hours = Math.floor(minutes / 60);
-		if (hours < 24) return `${hours}h ago`;
-		const days = Math.floor(hours / 24);
-		return `${days}d ago`;
 	}
 </script>
 
@@ -227,10 +183,12 @@
 		<nav class="rail" class:rail-open={railOpen} aria-label="Session navigation">
 			<div class="rail-scroll">
 				<div class="rail-heading">
-					Sessions
-					{#if activeSessions.length > 0}
-						<Badge variant="neutral" size="xs" mono>{activeSessions.length}</Badge>
-					{/if}
+					<span class="rail-heading-label">
+						Sessions
+						{#if activeSessions.length > 0}
+							<Badge variant="neutral" size="xs" mono>{activeSessions.length}</Badge>
+						{/if}
+					</span>
 					<span class="heading-spacer"></span>
 					<button
 						type="button"
@@ -360,32 +318,11 @@
 					>
 					<span>Memory</span>
 				</a>
-				<a
-					href={resolve('/settings')}
-					class="rail-nav-item"
-					aria-current={$page.url.pathname === '/settings' ? 'page' : undefined}
-				>
-					<!-- settings -->
-					<svg
-						width="16"
-						height="16"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						><path
-							d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"
-						/><circle cx="12" cy="12" r="3" /></svg
-					>
-					<span>Settings</span>
-				</a>
 			</div>
 
 			<div class="rail-footer">
-				<StatusDot status="success" label="Temporal Server" size="sm" />
-				<span class="temporal-detail">Namespace: default</span>
+				<StatusDot status="success" label="Durably connected" size="sm" />
+				<span class="temporal-detail">Your work survives a crash or a closed tab</span>
 			</div>
 		</nav>
 
@@ -588,14 +525,20 @@
 
 	.rail-heading {
 		padding: 10px 10px 6px;
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.rail-heading-label {
+		display: flex;
+		align-items: center;
+		gap: 6px;
 		font-size: 11px;
 		font-weight: 600;
 		color: var(--cinder-text-subtle);
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
-		display: flex;
-		align-items: center;
-		gap: 6px;
 	}
 
 	.heading-spacer {
@@ -783,11 +726,22 @@
 			padding: 4px;
 		}
 
-		.rail-heading,
+		.rail-heading-label,
 		.rail-message,
 		.card-content,
 		.rail-nav-item span,
 		.temporal-detail {
+			display: none;
+		}
+
+		.rail-heading {
+			justify-content: center;
+		}
+
+		/* Collapsed rail shows only the current conversation, per design spec
+			   11a — not a list of indistinguishable session dots. Switching to a
+			   different session requires expanding the rail. */
+		.session-card:not(.selected) {
 			display: none;
 		}
 
@@ -808,6 +762,10 @@
 		.rail-footer {
 			padding: 10px 0;
 			justify-content: center;
+		}
+
+		.rail-footer :global(.cinder-status-dot__label) {
+			display: none;
 		}
 
 		.brand-name {
@@ -849,11 +807,23 @@
 		}
 
 		/* Restore full rail content when open on phone */
-		.rail.rail-open .rail-heading,
+		.rail.rail-open .rail-heading-label,
 		.rail.rail-open .rail-message,
 		.rail.rail-open .card-content,
 		.rail.rail-open .rail-nav-item span,
 		.rail.rail-open .temporal-detail {
+			display: revert;
+		}
+
+		.rail.rail-open .rail-heading {
+			justify-content: flex-start;
+		}
+
+		.rail.rail-open .session-card:not(.selected) {
+			display: flex;
+		}
+
+		.rail.rail-open .rail-footer :global(.cinder-status-dot__label) {
 			display: revert;
 		}
 
