@@ -19,6 +19,13 @@ type AnthropicResponseBlock = AnthropicTextBlock | AnthropicToolUseBlock | { typ
 export type AnthropicMessageResponse = {
 	role: 'assistant';
 	content: AnthropicResponseBlock[];
+	/**
+	 * Why the model stopped. `'pause_turn'` means a server-tool loop
+	 * (web_search, web_fetch, ...) was interrupted mid-way and the request
+	 * must be re-issued with the assistant's partial content appended to
+	 * continue — see `continueAnthropicStream` in `model-runner.ts`.
+	 */
+	stop_reason?: string | null;
 	usage?: {
 		input_tokens?: number;
 		output_tokens?: number;

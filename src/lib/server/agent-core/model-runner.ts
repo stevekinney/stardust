@@ -19,6 +19,7 @@ import {
 	readAnthropicUsage,
 	type AnthropicMessageResponse
 } from './model-response-normalizer';
+import { serverToolsForModel } from './server-tools';
 
 type ProviderRequest = {
 	model: string;
@@ -76,28 +77,92 @@ export function formatToolsForAnthropic(tools: ModelToolSchema[] = []): Anthropi
 	return toAnthropicTools(serializedTools);
 }
 
+/** Fetches one streamed model response, forwarding text deltas via `onDelta`. */
+type StreamOnce = (messages: unknown[], onDelta: OnDelta) => Promise<AnthropicMessageResponse>;
+
+/** Maximum number of `pause_turn` continuations before giving up and returning
+ *  whatever has accumulated so far. */
+const MAX_PAUSE_TURN_CONTINUATIONS = 5;
+
+/**
+ * Runs a model stream request and automatically continues it when the
+ * response is interrupted mid-way by Anthropic's server-tool loop
+ * (`stop_reason: 'pause_turn'`). Per Anthropic's continuation contract, each
+ * continuation appends the assistant's partial response as an assistant turn
+ * and re-issues the request with the same messages otherwise unchanged — no
+ * user message is added between iterations, since the API resumes from the
+ * trailing `server_tool_use` block. Stops after `maxContinuations` re-issues
+ * and returns whatever has accumulated so far. `content` and token `usage`
+ * are merged across every iteration, in order.
+ */
+export async function continueAnthropicStream(
+	initialMessages: unknown[],
+	streamOnce: StreamOnce,
+	onDelta: OnDelta,
+	maxContinuations: number = MAX_PAUSE_TURN_CONTINUATIONS
+): Promise<AnthropicMessageResponse> {
+	let messages = initialMessages;
+	let mergedContent: AnthropicMessageResponse['content'] = [];
+	let inputTokens = 0;
+	let outputTokens = 0;
+	let continuations = 0;
+	let latest: AnthropicMessageResponse;
+
+	for (;;) {
+		latest = await streamOnce(messages, onDelta);
+		mergedContent = mergedContent.concat(latest.content);
+		inputTokens += latest.usage?.input_tokens ?? 0;
+		outputTokens += latest.usage?.output_tokens ?? 0;
+
+		if (latest.stop_reason !== 'pause_turn' || continuations >= maxContinuations) {
+			break;
+		}
+		continuations++;
+		messages = [...messages, { role: 'assistant' as const, content: latest.content }];
+	}
+
+	return {
+		...latest,
+		content: mergedContent,
+		usage: { input_tokens: inputTokens, output_tokens: outputTokens }
+	};
+}
+
 function createAnthropicProvider(apiKey: string): ModelProviderClient {
 	const client = new Anthropic({ apiKey });
 
 	return {
 		async createMessage(input, onDelta) {
-			const stream = client.messages.stream({
-				model: input.model,
-				max_tokens: input.maxTokens,
-				...(input.system ? { system: input.system } : {}),
-				messages: input.messages as never,
-				...(input.tools?.length ? { tools: input.tools as never } : {})
-			});
+			const { tools: serverTools, betaHeaders } = serverToolsForModel(input.model);
+			const tools = [...(input.tools ?? []), ...serverTools];
+			const requestOptions = betaHeaders.length
+				? { headers: { 'anthropic-beta': betaHeaders.join(',') } }
+				: undefined;
 
-			// Publish each text token to the stream bus as it arrives, before the
-			// final structured result is available to the workflow.
-			for await (const event of stream) {
-				if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-					await onDelta(event.delta.text);
+			const streamOnce: StreamOnce = async (messages, forwardDelta) => {
+				const stream = client.messages.stream(
+					{
+						model: input.model,
+						max_tokens: input.maxTokens,
+						...(input.system ? { system: input.system } : {}),
+						messages: messages as never,
+						tools: tools as never
+					},
+					requestOptions
+				);
+
+				// Publish each text token to the stream bus as it arrives, before the
+				// final structured result is available to the workflow.
+				for await (const event of stream) {
+					if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+						await forwardDelta(event.delta.text);
+					}
 				}
-			}
 
-			const message = (await stream.finalMessage()) as AnthropicMessageResponse;
+				return (await stream.finalMessage()) as AnthropicMessageResponse;
+			};
+
+			const message = await continueAnthropicStream(input.messages, streamOnce, onDelta);
 			return { message };
 		}
 	};
