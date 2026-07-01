@@ -5,7 +5,7 @@
  * Bun auto-loads `.env`, but only into its own runtime: it does not export those
  * values to child processes it spawns. Both entrypoints run under `tsx` (Node),
  * launched as children of `bun run`, so without this they would never see `.env`
- * values such as `MODEL_API_KEY` — the worker reads that key when calling the
+ * values such as `ANTHROPIC_API_KEY` — the worker reads that key when calling the
  * model. The web process is covered separately by Vite/SvelteKit's env loading.
  *
  * Import this module for its side effect *before* importing anything that reads

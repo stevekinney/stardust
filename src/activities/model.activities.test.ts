@@ -108,7 +108,7 @@ describe('model activity', () => {
 			createdAt: '2026-01-01T00:00:00.000Z'
 		});
 
-		vi.stubEnv('MODEL_API_KEY', 'runtime-key');
+		vi.stubEnv('ANTHROPIC_API_KEY', 'runtime-key');
 		const provider: ModelProviderClient = {
 			createMessage: vi.fn(async (request, onDelta) => {
 				expect(request.messages).toEqual([{ role: 'user', content: 'Say hello.' }]);

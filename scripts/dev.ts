@@ -131,10 +131,10 @@ async function shutdown(code: number): Promise<void> {
 }
 
 async function main() {
-	if (!process.env.MODEL_API_KEY) {
+	if (!process.env.ANTHROPIC_API_KEY) {
 		console.warn(
-			'[dev] MODEL_API_KEY is not set. The app and inspector will run, but any turn\n' +
-				'      that calls the model will fail. Add MODEL_API_KEY to .env (see\n' +
+			'[dev] ANTHROPIC_API_KEY is not set. The app and inspector will run, but any turn\n' +
+				'      that calls the model will fail. Add ANTHROPIC_API_KEY to .env (see\n' +
 				'      .env.example), then restart.'
 		);
 	}

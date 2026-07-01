@@ -210,7 +210,7 @@ Each transcript event also has a session-level sequence cursor. Memory compactio
 
 The model call is an Activity. The Activity:
 
-- Loads `MODEL_API_KEY` only inside the Activity runtime.
+- Loads `ANTHROPIC_API_KEY` only inside the Activity runtime.
 - Rebuilds conversation state from `transcript_events`.
 - Uses `conversationalist` for history, context windowing, provider message adaptation, and redaction.
 - Uses `armorer/adapters/anthropic` to format tool schemas for the provider.
@@ -385,7 +385,7 @@ Use these commands from the repository root:
 
 ```sh
 bun install
-cp .env.example .env   # set MODEL_API_KEY
+cp .env.example .env   # set ANTHROPIC_API_KEY
 bun run dev            # orchestrator: starts/reuses Temporal, migrates, runs web + worker
 ```
 

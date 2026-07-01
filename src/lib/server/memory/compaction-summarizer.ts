@@ -71,10 +71,10 @@ Return only the JSON object, no markdown fences.`;
 // ── API key reader ─────────────────────────────────────────────────────────────
 
 function readApiKey(override?: string): string {
-	const key = override ?? process.env.MODEL_API_KEY;
+	const key = override ?? process.env.ANTHROPIC_API_KEY;
 	if (!key) {
 		throw ApplicationFailure.nonRetryable(
-			'MODEL_API_KEY is required for memory compaction summarization'
+			'ANTHROPIC_API_KEY is required for memory compaction summarization'
 		);
 	}
 	return key;

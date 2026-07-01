@@ -104,9 +104,9 @@ function createAnthropicProvider(apiKey: string): ModelProviderClient {
 }
 
 function readApiKey(input?: string): string {
-	const apiKey = input ?? process.env.MODEL_API_KEY;
+	const apiKey = input ?? process.env.ANTHROPIC_API_KEY;
 	if (!apiKey) {
-		throw ApplicationFailure.nonRetryable('MODEL_API_KEY is required to call the model');
+		throw ApplicationFailure.nonRetryable('ANTHROPIC_API_KEY is required to call the model');
 	}
 	return apiKey;
 }

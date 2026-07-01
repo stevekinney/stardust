@@ -41,12 +41,12 @@ describe('summarizeCompaction', () => {
 		expect(provider.complete).not.toHaveBeenCalled();
 	});
 
-	it('throws a non-retryable ApplicationFailure when MODEL_API_KEY is missing', async () => {
+	it('throws a non-retryable ApplicationFailure when ANTHROPIC_API_KEY is missing', async () => {
 		// Ensure the env var is absent.
-		vi.stubEnv('MODEL_API_KEY', '');
+		vi.stubEnv('ANTHROPIC_API_KEY', '');
 
 		await expect(summarizeCompaction(baseInput, {})).rejects.toThrow(
-			'MODEL_API_KEY is required for memory compaction summarization'
+			'ANTHROPIC_API_KEY is required for memory compaction summarization'
 		);
 	});
 

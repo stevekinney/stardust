@@ -15,7 +15,7 @@ The whole system is five moving parts: one SvelteKit app (web UI + server routes
 
 ```sh
 bun install
-cp .env.example .env      # then open .env and set MODEL_API_KEY
+cp .env.example .env      # then open .env and set ANTHROPIC_API_KEY
 bun run dev
 ```
 
@@ -35,7 +35,7 @@ Those are the preferred ports (Temporal's frontend is 7233 — Temporal's own de
 Press `Ctrl-C` to stop everything. The orchestrator owns only what it started: if it launched the Temporal server it tears it down too, but a Temporal server you were already running is left untouched.
 
 > [!NOTE]
-> The app and run inspector start fine without `MODEL_API_KEY`, but any turn that calls the model will fail. The orchestrator prints a warning at startup if the key is missing.
+> The app and run inspector start fine without `ANTHROPIC_API_KEY`, but any turn that calls the model will fail. The orchestrator prints a warning at startup if the key is missing.
 
 ## Configuration
 
@@ -43,7 +43,7 @@ Configuration is environment variables, read from `process.env`. Copy `.env.exam
 
 | Variable                   | Default                        | Purpose                                                                           |
 | -------------------------- | ------------------------------ | --------------------------------------------------------------------------------- |
-| `MODEL_API_KEY`            | _(none — required)_            | Anthropic API key. Required for any turn that calls the model.                    |
+| `ANTHROPIC_API_KEY`        | _(none — required)_            | Anthropic API key. Required for any turn that calls the model.                    |
 | `TEMPORAL_ADDRESS`         | `localhost:7233`               | Temporal dev server frontend address.                                             |
 | `TEMPORAL_NAMESPACE`       | `default`                      | Temporal namespace (see the note below).                                          |
 | `TEMPORAL_WEB_PORT`        | `8233`                         | Port for the Temporal Web UI.                                                     |
@@ -83,7 +83,7 @@ bun run chaos
 It spins up a throwaway database and Temporal server, starts **two** Worker processes, drives a run to a tool-approval gate, kills one Worker mid-run, resolves the approval, and verifies the run completes on the surviving Worker. It prints `STARDUST_T11_CHAOS_OK <runId>` on success.
 
 > [!WARNING]
-> `bun run chaos` needs `MODEL_API_KEY` set — it depends on a real Anthropic `tool_use` response to reach the approval gate.
+> `bun run chaos` needs `ANTHROPIC_API_KEY` set — it depends on a real Anthropic `tool_use` response to reach the approval gate.
 
 ## Commands
 
@@ -137,7 +137,7 @@ The load-bearing rule is Temporal determinism: workflow code decides and waits b
 
 ## Troubleshooting
 
-- **Model turns fail / "MODEL_API_KEY is required"** — set `MODEL_API_KEY` in `.env` (or export it in your shell) and restart so the Worker picks it up. `.env` is read from the directory you run from.
+- **Model turns fail / "ANTHROPIC_API_KEY is required"** — set `ANTHROPIC_API_KEY` in `.env` (or export it in your shell) and restart so the Worker picks it up. `.env` is read from the directory you run from.
 - **`temporal: command not found`** — install the Temporal CLI (`brew install temporal`).
 - **Port already in use (7233 / 7777 / 8233)** — `bun run dev` handles this for you: it reuses a Temporal server already running on `TEMPORAL_ADDRESS`, and otherwise selects the next free port for Temporal, the UI, and the app, printing the actual URLs in its banner. To pin specific ports, set `TEMPORAL_ADDRESS` / `TEMPORAL_WEB_PORT` (and `APP_PORT` for the app). The standalone `bun run dev:web` falls back through Vite if 7777 is busy.
 - **Reset all local state** — stop the app and delete `~/.stardust/` (database, artifacts, workspaces, model cache). The next run recreates it and re-applies migrations.
