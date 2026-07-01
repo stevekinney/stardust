@@ -29,6 +29,75 @@ import type {
 	SandboxProvider
 } from '../sandbox/sandbox-provider';
 import * as schema from '../db/schema';
+import { isMacOs, sendIMessage, sendUserNotification } from './local-notifications';
+import { executeScheduleCreate, executeScheduleList } from './schedule-tools';
+import { callPlaywrightMcpTool } from './playwright-mcp';
+import { lookupLibraryDocs } from './context7';
+import { queryScratchDatabase } from './scratch-db';
+import { sendSessionMessage } from '../temporal/session-messaging';
+
+vi.mock('./local-notifications', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('./local-notifications')>();
+	return {
+		...actual,
+		isMacOs: vi.fn(() => true),
+		sendUserNotification: vi.fn(async () => ({ sentAt: '2026-01-01T00:00:00.000Z' })),
+		sendIMessage: vi.fn(async () => ({
+			recipient: 'buddy@example.test',
+			sentAt: '2026-01-01T00:00:00.000Z'
+		}))
+	};
+});
+
+vi.mock('./schedule-tools', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('./schedule-tools')>();
+	return {
+		...actual,
+		executeScheduleCreate: vi.fn(async () => ({
+			scheduleId: 'sched_001',
+			name: 'nightly-report',
+			cronExpression: '0 0 * * *'
+		})),
+		executeScheduleList: vi.fn(async () => [])
+	};
+});
+
+vi.mock('./playwright-mcp', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('./playwright-mcp')>();
+	return {
+		...actual,
+		callPlaywrightMcpTool: vi.fn(async () => ({ isError: false, content: [] }))
+	};
+});
+
+vi.mock('./context7', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('./context7')>();
+	return {
+		...actual,
+		lookupLibraryDocs: vi.fn(async () => ({
+			library: 'svelte',
+			resolvedId: '/sveltejs/svelte',
+			topic: null,
+			documentation: 'Svelte docs excerpt'
+		}))
+	};
+});
+
+vi.mock('./scratch-db', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('./scratch-db')>();
+	return {
+		...actual,
+		queryScratchDatabase: vi.fn(() => ({ rows: [{ id: 1 }], truncated: false }))
+	};
+});
+
+vi.mock('../temporal/session-messaging', () => ({
+	sendSessionMessage: vi.fn(async () => ({
+		accepted: true,
+		runId: 'run-target-001',
+		targetSessionKey: 'target-session'
+	}))
+}));
 
 let workspaceRoot: string;
 let provider: LocalSubprocessSandboxProvider;
@@ -41,41 +110,55 @@ function runCommandThroughProvider(input: SandboxCommandInput): Promise<SandboxC
 }
 
 beforeEach(async () => {
-	vi.stubEnv('TAVILY_API_KEY', '');
+	vi.mocked(isMacOs).mockReturnValue(true);
 	workspaceRoot = await mkdtemp(join(tmpdir(), 'stardust-tools-'));
 	provider = new LocalSubprocessSandboxProvider({ workspaceRoot });
 });
 
 afterEach(async () => {
-	vi.unstubAllEnvs();
+	vi.clearAllMocks();
 	await rm(workspaceRoot, { recursive: true, force: true });
 });
 
 // ── Manifest shape ────────────────────────────────────────────────────────────
 
 describe('tool registry', () => {
-	it('exposes implemented local tools and hides only credential-gated web.search', () => {
+	it('exposes every implemented tool, including the keyless new tool modules, on macOS', () => {
+		vi.mocked(isMacOs).mockReturnValue(true);
 		const manifest = getToolManifest();
 		expect(manifest.map((tool) => tool.name).sort()).toEqual([
 			'artifact.createReport',
 			'browser.act',
 			'browser.inspect',
+			'browser.mcp.call',
+			'db.query',
 			'delegate.code',
 			'delegate.critic',
 			'delegate.parallel',
 			'delegate.research',
+			'docs.lookup',
+			'feed.read',
+			'hackernews.read',
+			'imessage.send',
 			'memory.search',
 			'memory.writeCandidate',
+			'notify.user',
 			'process.kill',
 			'process.start',
 			'repository.inspect',
 			'sandbox.restore',
 			'sandbox.snapshot',
+			'schedule.create',
+			'schedule.list',
+			'session.sendMessage',
 			'shell.exec',
 			'temporal.inspect',
 			'temporal.mcp.call',
+			'timer.wait',
 			'verification.run',
+			'weather.lookup',
 			'web.fetch',
+			'wikipedia.lookup',
 			'workspace.applyPatch',
 			'workspace.diff',
 			'workspace.readFile',
@@ -92,6 +175,29 @@ describe('tool registry', () => {
 			requiresApproval: false,
 			taskQueue: TASK_QUEUE_TOOLS
 		});
+	});
+
+	it('hides notify.user and imessage.send from the manifest when not on macOS', () => {
+		vi.mocked(isMacOs).mockReturnValue(false);
+		const names = getToolManifest().map((tool) => tool.name);
+		expect(names).not.toContain('notify.user');
+		expect(names).not.toContain('imessage.send');
+		// Every other keyless tool stays visible regardless of platform.
+		expect(names).toContain('docs.lookup');
+		expect(names).toContain('db.query');
+		expect(names).toContain('feed.read');
+	});
+
+	it('denies calls to notify.user and imessage.send when not on macOS', async () => {
+		vi.mocked(isMacOs).mockReturnValue(false);
+		const result = await executeRegisteredTool({
+			call: {
+				id: 'call-notify-gated-01',
+				name: 'notify.user',
+				arguments: { title: 'Hi', message: 'hello' }
+			}
+		});
+		expect(result.outcome).toBe('denied');
 	});
 
 	it('assigns high risk to workspace.writeFile and workspace.applyPatch per the MVP spec', () => {
@@ -190,7 +296,6 @@ describe('tool registry', () => {
 		]) {
 			expect(manifestNames.has(visible), `${visible} should appear in manifest`).toBe(true);
 		}
-		expect(manifestNames.has('web.search')).toBe(false);
 	});
 
 	it('carries idempotencyBehavior on every registered tool', () => {
@@ -200,14 +305,6 @@ describe('tool registry', () => {
 				`${tool.name} is missing idempotencyBehavior`
 			).toMatch(/^(safe|key-required|unsafe)$/);
 		}
-	});
-
-	it('exposes web.search from the manifest only when TAVILY_API_KEY is configured', async () => {
-		vi.stubEnv('TAVILY_API_KEY', '');
-		expect(getToolManifest().map((tool) => tool.name)).not.toContain('web.search');
-
-		vi.stubEnv('TAVILY_API_KEY', 'test-tavily-key');
-		expect(getToolManifest().map((tool) => tool.name)).toContain('web.search');
 	});
 
 	it('filters denied tools from the model manifest and formats via armorer', () => {
@@ -253,47 +350,6 @@ describe('tool registry', () => {
 		expect(result.content).toContain('hello from the internet');
 	});
 
-	it('executes web.search through Tavily and normalizes results', async () => {
-		vi.stubEnv('TAVILY_API_KEY', 'test-tavily-key');
-		const fetcher = vi.fn(
-			async () =>
-				new Response(
-					JSON.stringify({
-						results: [
-							{ title: 'First', url: 'https://example.test/1', content: 'first result' },
-							{ title: 'Second', url: 'https://example.test/2', snippet: 'second result' }
-						]
-					}),
-					{ status: 200, headers: { 'content-type': 'application/json' } }
-				)
-		);
-
-		const result = await executeRegisteredTool({
-			fetcher,
-			call: {
-				id: 'call-web-search-01',
-				name: 'web.search',
-				arguments: { query: 'stardust', maxResults: 2 }
-			}
-		});
-
-		expect(result.outcome).toBe('success');
-		expect(fetcher).toHaveBeenCalledWith(
-			'https://api.tavily.com/search',
-			expect.objectContaining({
-				method: 'POST',
-				headers: expect.objectContaining({ authorization: 'Bearer test-tavily-key' })
-			})
-		);
-		expect(result.content).toEqual({
-			query: 'stardust',
-			results: [
-				{ title: 'First', url: 'https://example.test/1', snippet: 'first result' },
-				{ title: 'Second', url: 'https://example.test/2', snippet: 'second result' }
-			]
-		});
-	});
-
 	it('fences workspace.readFile output as untrusted data to prevent prompt injection', async () => {
 		// Set up the adversarial file directly via the provider (bypasses the
 		// approval gate that workspace.writeFile requires).
@@ -321,6 +377,329 @@ describe('tool registry', () => {
 		expect(result.outcome).toBe('success');
 		expect(result.content).toContain('```text');
 		expect(result.content).toContain(adversarialContent);
+	});
+
+	// ── New tool wiring: timer, session messaging, schedules ────────────────────
+
+	it('timer.wait returns stub content instead of executing — the orchestrator workflow intercepts it', async () => {
+		const result = await executeRegisteredTool({
+			call: {
+				id: 'call-timer-01',
+				name: 'timer.wait',
+				arguments: { durationMs: 60_000, reason: 'check back later' }
+			}
+		});
+
+		expect(result.outcome).toBe('success');
+		expect(result.content).toMatchObject({
+			durationMs: 60_000,
+			reason: 'check back later',
+			message: expect.stringContaining('orchestrator workflow')
+		});
+	});
+
+	it('session.sendMessage delegates to sendSessionMessage, passing the execution-input sessionKey as fromSessionKey', async () => {
+		const result = await executeRegisteredTool({
+			sessionKey: TEST_SESSION,
+			runId: 'run-session-msg',
+			approved: true,
+			call: {
+				id: 'call-session-msg-01',
+				name: 'session.sendMessage',
+				arguments: { sessionKey: 'target-session', message: 'hello there' }
+			}
+		});
+
+		expect(result.outcome).toBe('success');
+		expect(vi.mocked(sendSessionMessage)).toHaveBeenCalledWith({
+			targetSessionKey: 'target-session',
+			message: 'hello there',
+			fromSessionKey: TEST_SESSION
+		});
+	});
+
+	it('session.sendMessage requires approval before executing', async () => {
+		const result = await executeRegisteredTool({
+			sessionKey: TEST_SESSION,
+			runId: 'run-session-msg-gate',
+			call: {
+				id: 'call-session-msg-02',
+				name: 'session.sendMessage',
+				arguments: { sessionKey: 'target-session', message: 'hello there' }
+			}
+		});
+		expect(result.outcome).toBe('approval_required');
+	});
+
+	it('schedule.create delegates to executeScheduleCreate and requires approval', async () => {
+		const waiting = await executeRegisteredTool({
+			call: {
+				id: 'call-schedule-create-01',
+				name: 'schedule.create',
+				arguments: {
+					name: 'nightly-report',
+					cronExpression: '0 0 * * *',
+					prompt: 'Summarize yesterday.'
+				}
+			}
+		});
+		expect(waiting.outcome).toBe('approval_required');
+
+		const approved = await executeRegisteredTool({
+			approved: true,
+			call: {
+				id: 'call-schedule-create-01',
+				name: 'schedule.create',
+				arguments: {
+					name: 'nightly-report',
+					cronExpression: '0 0 * * *',
+					prompt: 'Summarize yesterday.'
+				}
+			}
+		});
+		expect(approved.outcome).toBe('success');
+		expect(vi.mocked(executeScheduleCreate)).toHaveBeenCalledWith({
+			name: 'nightly-report',
+			cronExpression: '0 0 * * *',
+			prompt: 'Summarize yesterday.'
+		});
+		expect(approved.content).toMatchObject({ scheduleId: 'sched_001' });
+	});
+
+	it('schedule.list delegates to executeScheduleList without requiring approval', async () => {
+		const result = await executeRegisteredTool({
+			call: { id: 'call-schedule-list-01', name: 'schedule.list', arguments: {} }
+		});
+		expect(result.outcome).toBe('success');
+		expect(vi.mocked(executeScheduleList)).toHaveBeenCalled();
+	});
+
+	// ── New tool wiring: local notifications (darwin-gated) ─────────────────────
+
+	it('notify.user delegates to sendUserNotification without requiring approval', async () => {
+		const result = await executeRegisteredTool({
+			call: {
+				id: 'call-notify-01',
+				name: 'notify.user',
+				arguments: { title: 'Build finished', message: 'All green.' }
+			}
+		});
+		expect(result.outcome).toBe('success');
+		expect(vi.mocked(sendUserNotification)).toHaveBeenCalledWith({
+			title: 'Build finished',
+			message: 'All green.'
+		});
+	});
+
+	it('imessage.send delegates to sendIMessage and requires approval', async () => {
+		const waiting = await executeRegisteredTool({
+			call: {
+				id: 'call-imessage-01',
+				name: 'imessage.send',
+				arguments: { recipient: 'buddy@example.test', message: 'On my way.' }
+			}
+		});
+		expect(waiting.outcome).toBe('approval_required');
+
+		const approved = await executeRegisteredTool({
+			approved: true,
+			call: {
+				id: 'call-imessage-01',
+				name: 'imessage.send',
+				arguments: { recipient: 'buddy@example.test', message: 'On my way.' }
+			}
+		});
+		expect(approved.outcome).toBe('success');
+		expect(vi.mocked(sendIMessage)).toHaveBeenCalledWith({
+			recipient: 'buddy@example.test',
+			message: 'On my way.'
+		});
+	});
+
+	// ── New tool wiring: browser.mcp.call, docs.lookup, db.query ────────────────
+
+	it('browser.mcp.call delegates to callPlaywrightMcpTool, requires approval, and fences its result', async () => {
+		const result = await executeRegisteredTool({
+			approved: true,
+			call: {
+				id: 'call-browser-mcp-01',
+				name: 'browser.mcp.call',
+				arguments: { toolName: 'browser_snapshot', arguments: {} }
+			}
+		});
+
+		expect(result.outcome).toBe('success');
+		expect(vi.mocked(callPlaywrightMcpTool)).toHaveBeenCalledWith({
+			toolName: 'browser_snapshot',
+			arguments: {}
+		});
+		expect(result.content).toContain('```text');
+	});
+
+	it('docs.lookup delegates to lookupLibraryDocs and fences its result', async () => {
+		const result = await executeRegisteredTool({
+			call: {
+				id: 'call-docs-01',
+				name: 'docs.lookup',
+				arguments: { library: 'svelte' }
+			}
+		});
+
+		expect(result.outcome).toBe('success');
+		expect(vi.mocked(lookupLibraryDocs)).toHaveBeenCalledWith({
+			library: 'svelte',
+			topic: undefined
+		});
+		expect(result.content).toContain('```text');
+		expect(result.content).toContain('Svelte docs excerpt');
+	});
+
+	it('db.query threads the execution-input sessionKey, ignoring any model-supplied sessionKey', async () => {
+		const result = await executeRegisteredTool({
+			sessionKey: TEST_SESSION,
+			runId: 'run-db-query',
+			call: {
+				id: 'call-db-query-01',
+				name: 'db.query',
+				// A model could try to smuggle its own sessionKey through arguments;
+				// db.query's input schema has no sessionKey field, so it is ignored.
+				arguments: { sql: 'SELECT 1', params: [], sessionKey: 'attacker-supplied' }
+			}
+		});
+
+		expect(result.outcome).toBe('success');
+		expect(vi.mocked(queryScratchDatabase)).toHaveBeenCalledWith({
+			sessionKey: TEST_SESSION,
+			sql: 'SELECT 1',
+			params: []
+		});
+	});
+
+	// ── New tool wiring: keyless public-data reads ───────────────────────────────
+
+	it('feed.read fetches and parses an RSS feed, fenced as untrusted data', async () => {
+		const rssXml = [
+			'<?xml version="1.0"?>',
+			'<rss version="2.0"><channel><title>Test Feed</title>',
+			'<item><title>Post One</title><link>https://example.test/1</link></item>',
+			'</channel></rss>'
+		].join('');
+
+		const result = await executeRegisteredTool({
+			fetcher: async () =>
+				new Response(rssXml, { status: 200, headers: { 'content-type': 'application/xml' } }),
+			call: {
+				id: 'call-feed-01',
+				name: 'feed.read',
+				arguments: { url: 'https://example.test/feed.xml' }
+			}
+		});
+
+		expect(result.outcome).toBe('success');
+		expect(result.content).toContain('```text');
+		expect(result.content).toContain('Post One');
+	});
+
+	it('hackernews.read reads Hacker News stories, fenced as untrusted data', async () => {
+		const fetcher = vi.fn(async (url: RequestInfo | URL) => {
+			const href = url.toString();
+			if (href.includes('topstories')) {
+				return new Response(JSON.stringify([1]), { status: 200 });
+			}
+			return new Response(
+				JSON.stringify({
+					id: 1,
+					title: 'Show HN: Stardust',
+					by: 'steve',
+					score: 42,
+					time: 0,
+					descendants: 3
+				}),
+				{ status: 200 }
+			);
+		});
+
+		const result = await executeRegisteredTool({
+			fetcher: fetcher as unknown as typeof fetch,
+			call: {
+				id: 'call-hn-01',
+				name: 'hackernews.read',
+				arguments: { feed: 'top', limit: 1 }
+			}
+		});
+
+		expect(result.outcome).toBe('success');
+		expect(result.content).toContain('```text');
+		expect(result.content).toContain('Show HN: Stardust');
+	});
+
+	it('wikipedia.lookup searches and summarizes, fenced as untrusted data', async () => {
+		const fetcher = vi.fn(async (url: RequestInfo | URL) => {
+			const href = url.toString();
+			if (href.includes('/search/page')) {
+				return new Response(JSON.stringify({ pages: [{ key: 'Svelte' }] }), { status: 200 });
+			}
+			return new Response(
+				JSON.stringify({
+					title: 'Svelte',
+					extract: 'Svelte is a UI framework.',
+					content_urls: { desktop: { page: 'https://en.wikipedia.org/wiki/Svelte' } }
+				}),
+				{ status: 200 }
+			);
+		});
+
+		const result = await executeRegisteredTool({
+			fetcher: fetcher as unknown as typeof fetch,
+			call: {
+				id: 'call-wiki-01',
+				name: 'wikipedia.lookup',
+				arguments: { query: 'Svelte' }
+			}
+		});
+
+		expect(result.outcome).toBe('success');
+		expect(result.content).toContain('```text');
+		expect(result.content).toContain('Svelte is a UI framework.');
+	});
+
+	it('weather.lookup returns structured data without fencing (not third-party prose)', async () => {
+		const fetcher = vi.fn(async (url: RequestInfo | URL) => {
+			const href = url.toString();
+			if (href.includes('geocoding-api')) {
+				return new Response(
+					JSON.stringify({
+						results: [{ name: 'Austin', country: 'US', latitude: 30.3, longitude: -97.7 }]
+					}),
+					{ status: 200 }
+				);
+			}
+			return new Response(
+				JSON.stringify({
+					current: { temperature_2m: 25 },
+					daily: {
+						time: ['2026-01-01'],
+						temperature_2m_max: [30],
+						temperature_2m_min: [20],
+						precipitation_probability_max: [10],
+						weather_code: [0]
+					}
+				}),
+				{ status: 200 }
+			);
+		});
+
+		const result = await executeRegisteredTool({
+			fetcher: fetcher as unknown as typeof fetch,
+			call: {
+				id: 'call-weather-01',
+				name: 'weather.lookup',
+				arguments: { location: 'Austin' }
+			}
+		});
+
+		expect(result.outcome).toBe('success');
+		expect(result.content).toMatchObject({ location: expect.objectContaining({ name: 'Austin' }) });
 	});
 
 	it('denies hallucinated and malformed tool calls before execution', async () => {

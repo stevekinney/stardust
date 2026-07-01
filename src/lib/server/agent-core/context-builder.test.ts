@@ -173,7 +173,7 @@ describe('model context builder', () => {
 				id: 't-002',
 				kind: 'tool_call' as const,
 				payload: JSON.stringify({
-					calls: [{ id: 'c-1', name: 'web.search', input: { query: 'TypeScript docs' } }]
+					calls: [{ id: 'c-1', name: 'docs.lookup', input: { library: 'typescript' } }]
 				}),
 				createdAt: '2026-01-01T00:00:01.000Z'
 			},

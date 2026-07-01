@@ -31,6 +31,3 @@ export const TOOL_RESULT_INLINE_LIMIT = parseInt(
 	process.env.TOOL_RESULT_INLINE_LIMIT ?? '8000',
 	10
 );
-
-/** Optional Tavily API key. When absent, `web.search` is not exposed to the model. */
-export const TAVILY_API_KEY = process.env.TAVILY_API_KEY ?? '';
