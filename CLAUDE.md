@@ -70,6 +70,8 @@ import FacetedFilterBar from '@lostgradient/cinder/faceted-filter-bar';
 
 **Nine run states:** empty, loading, streaming, waiting_approval, disconnected, recovered, failed, cancelled, complete. Each maps to a dot color and has specific UI treatment (see design section 10).
 
+**Tool modules:** New agent tools live as one module per domain under `src/lib/server/tools/` (e.g. `public-data.ts`, `scratch-db.ts`), each exporting zod input schemas, executor functions with injectable deps, and a `defineXxxTools(): RegisteredTool[]` built with `defineStardustTool` from `define-tool.ts`. Risk/approval/task-queue metadata lives in `src/lib/server/policy/risk.ts`. Registration happens in `tool-definitions.ts`; execution dispatch in `execute-new-tool-call.ts`; platform/env gating in `registry.ts`'s `isToolConfigured`. Tools must stay keyless — `ANTHROPIC_API_KEY` is the only required secret (optional keys like `CONTEXT7_API_KEY` may raise limits but must never gate a tool's presence). Tools returning third-party text join the fenced-untrusted set in `registry.ts`.
+
 **Responsive breakpoints:**
 
 - Desktop: full rail + side-by-side split

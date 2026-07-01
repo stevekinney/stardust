@@ -154,7 +154,7 @@ Reintroducing authentication later is additive: restore users, tenants, membersh
 
 **AgentSessionWorkflow:** Owns the session lane. It accepts `submitTurn` Updates, exposes state Queries, keeps one active run at a time, queues additional turns, routes approval decisions, routes steering, handles interrupt, tracks memory references, and performs Continue-As-New only between runs.
 
-**AgentRunWorkflow:** Owns one prepared turn. It assembles context through Activities, calls the model through an Activity, validates tool calls, enforces policy, waits durably for approval, executes tools through Activities or child workflows, publishes stream events, persists canonical transcript events, and produces memory candidates.
+**AgentRunWorkflow:** Owns one prepared turn. It assembles context through Activities, calls the model through an Activity, validates tool calls, enforces policy, waits durably for approval, executes tools through Activities or child workflows, publishes stream events, persists canonical transcript events, and produces memory candidates. It also executes `timer.wait` itself as a durable `condition()` wait; an in-band `interruptRunSignal` (sent by the session before its hard-cancel safety net) lets an interrupted wait persist a partial-wait tool result through the normal path before the run records `cancelled`.
 
 **Subagent workflows:** Research and code subagents are child workflows in the demo path. They share the parent run budget and render as nested lanes. The critic subagent is advisory and is a fast follow.
 
@@ -218,6 +218,7 @@ The model call is an Activity. The Activity:
 - Emits token deltas into `stream_events`.
 - Returns one normalized final result to the workflow.
 - Computes token usage and estimated cost from a local price table keyed by model ID.
+- Attaches Anthropic's server-side `web_search`/`web_fetch` tools to every request, selecting the tool variant by model generation, and resumes `pause_turn` responses inside the Activity (capped at five continuations, content and usage merged across iterations).
 
 Unknown model IDs should fail before under-counting cost.
 
@@ -244,7 +245,18 @@ Policy is enforced in three stages:
 - **Call validation:** Hallucinated, malformed, denied, or prompt-injection-shaped calls are rejected before execution.
 - **Side-effect gate:** Risky tools enter Temporal's durable approval wait before execution.
 
-The demo-critical tool set is `web.fetch`, `workspace.readFile`, `workspace.writeFile`, `workspace.applyPatch`, and `shell.exec`. Extended tools such as `web.search`, process management, `sandbox.snapshot`, `memory.writeCandidate`, and `delegate.*` are fast follows.
+The registered tool surface is thirty-seven tools, all keyless beyond `ANTHROPIC_API_KEY`:
+
+- **Workspace and sandbox:** `web.fetch`, `workspace.readFile`/`writeFile`/`applyPatch`/`diff`/`searchFiles`, `shell.exec`, `process.start`/`kill`, `sandbox.snapshot`/`restore`, `verification.run`.
+- **Browser:** `browser.inspect`/`act` (first-party Playwright) and `browser.mcp.call` (bundled `@playwright/mcp` over stdio, allowlisted to interaction/observation tools — no evaluate, filesystem, or storage access).
+- **Public data:** `feed.read` (RSS/Atom behind the SSRF guard), `hackernews.read`, `weather.lookup` (Open-Meteo), `wikipedia.lookup`, `docs.lookup` (Context7 remote MCP, anonymous tier; `CONTEXT7_API_KEY` optionally raises limits).
+- **Temporal-native:** `timer.wait` (durable in-workflow wait, executed by the run workflow itself like `delegate.parallel`), `schedule.create`/`schedule.list` (real Temporal Schedules), `session.sendMessage` (cross-session `submitTurn` bridge).
+- **Local machine (macOS-gated):** `notify.user`, `imessage.send` — hidden from the manifest off-darwin; approval parking also fires a best-effort desktop notification.
+- **Memory, observability, delegation:** `memory.search`/`writeCandidate`, `repository.inspect`, `temporal.inspect`/`mcp.call`, `artifact.createReport`, `db.query` (per-session SQLite scratchpad), `delegate.research`/`code`/`critic`/`parallel`.
+
+Web _search_ is not a client tool: it is served by Anthropic's server-side `web_search`/`web_fetch` tools attached to every model call (see Model and Context).
+
+The tools module is split along its natural seams, each file under 500 lines: `tool-definitions.ts` (schemas and the registered-tool assembly), `registry.ts` (manifest, configuration gating, and the execution entry point), `execute-tool-call.ts`/`execute-new-tool-call.ts` (dispatch), `tool-execution-context.ts` (shared execution helpers), and one module per tool domain (`public-data.ts`, `local-notifications.ts`, `playwright-mcp.ts`, `context7.ts`, `scratch-db.ts`, `timer-tool.ts`, `schedule-tools.ts`). Tool output that can carry third-party text (`web.fetch`, `workspace.readFile`, `feed.read`, `hackernews.read`, `wikipedia.lookup`, `docs.lookup`, `browser.mcp.call`) is fenced as untrusted data before it reaches model context.
 
 Command-backed sandbox tools must execute through the heartbeat-aware sandbox command Activity helper. The registry still owns policy, artifact spill, and tool idempotency behavior, but subprocess work must heartbeat while running and observe Temporal cancellation instead of calling the sandbox provider directly inside a larger opaque Activity.
 
@@ -327,6 +339,8 @@ The demo path needs:
 - Record every schedule fire in `schedule_fire_events` so the UI can show schedule ID, overlap policy, scheduled workflow, target session, accepted run ID, and inspect-run linkage.
 
 Fast-follow schedule management adds pause, resume, delete, and projection reconciliation from Temporal as the source of truth.
+
+The agent can also create and list schedules itself through the `schedule.create` (approval-gated) and `schedule.list` tools, which reuse the same schedule client as the API routes — agent-created standing tasks appear on the Schedules surface exactly like human-created ones.
 
 ## User Interface Architecture
 
@@ -519,7 +533,7 @@ Tasks are grouped by dependency waves. A task is safe to start only after all bl
 **T14: Extended tool set**
 
 - Depends on T5.
-- Add `web.search`, `process.start`, `process.kill`, `sandbox.snapshot`, `memory.writeCandidate`, and `delegate.*` tool descriptors.
+- Add `process.start`, `process.kill`, `sandbox.snapshot`, `memory.writeCandidate`, and `delegate.*` tool descriptors. (Web search ultimately shipped as Anthropic's server-side `web_search`/`web_fetch` tools rather than a keyed client tool.)
 - Gates: `bun run vitest run src/lib/server/tools`, `bun run vitest run src/lib/server/policy`, then standard gates.
 
 **T15: Ephemeral sandbox**
