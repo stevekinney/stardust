@@ -159,6 +159,82 @@ export const DELEGATE_TOOL: ToolMetadata = toolMetadata({
 	idempotencyBehavior: 'key-required'
 });
 
+/** Keyless public-data reads (feeds, Hacker News, weather, Wikipedia, docs lookup). */
+export const PUBLIC_DATA_TOOL: ToolMetadata = toolMetadata({
+	...LOW_RISK_TOOL,
+	timeoutMs: 15_000
+});
+
+/** Remote documentation lookup (Context7) — read-only but slower than local reads. */
+export const DOCS_LOOKUP_TOOL: ToolMetadata = toolMetadata({
+	...LOW_RISK_TOOL,
+	timeoutMs: 30_000,
+	retry: { maximumAttempts: 1 }
+});
+
+/**
+ * Durable timer — executed by the orchestrator workflow itself (like
+ * `delegate.parallel`), never inside a tool activity. Low risk: waiting has no
+ * side effects and cancellation interrupts it.
+ */
+export const TIMER_TOOL: ToolMetadata = toolMetadata({
+	...LOW_RISK_TOOL,
+	taskQueue: TASK_QUEUE_ORCHESTRATOR
+});
+
+/** Creating a standing Temporal schedule is a durable action — approval + dedupe required. */
+export const SCHEDULE_CREATE_TOOL: ToolMetadata = toolMetadata({
+	risk: 'medium',
+	requiresApproval: true,
+	taskQueue: TASK_QUEUE_TOOLS,
+	timeoutMs: 15_000,
+	retry: { maximumAttempts: 1 },
+	idempotencyBehavior: 'key-required'
+});
+
+/** Cross-session messaging wakes or feeds another session — approval + dedupe required. */
+export const SESSION_MESSAGE_TOOL: ToolMetadata = toolMetadata({
+	risk: 'medium',
+	requiresApproval: true,
+	taskQueue: TASK_QUEUE_TOOLS,
+	timeoutMs: 15_000,
+	retry: { maximumAttempts: 1 },
+	idempotencyBehavior: 'key-required'
+});
+
+/** Native desktop notification — local, transient, no approval needed. */
+export const NOTIFY_TOOL: ToolMetadata = toolMetadata({
+	...LOW_RISK_TOOL,
+	retry: { maximumAttempts: 1 }
+});
+
+/** iMessage send — outward-facing message to a real person; approval + dedupe required. */
+export const MESSAGING_TOOL: ToolMetadata = toolMetadata({
+	risk: 'high',
+	requiresApproval: true,
+	taskQueue: TASK_QUEUE_TOOLS,
+	timeoutMs: 15_000,
+	retry: { maximumAttempts: 1 },
+	idempotencyBehavior: 'key-required'
+});
+
+/** Raw Playwright MCP calls can mutate page state through UI interactions. */
+export const BROWSER_MCP_TOOL: ToolMetadata = toolMetadata({
+	risk: 'medium',
+	requiresApproval: true,
+	taskQueue: TASK_QUEUE_SANDBOX,
+	timeoutMs: 60_000,
+	retry: { maximumAttempts: 1 },
+	idempotencyBehavior: 'unsafe'
+});
+
+/** Per-session scratch SQLite — contained to a dedicated database file, no approval. */
+export const DB_QUERY_TOOL: ToolMetadata = toolMetadata({
+	...LOW_RISK_TOOL,
+	timeoutMs: 15_000,
+	retry: { maximumAttempts: 1 }
+});
+
 export function riskRequiresApproval(risk: ToolRiskLevel): boolean {
 	return risk === 'medium' || risk === 'high';
 }
