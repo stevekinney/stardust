@@ -20,6 +20,7 @@ import {
 	type AnthropicMessageResponse
 } from './model-response-normalizer';
 import { serverToolsForModel } from './server-tools';
+import { buildCanonicalToolNameIndex, fromModelToolName, toModelToolName } from './tool-name-codec';
 
 type ProviderRequest = {
 	model: string;
@@ -59,20 +60,28 @@ export function classifyModelProviderError(error: unknown): 'transient' | 'perma
 }
 
 export function formatToolsForAnthropic(tools: ModelToolSchema[] = []): AnthropicTool[] {
-	const serializedTools: SerializedToolDefinition[] = tools.map((tool) => ({
-		schemaVersion: '2020-12',
-		id: `${tool.identity.namespace ?? 'default'}:${tool.identity.name}`,
-		identity: {
-			namespace: tool.identity.namespace ?? 'default',
-			name: tool.identity.name,
-			...(tool.identity.version ? { version: tool.identity.version } : {})
-		},
-		display: tool.display,
-		name: tool.identity.name,
-		description: tool.display.description,
-		aliases: [],
-		input: tool.input as JsonObject
-	}));
+	// Guard against sanitized-name collisions before anything reaches the API.
+	buildCanonicalToolNameIndex(tools.map((tool) => tool.identity.name));
+
+	const serializedTools: SerializedToolDefinition[] = tools.map((tool) => {
+		// The API rejects dot-namespaced names; the model only ever sees the
+		// sanitized form, and responses are mapped back in runModelCall.
+		const modelName = toModelToolName(tool.identity.name);
+		return {
+			schemaVersion: '2020-12',
+			id: `${tool.identity.namespace ?? 'default'}:${modelName}`,
+			identity: {
+				namespace: tool.identity.namespace ?? 'default',
+				name: modelName,
+				...(tool.identity.version ? { version: tool.identity.version } : {})
+			},
+			display: tool.display,
+			name: modelName,
+			description: tool.display.description,
+			aliases: [],
+			input: tool.input as JsonObject
+		};
+	});
 
 	return toAnthropicTools(serializedTools);
 }
@@ -222,7 +231,19 @@ export async function runModelCall(
 		onDelta
 	);
 	const usageTokens = readAnthropicUsage(result.message);
-	const message: NormalizedModelMessage = normalizeAnthropicMessage(result.message);
+	const normalized = normalizeAnthropicMessage(result.message);
+	// The model replies with sanitized tool names; restore canonical dotted
+	// names before anything downstream (transcript, executor, UI) sees them.
+	const canonicalNames = buildCanonicalToolNameIndex(
+		(input.tools ?? []).map((tool) => tool.identity.name)
+	);
+	const message: NormalizedModelMessage = {
+		...normalized,
+		toolCalls: normalized.toolCalls.map((toolCall) => ({
+			...toolCall,
+			name: fromModelToolName(toolCall.name, canonicalNames)
+		}))
+	};
 	const now = new Date().toISOString();
 
 	if (message.toolCalls.length > 0) {

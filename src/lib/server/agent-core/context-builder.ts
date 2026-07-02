@@ -12,6 +12,7 @@ import type { ConversationHistory } from 'conversationalist';
 import type { ContextMemoryNote } from '@src/lib/types';
 import type { DatabaseClient } from '../db/client';
 import { reconstructSessionTranscript } from '../stream';
+import { toModelToolName } from './tool-name-codec';
 
 export type ModelContext = {
 	conversation: ConversationHistory;
@@ -165,7 +166,9 @@ export async function buildModelContext(
 					conversation,
 					toolCallPayload.calls.map((call) => ({
 						id: call.id,
-						name: call.name,
+						// Transcripts store canonical dotted names; replayed tool_use
+						// blocks must use the API-safe form the model originally saw.
+						name: toModelToolName(call.name),
 						arguments: call.input
 					}))
 				);

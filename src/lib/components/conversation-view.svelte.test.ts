@@ -205,6 +205,33 @@ describe('ConversationView', () => {
 		unmount(component);
 	});
 
+	it('renders canonical approval requests with the nested toolCall name and settles on resolution', () => {
+		const events: StreamEvent[] = [
+			{
+				...makeEvent(1, 'approval.request', {
+					approvalId: 'apr-002',
+					toolCall: { id: 'call-9', name: 'workspace.writeFile', arguments: {} }
+				}),
+				sequence: 5
+			},
+			{
+				...makeEvent(2, 'approval.resolution', { approvalId: 'apr-002', action: 'approve' }),
+				sequence: 6
+			}
+		];
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: { ...defaultProps, events }
+		});
+
+		expect(document.body.textContent).toContain(
+			'Approved — the signal woke the workflow and workspace.writeFile ran'
+		);
+		expect(document.body.textContent).not.toContain('Waiting for approval');
+
+		unmount(component);
+	});
+
 	it('renders a settled banner after the approval is resolved', () => {
 		const events: StreamEvent[] = [
 			makeEvent(1, 'approval.request', { approvalId: 'apr-001', toolName: 'run_command' })

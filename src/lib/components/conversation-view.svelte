@@ -170,7 +170,20 @@
 				</div>
 			{:else if type === 'approval-request'}
 				{@const toolName = (message.metadata['stardust:toolName'] as string) ?? 'unknown'}
-				{#if pendingApproval && onResolveApproval}
+				{@const transcriptResolution = message.metadata['stardust:resolution'] as
+					| string
+					| undefined}
+				{#if transcriptResolution}
+					<div
+						class="approval-settled"
+						class:approval-denied={transcriptResolution === 'deny'}
+						role="status"
+					>
+						{transcriptResolution === 'deny'
+							? 'Denied — the run was told no and is wrapping up safely'
+							: `Approved — the signal woke the workflow and ${toolName} ran`}
+					</div>
+				{:else if pendingApproval && onResolveApproval}
 					{@const approval = pendingApproval}
 					<div class="inline-approval">
 						<ApprovalCard

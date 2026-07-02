@@ -160,28 +160,53 @@ export function buildConversation(
 
 			case 'approval.request': {
 				const approvalToolCallId = (payload.approvalId as string) ?? '';
+				// Live stream frames carry a flat toolName; canonical transcript
+				// events nest it under toolCall.name.
+				const toolName =
+					(payload.toolName as string) ??
+					((payload.toolCall as { name?: string } | undefined)?.name || 'unknown');
 				const toolResult: ToolResult = {
 					callId: approvalToolCallId,
 					outcome: 'action_required',
-					content: `Waiting for approval: ${(payload.toolName as string) ?? 'unknown'}`,
+					content: `Waiting for approval: ${toolName}`,
 					action: {
 						type: 'approval',
-						message: `Approve tool call: ${(payload.toolName as string) ?? 'unknown'}`
+						message: `Approve tool call: ${toolName}`
 					}
 				};
 				addMessage(
 					{
 						role: 'tool-result',
-						content: `Approval required: ${(payload.toolName as string) ?? 'unknown'}`,
+						content: `Approval required: ${toolName}`,
 						toolResult,
 						metadata: {
 							'stardust:type': 'approval-request',
-							'stardust:toolName': (payload.toolName as string) ?? 'unknown',
+							'stardust:toolName': toolName,
 							'stardust:approvalId': (payload.approvalId as string) ?? ''
 						}
 					},
 					event.sequence
 				);
+				break;
+			}
+
+			case 'approval.resolution': {
+				// Mark the matching approval-request message as settled so the row
+				// renders a resolved banner instead of a stale waiting notice.
+				const approvalId = (payload.approvalId as string) ?? '';
+				const action = (payload.action as string) ?? 'approve';
+				for (const id of ids) {
+					const candidate = messages[id];
+					if (
+						candidate.metadata['stardust:type'] === 'approval-request' &&
+						candidate.metadata['stardust:approvalId'] === approvalId
+					) {
+						messages[id] = {
+							...candidate,
+							metadata: { ...candidate.metadata, 'stardust:resolution': action }
+						};
+					}
+				}
 				break;
 			}
 

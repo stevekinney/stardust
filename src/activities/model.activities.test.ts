@@ -79,6 +79,85 @@ describe('model activity', () => {
 		]);
 	});
 
+	it('sanitizes dot-namespaced tool names for the Anthropic API', () => {
+		// The API rejects names outside ^[a-zA-Z0-9_-]{1,128}$ — dotted internal
+		// names must never reach the tools array (regression: every real model
+		// call failed with a 400 on tools.0.custom.name).
+		const [tool] = formatToolsForAnthropic([
+			{
+				identity: { namespace: 'workspace', name: 'workspace.write' },
+				display: { description: 'Write a workspace file' },
+				input: { type: 'object', properties: {}, additionalProperties: false }
+			}
+		]);
+
+		expect(tool.name).toBe('workspace__write');
+		expect(tool.name).toMatch(/^[a-zA-Z0-9_-]{1,128}$/);
+	});
+
+	it('refuses tool sets whose names collide after sanitizing', () => {
+		expect(() =>
+			formatToolsForAnthropic([
+				{
+					identity: { name: 'workspace.write' },
+					display: { description: 'a' },
+					input: { type: 'object', properties: {} }
+				},
+				{
+					identity: { name: 'workspace__write' },
+					display: { description: 'b' },
+					input: { type: 'object', properties: {} }
+				}
+			])
+		).toThrow(/both sanitize/);
+	});
+
+	it('maps sanitized tool_use names back to canonical dotted names', async () => {
+		const provider: ModelProviderClient = {
+			createMessage: vi.fn(async () => ({
+				message: {
+					role: 'assistant' as const,
+					content: [
+						{
+							type: 'tool_use' as const,
+							id: 'call-2',
+							// The model replies with the sanitized name it was given.
+							name: 'workspace__write',
+							input: { path: 'notes/hello.txt' }
+						}
+					],
+					usage: { input_tokens: 10, output_tokens: 5 }
+				}
+			}))
+		};
+
+		await runModelCall(
+			{
+				sessionId: 'session-001',
+				runId: 'run-001',
+				modelCallId: 'run-001:model-call-codec',
+				model: 'claude-sonnet-4-5-20250929',
+				tools: [
+					{
+						identity: { name: 'workspace.write' },
+						display: { description: 'Write a workspace file' },
+						input: { type: 'object', properties: {} }
+					}
+				]
+			},
+			{ database, provider, apiKey: 'test-key' }
+		);
+
+		// The transcript, stream events, and executor must all see the canonical name.
+		const transcript = await reconstructSessionTranscript(database, 'session-001');
+		const toolCallEvent = transcript.find((e) => e.kind === 'tool_call');
+		expect(JSON.parse(toolCallEvent!.payload).calls[0].name).toBe('workspace.write');
+
+		const streamEvents = await readStreamEventsAfterCursor(database, { runId: 'run-001' });
+		const toolCallStreamEvent = streamEvents.events.find((e) => e.kind === 'tool.call');
+		expect(JSON.parse(toolCallStreamEvent!.payload).name).toBe('workspace.write');
+	});
+
 	it('refuses unknown model ids before calling the provider', async () => {
 		const provider: ModelProviderClient = {
 			createMessage: vi.fn() as ModelProviderClient['createMessage']

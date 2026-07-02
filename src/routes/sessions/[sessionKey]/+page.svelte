@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { afterNavigate, goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import Badge from '@lostgradient/cinder/badge';
 	import SegmentedControl from '@lostgradient/cinder/segmented-control';
@@ -47,7 +46,29 @@
 	/** Controls which pane is active on tablet (641–1024px). */
 	let tabletView = $state<'conversation' | 'run'>('conversation');
 
-	onMount(() => {
+	// SvelteKit reuses this component when only the [sessionKey] param changes
+	// (e.g. jumping between sessions from the command palette), so per-session
+	// state must reset and reload on every navigation, not just on mount.
+	let initializedSessionKey: string | null = null;
+	afterNavigate(() => {
+		if (initializedSessionKey === sessionKey) return;
+		initializedSessionKey = sessionKey;
+
+		abortController?.abort();
+		abortController = null;
+		running = false;
+		liveEvents = [];
+		canonicalEvents = [];
+		transcriptMode = 'live';
+		currentUserMessage = null;
+		errorMessage = null;
+		streamGapNotice = null;
+		inspector = null;
+		runCount = null;
+		pendingApproval = null;
+		approvalResolution = null;
+		scrubCursor = null;
+
 		void loadPendingApproval();
 		if (data.startMessage) {
 			void goto(resolve(`/sessions/${encodeURIComponent(sessionKey)}`), { replaceState: true });

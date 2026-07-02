@@ -104,10 +104,12 @@ describe('model context builder', () => {
 		expect(assistantMessage.content).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({ type: 'text', text: "I'll fetch that for you." }),
+				// Replayed tool_use blocks carry the API-safe name the model
+				// originally saw, not the canonical dotted transcript name.
 				expect.objectContaining({
 					type: 'tool_use',
 					id: 'call-1',
-					name: 'web.fetch',
+					name: 'web__fetch',
 					input: { url: 'https://example.com' }
 				})
 			])
