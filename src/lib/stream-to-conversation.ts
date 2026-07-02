@@ -19,6 +19,12 @@ export type StreamEvent = {
 	id: number;
 	kind: string;
 	payload: string;
+	/**
+	 * Durable transcript sequence, present when the event was rebuilt from the
+	 * canonical transcript. Live SSE frames have no sequence. Drives the replay
+	 * scrubber's row dimming via `stardust:sequence` message metadata.
+	 */
+	sequence?: number;
 };
 
 /** A user message rendered before the stream (the turn that started the run). */
@@ -47,7 +53,7 @@ export function buildConversation(
 	const messages: Record<string, Message> = {};
 	let position = 0;
 
-	function addMessage(input: MessageInput): string {
+	function addMessage(input: MessageInput, sequence?: number): string {
 		const id = `msg-${position}`;
 		const content = typeof input.content === 'string' ? input.content : [...input.content];
 		const message: Message = {
@@ -56,7 +62,10 @@ export function buildConversation(
 			content,
 			position,
 			createdAt: now,
-			metadata: input.metadata ?? {},
+			metadata: {
+				...(input.metadata ?? {}),
+				...(sequence !== undefined ? { 'stardust:sequence': sequence } : {})
+			},
 			hidden: input.hidden ?? false,
 			...(input.toolCall !== undefined ? { toolCall: input.toolCall } : {}),
 			...(input.toolResult !== undefined ? { toolResult: input.toolResult } : {})
@@ -91,10 +100,10 @@ export function buildConversation(
 						content: assistantTextAccumulator
 					};
 				} else {
-					assistantMessageId = addMessage({
-						role: 'assistant',
-						content: assistantTextAccumulator
-					});
+					assistantMessageId = addMessage(
+						{ role: 'assistant', content: assistantTextAccumulator },
+						event.sequence
+					);
 				}
 				break;
 			}
@@ -109,10 +118,7 @@ export function buildConversation(
 					};
 				} else {
 					assistantTextAccumulator = text;
-					assistantMessageId = addMessage({
-						role: 'assistant',
-						content: text
-					});
+					assistantMessageId = addMessage({ role: 'assistant', content: text }, event.sequence);
 				}
 				break;
 			}
@@ -123,11 +129,14 @@ export function buildConversation(
 					name: payload.name as string,
 					arguments: (payload.input as JSONValue) ?? {}
 				};
-				addMessage({
-					role: 'tool-call',
-					content: `Tool call: ${toolCall.name}`,
-					toolCall
-				});
+				addMessage(
+					{
+						role: 'tool-call',
+						content: `Tool call: ${toolCall.name}`,
+						toolCall
+					},
+					event.sequence
+				);
 				break;
 			}
 
@@ -138,11 +147,14 @@ export function buildConversation(
 					outcome,
 					content: (payload.content as JSONValue) ?? ''
 				};
-				addMessage({
-					role: 'tool-result',
-					content: `Tool result: ${outcome}`,
-					toolResult
-				});
+				addMessage(
+					{
+						role: 'tool-result',
+						content: `Tool result: ${outcome}`,
+						toolResult
+					},
+					event.sequence
+				);
 				break;
 			}
 
@@ -157,68 +169,84 @@ export function buildConversation(
 						message: `Approve tool call: ${(payload.toolName as string) ?? 'unknown'}`
 					}
 				};
-				addMessage({
-					role: 'tool-result',
-					content: `Approval required: ${(payload.toolName as string) ?? 'unknown'}`,
-					toolResult,
-					metadata: {
-						'stardust:type': 'approval-request',
-						'stardust:toolName': (payload.toolName as string) ?? 'unknown'
-					}
-				});
+				addMessage(
+					{
+						role: 'tool-result',
+						content: `Approval required: ${(payload.toolName as string) ?? 'unknown'}`,
+						toolResult,
+						metadata: {
+							'stardust:type': 'approval-request',
+							'stardust:toolName': (payload.toolName as string) ?? 'unknown',
+							'stardust:approvalId': (payload.approvalId as string) ?? ''
+						}
+					},
+					event.sequence
+				);
 				break;
 			}
 
 			case 'subagent.start': {
-				addMessage({
-					role: 'system',
-					content: `Subagent started: ${(payload.label as string) ?? ''}`,
-					metadata: {
-						'stardust:type': 'subagent',
-						'stardust:status': 'running',
-						'stardust:subagentRunId': (payload.subagentRunId as string) ?? '',
-						'stardust:subagentKind': (payload.kind as string) ?? '',
-						'stardust:subagentLabel': (payload.label as string) ?? ''
-					}
-				});
+				addMessage(
+					{
+						role: 'system',
+						content: `Subagent started: ${(payload.label as string) ?? ''}`,
+						metadata: {
+							'stardust:type': 'subagent',
+							'stardust:status': 'running',
+							'stardust:subagentRunId': (payload.subagentRunId as string) ?? '',
+							'stardust:subagentKind': (payload.kind as string) ?? '',
+							'stardust:subagentLabel': (payload.label as string) ?? ''
+						}
+					},
+					event.sequence
+				);
 				break;
 			}
 
 			case 'subagent.complete': {
-				addMessage({
-					role: 'system',
-					content: `Subagent complete: ${(payload.subagentRunId as string) ?? ''}`,
-					metadata: {
-						'stardust:type': 'subagent',
-						'stardust:status': (payload.status as string) ?? 'complete',
-						'stardust:subagentRunId': (payload.subagentRunId as string) ?? ''
-					}
-				});
+				addMessage(
+					{
+						role: 'system',
+						content: `Subagent complete: ${(payload.subagentRunId as string) ?? ''}`,
+						metadata: {
+							'stardust:type': 'subagent',
+							'stardust:status': (payload.status as string) ?? 'complete',
+							'stardust:subagentRunId': (payload.subagentRunId as string) ?? ''
+						}
+					},
+					event.sequence
+				);
 				break;
 			}
 
 			case 'lifecycle': {
 				const status = (payload.status as string) ?? '';
-				addMessage({
-					role: 'system',
-					content: `Run ${status}`,
-					metadata: {
-						'stardust:type': 'lifecycle',
-						'stardust:status': status,
-						...(typeof payload.reason === 'string' ? { 'stardust:reason': payload.reason } : {})
-					}
-				});
+				addMessage(
+					{
+						role: 'system',
+						content: `Run ${status}`,
+						metadata: {
+							'stardust:type': 'lifecycle',
+							'stardust:status': status,
+							...(typeof payload.reason === 'string' ? { 'stardust:reason': payload.reason } : {})
+						}
+					},
+					event.sequence
+				);
 				break;
 			}
 
 			case 'memory.candidate': {
-				addMessage({
-					role: 'system',
-					content: (payload.content as string) ?? '',
-					metadata: {
-						'stardust:type': 'memory-candidate'
-					}
-				});
+				addMessage(
+					{
+						role: 'system',
+						content: (payload.content as string) ?? '',
+						metadata: {
+							'stardust:type': 'memory-candidate'
+						}
+					},
+					event.sequence
+				);
 				break;
 			}
 		}

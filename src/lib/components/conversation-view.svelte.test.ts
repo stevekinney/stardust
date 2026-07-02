@@ -165,4 +165,80 @@ describe('ConversationView', () => {
 
 		unmount(component);
 	});
+
+	it('renders an inline ApprovalCard for a pending approval and resolves through it', () => {
+		const onResolveApproval = vi.fn();
+		const events: StreamEvent[] = [
+			makeEvent(1, 'approval.request', { approvalId: 'apr-001', toolName: 'run_command' })
+		];
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: {
+				...defaultProps,
+				events,
+				pendingApproval: {
+					approvalId: 'apr-001',
+					sessionId: 'sess-001',
+					toolCall: {
+						id: 'call-001',
+						name: 'run_command',
+						arguments: { command: 'git push origin main' }
+					},
+					status: 'pending' as const,
+					createdAt: new Date().toISOString(),
+					expiresAt: new Date(Date.now() + 60_000).toISOString()
+				},
+				onResolveApproval
+			}
+		});
+
+		expect(document.body.textContent).toContain('git push origin main');
+		expect(document.body.textContent).toContain('the same durable signal');
+
+		const approveButton = Array.from(document.querySelectorAll('button')).find(
+			(button) => button.textContent?.trim() === 'Approve'
+		);
+		expect(approveButton).toBeDefined();
+		approveButton!.click();
+		expect(onResolveApproval).toHaveBeenCalledWith('apr-001', 'approve');
+
+		unmount(component);
+	});
+
+	it('renders a settled banner after the approval is resolved', () => {
+		const events: StreamEvent[] = [
+			makeEvent(1, 'approval.request', { approvalId: 'apr-001', toolName: 'run_command' })
+		];
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: {
+				...defaultProps,
+				events,
+				pendingApproval: null,
+				approvalResolution: 'approve' as const,
+				onResolveApproval: vi.fn()
+			}
+		});
+
+		expect(document.body.textContent).toContain('Approved — the signal woke the workflow');
+
+		unmount(component);
+	});
+
+	it('dims rows whose durable sequence is past the replay cursor', () => {
+		const events: StreamEvent[] = [
+			{ ...makeEvent(1, 'lifecycle', { status: 'started' }), sequence: 2 },
+			{ ...makeEvent(2, 'lifecycle', { status: 'complete' }), sequence: 6 }
+		];
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: { ...defaultProps, events, dimAfterSequence: 3 }
+		});
+
+		const dimmed = document.querySelectorAll('.row-dimmed');
+		expect(dimmed).toHaveLength(1);
+		expect(dimmed[0].textContent).toContain('Run complete');
+
+		unmount(component);
+	});
 });

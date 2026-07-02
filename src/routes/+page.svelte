@@ -3,138 +3,95 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import Button from '@lostgradient/cinder/button';
-	import Badge from '@lostgradient/cinder/badge';
 	import Textarea from '@lostgradient/cinder/textarea';
-	import SearchField from '@lostgradient/cinder/search-field';
-	import Select from '@lostgradient/cinder/select';
-	import type { SelectOption } from '@lostgradient/cinder/select';
-	import type { SessionRow } from '$lib/components/session-list.svelte';
-	import { viewMode } from '$lib/view-mode.svelte';
-	import { displayLabel, statusDotClass } from '$lib/session-display';
+	import SessionFilterChips, {
+		type SessionFilter
+	} from '$lib/components/session-filter-chips.svelte';
+	import SessionRowCard, { sessionTone } from '$lib/components/session-row.svelte';
+	import { sessionsStore } from '$lib/sessions.svelte';
+	import type { SessionRow } from '$lib/types';
 
-	// ── Session fetch state ────────────────────────────────────────
-	let sessions = $state<SessionRow[]>([]);
-	let sessionsLoading = $state(false);
-	let sessionsError = $state<string | null>(null);
-
-	// ── Filter state ───────────────────────────────────────────────
-	let searchQuery = $state('');
-	let statusFilter = $state('');
-
-	// ── Welcome form state ─────────────────────────────────────────
+	let filter = $state<SessionFilter>('all');
 	let message = $state('');
 
-	// ── Derived ────────────────────────────────────────────────────
-	const activeSessions = $derived(sessions.filter((s) => !s.archivedAt));
+	const activeSessions = $derived(sessionsStore.active);
 
-	const waitingCount = $derived(
-		activeSessions.filter((s) => s.status === 'waiting_approval').length
-	);
+	const counts = $derived({
+		all: activeSessions.length,
+		running: activeSessions.filter((s) => sessionTone(s.status) === 'running').length,
+		'needs-you': activeSessions.filter((s) => sessionTone(s.status) === 'needs-you').length,
+		complete: activeSessions.filter((s) => sessionTone(s.status) === 'done').length
+	});
 
 	const filteredSessions = $derived.by(() => {
-		let result = activeSessions;
-
-		const query = searchQuery.trim().toLowerCase();
-		if (query) {
-			result = result.filter((s) => {
-				const label = (s.name ?? s.sessionKey).toLowerCase();
-				return label.includes(query) || s.sessionKey.toLowerCase().includes(query);
-			});
+		if (filter === 'running') {
+			return activeSessions.filter((s) => sessionTone(s.status) === 'running');
 		}
-
-		if (statusFilter) {
-			result = result.filter((s) => s.status === statusFilter);
+		if (filter === 'needs-you') {
+			return activeSessions.filter((s) => sessionTone(s.status) === 'needs-you');
 		}
-
-		return result;
+		if (filter === 'complete') {
+			return activeSessions.filter((s) => sessionTone(s.status) === 'done');
+		}
+		return activeSessions;
 	});
 
-	// ── Filter options ─────────────────────────────────────────────
-	const STATUS_OPTIONS: SelectOption[] = [
-		{ value: '', label: 'All statuses' },
-		{ value: 'running', label: 'Running' },
-		{ value: 'streaming', label: 'Streaming' },
-		{ value: 'loading', label: 'Loading' },
-		{ value: 'waiting_approval', label: 'Waiting approval' },
-		{ value: 'disconnected', label: 'Disconnected' },
-		{ value: 'recovered', label: 'Recovered' },
-		{ value: 'complete', label: 'Complete' },
-		{ value: 'failed', label: 'Failed' },
-		{ value: 'cancelled', label: 'Cancelled' },
-		{ value: 'active', label: 'Active' },
-		{ value: 'idle', label: 'Idle' }
+	const CONCEPT_MAP = [
+		{ app: 'Session', temporal: 'Workflow' },
+		{ app: 'Turn', temporal: 'Child workflow' },
+		{ app: 'Tool call', temporal: 'Activity' },
+		{ app: 'Approval', temporal: 'Signal + wait' },
+		{ app: 'Schedule', temporal: 'Schedule' }
 	];
 
-	// ── Example prompts (welcome view) ─────────────────────────────
-	const EXAMPLE_PROMPTS = [
+	const STARTER_TASKS = [
 		{
-			icon: 'rocket',
-			text: 'Deploy the latest build to staging'
+			kicker: 'Try the basics',
+			title: 'Write a file to the workspace',
+			body: 'One tool call, one activity, one durable event history you can open in Temporal Web.',
+			prompt:
+				"Create a file at notes/hello.txt in the workspace containing the text 'Hello from Stardust'."
 		},
 		{
-			icon: 'test-tube',
-			text: 'Run the test suite and report failures'
+			kicker: 'The headline trick',
+			title: 'Prove durability — kill the worker mid-run',
+			body: 'Start a long task, kill the worker process, and watch the run resume on a survivor.',
+			prompt:
+				'Check the overnight CI runs, figure out what broke, and draft a summary for the team.'
 		},
 		{
-			icon: 'activity',
-			text: 'Summarize recent incidents from the last 24h'
+			kicker: 'Fan out',
+			title: 'Research three topics in parallel',
+			body: 'Each delegate is a child workflow with its own history, budget, and retry policy.',
+			prompt:
+				'Research three topics in parallel: Temporal schedules, child workflows, and activity retries. Summarize each.'
+		},
+		{
+			kicker: 'Set and forget',
+			title: 'Schedule a morning digest',
+			body: 'A native Temporal Schedule that fires at 6:00 AM whether or not this app is open.',
+			prompt: null
 		}
 	];
 
-	// ── Lifecycle ──────────────────────────────────────────────────
 	onMount(() => {
-		void loadSessions();
+		void sessionsStore.load();
 	});
 
-	// ── Session loading ────────────────────────────────────────────
-	async function loadSessions() {
-		sessionsLoading = true;
-		sessionsError = null;
-		try {
-			const response = await fetch('/api/sessions');
-			if (!response.ok) throw new Error(await response.text());
-			const body = (await response.json()) as { sessions: SessionRow[] };
-			sessions = body.sessions;
-		} catch (caught) {
-			if (caught instanceof Error) {
-				try {
-					const parsed = JSON.parse(caught.message) as { message?: string };
-					sessionsError = parsed.message ?? caught.message;
-				} catch {
-					sessionsError = caught.message;
-				}
-			} else {
-				sessionsError = 'Failed to load sessions';
-			}
-		} finally {
-			sessionsLoading = false;
-		}
+	function openSession(session: SessionRow) {
+		void goto(resolve(`/sessions/${encodeURIComponent(session.sessionKey)}`));
 	}
 
-	// ── Navigation ─────────────────────────────────────────────────
-	function navigateToSession(sessionKey: string) {
-		void goto(resolve(`/sessions/${encodeURIComponent(sessionKey)}`));
-	}
-
-	async function handleNewSession() {
-		const response = await fetch('/api/sessions', { method: 'POST' });
-		if (!response.ok) return;
-		const body = (await response.json()) as { sessionKey: string };
-		void goto(resolve(`/sessions/${encodeURIComponent(body.sessionKey)}`));
-	}
-
-	// ── Display helpers ────────────────────────────────────────────
-	function cardBorderColor(status: string): string {
-		if (status === 'waiting_approval') return 'var(--cinder-warning)';
-		return 'var(--cinder-border)';
-	}
-
-	// ── Welcome form handlers ──────────────────────────────────────
 	async function mintSessionKey(): Promise<string> {
 		const response = await fetch('/api/sessions', { method: 'POST' });
 		if (!response.ok) throw new Error('Failed to create session');
 		const body = (await response.json()) as { sessionKey: string };
 		return body.sessionKey;
+	}
+
+	async function handleNewSession() {
+		const sessionKey = await mintSessionKey();
+		void goto(resolve(`/sessions/${encodeURIComponent(sessionKey)}`));
 	}
 
 	function handleSubmit() {
@@ -155,8 +112,12 @@
 		}
 	}
 
-	function handlePromptClick(text: string) {
-		message = text;
+	function handleStarterTask(task: (typeof STARTER_TASKS)[number]) {
+		if (task.prompt === null) {
+			void goto(resolve('/schedules'));
+			return;
+		}
+		message = task.prompt;
 		handleSubmit();
 	}
 </script>
@@ -165,163 +126,66 @@
 	<title>Stardust</title>
 </svelte:head>
 
-{#if sessionsLoading}
-	<!-- ── Loading state ────────────────────────────────────────── -->
-	<div class="sessions-loading" aria-busy="true" aria-label="Loading sessions">
-		<span class="sessions-loading-text">Loading sessions…</span>
+{#if sessionsStore.loading && sessionsStore.sessions.length === 0}
+	<div class="state-screen" aria-busy="true" aria-label="Loading sessions">
+		<span class="state-text">Loading sessions…</span>
 	</div>
-{:else if sessionsError}
-	<!-- ── Error state ───────────────────────────────────────────── -->
-	<div class="sessions-error" role="alert">
-		<p class="sessions-error-text">{sessionsError}</p>
-		<Button label="Retry" variant="secondary" size="sm" onclick={() => void loadSessions()} />
+{:else if sessionsStore.error}
+	<div class="state-screen" role="alert">
+		<p class="state-text">{sessionsStore.error}</p>
+		<Button label="Retry" variant="secondary" size="sm" onclick={() => void sessionsStore.load()} />
 	</div>
 {:else if activeSessions.length > 0}
-	<!-- ── Populated sessions view ──────────────────────────────── -->
-	<div class="sessions">
-		<div class="sessions-header">
-			<div class="sessions-heading">
-				<h1 class="sessions-title">Sessions</h1>
-				<span class="sessions-count">
-					{activeSessions.length} active{waitingCount > 0
-						? ` · ${waitingCount} waiting on you`
-						: ''}
-				</span>
-			</div>
-			<span class="header-spacer"></span>
-			<Button variant="primary" size="sm" label="New session" onclick={handleNewSession}>
-				<span class="new-session-content">
-					<!-- lucide plus -->
-					<svg
-						width="15"
-						height="15"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-					>
-						<path d="M5 12h14" /><path d="M12 5v14" />
-					</svg>
-					New session
-				</span>
-			</Button>
+	<!-- ── Sessions list ────────────────────────────────────────── -->
+	<div class="page">
+		<div class="page-head">
+			<h1 class="page-title">Sessions</h1>
+			<span class="spacer"></span>
+			<Button variant="primary" size="sm" label="New session" onclick={handleNewSession} />
 		</div>
 
-		<div class="filter-bar">
-			<div class="session-search-control">
-				<SearchField
-					value={searchQuery}
-					placeholder="Search sessions…"
-					aria-label="Search sessions"
-					oninput={(query) => (searchQuery = query)}
-				/>
-			</div>
-			<div class="session-status-control">
-				<Select
-					id="session-status-filter"
-					label="Status"
-					bind:value={statusFilter}
-					options={STATUS_OPTIONS}
-				/>
-			</div>
-		</div>
+		<SessionFilterChips value={filter} {counts} onchange={(next) => (filter = next)} />
 
-		<div class="sessions-list">
+		<div class="session-rows">
 			{#each filteredSessions as session (session.id)}
-				<!-- svelte-ignore a11y_click_events_have_key_events -->
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div
-					class="session-item"
-					style="border-color: {cardBorderColor(session.status)}"
-					onclick={() => navigateToSession(session.sessionKey)}
-				>
-					<span class="session-dot {statusDotClass(session.status)}"></span>
-
-					<div class="session-body">
-						<div class="session-name-row">
-							<span class="session-name">{displayLabel(session)}</span>
-							<span class="session-id">{session.sessionKey}</span>
-						</div>
-						{#if session.status === 'complete'}
-							<div class="session-chips">
-								<span class="chip chip-success">0 events lost</span>
-							</div>
-						{:else if session.status === 'recovered'}
-							<div class="session-chips">
-								<span class="chip chip-success">0 events lost</span>
-								<span class="chip chip-neutral">recovered from crash</span>
-							</div>
-						{:else if session.status === 'failed'}
-							<div class="session-chips">
-								<span class="chip chip-danger">error · review run for details</span>
-							</div>
-						{:else if session.status === 'disconnected'}
-							<div class="session-reconnect">
-								<span class="reconnect-spinner" aria-hidden="true"></span>
-								<span class="reconnect-text">Reconnecting…</span>
-							</div>
-						{/if}
-					</div>
-
-					{#if viewMode.isEngineer}
-						<div class="session-eng">
-							<Badge variant="neutral" mono size="sm">{session.workflowId}</Badge>
-						</div>
-					{/if}
-				</div>
+				<SessionRowCard {session} onOpen={openSession} />
 			{/each}
-
 			{#if filteredSessions.length === 0}
-				<p class="no-results">No sessions match your filters.</p>
+				<p class="no-results">No sessions match this filter.</p>
 			{/if}
+		</div>
+
+		<div class="explainer">
+			<span class="explainer-tag">workflow</span>
+			<p class="explainer-text">
+				Every session is a long-lived Temporal Workflow; every turn runs as a child workflow with
+				its own event history. The <span class="mono">wf</span> chips open the exact execution in Temporal
+				Web.
+			</p>
 		</div>
 	</div>
 {:else}
-	<!-- ── Welcome / first-run view (no sessions yet) ───────────── -->
-	<div class="welcome">
-		<div class="welcome-content">
-			<div class="welcome-icon">
-				<!-- lucide sparkles -->
-				<svg
-					width="23"
-					height="23"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-				>
-					<path
-						d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"
-					/>
-					<path d="M20 3v4" />
-					<path d="M22 5h-4" />
-					<path d="M4 17v2" />
-					<path d="M5 18H3" />
-				</svg>
-			</div>
-			<h2 class="welcome-heading">What should the agent work on?</h2>
-			<p class="welcome-description">
-				Describe a task. Stardust opens a session, streams its work, and pauses for your approval
-				before anything risky. It runs on a durable runtime — close this tab and pick the run back
-				up exactly where it was.
+	<!-- ── First-run empty state ────────────────────────────────── -->
+	<div class="first-run">
+		<div class="hero">
+			<span class="hero-kicker">STARDUST</span>
+			<h1 class="hero-title">Your agent, crash-proof.</h1>
+			<p class="hero-description">
+				Every conversation is a durable Temporal Workflow. Kill the tab, kill the worker, kill the
+				laptop — the run picks up exactly where it left off.
 			</p>
+		</div>
 
-			<div class="task-input">
-				<Textarea
-					id="home-task"
-					bind:value={message}
-					onkeydown={handleKeydown}
-					placeholder="e.g. Refactor the auth guards in src/lib/server and run the test suite"
-					rows={3}
-					aria-label="Describe a task"
-				/>
-			</div>
-
-			<div class="task-actions">
+		<div class="composer">
+			<Textarea
+				id="home-task"
+				bind:value={message}
+				onkeydown={handleKeydown}
+				placeholder="e.g. Refactor the auth guards in src/lib/server and run the test suite"
+				rows={3}
+				aria-label="Describe a task"
+			/>
+			<div class="composer-actions">
 				<span class="spacer"></span>
 				<span class="enter-hint"><span class="mono">Enter</span> to start</span>
 				<Button
@@ -330,89 +194,47 @@
 					size="md"
 					onclick={handleSubmit}
 					disabled={!message.trim()}
-				>
-					<span class="btn-content">
-						Start session
-						<!-- lucide arrow-up -->
-						<svg
-							width="15"
-							height="15"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-						>
-							<path d="m5 12 7-7 7 7" />
-							<path d="M12 19V5" />
-						</svg>
-					</span>
-				</Button>
+				/>
 			</div>
+		</div>
 
-			<div class="prompt-section">
-				<div class="prompt-heading">Or start from</div>
-				{#each EXAMPLE_PROMPTS as prompt (prompt.text)}
-					<button type="button" class="prompt-card" onclick={() => handlePromptClick(prompt.text)}>
-						<svg
-							class="prompt-icon"
-							width="16"
-							height="16"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-						>
-							{#if prompt.icon === 'rocket'}
-								<path
-									d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"
-								/>
-								<path
-									d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"
-								/>
-								<path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0" />
-								<path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" />
-							{:else if prompt.icon === 'test-tube'}
-								<path d="M14.5 2v17.5c0 1.4-1.1 2.5-2.5 2.5c-1.4 0-2.5-1.1-2.5-2.5V2" />
-								<path d="M8.5 2h7" />
-								<path d="M14.5 16h-5" />
-							{:else if prompt.icon === 'activity'}
-								<path
-									d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"
-								/>
-							{/if}
-						</svg>
-						<span class="prompt-text">{prompt.text}</span>
-						<span class="spacer"></span>
-						<!-- lucide arrow-up-right -->
-						<svg
-							class="prompt-arrow"
-							width="15"
-							height="15"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-						>
-							<path d="M7 7h10v10" />
-							<path d="M7 17 17 7" />
-						</svg>
-					</button>
+		<div class="starter-grid">
+			{#each STARTER_TASKS as task (task.title)}
+				<button type="button" class="starter-card" onclick={() => handleStarterTask(task)}>
+					<span class="starter-kicker">{task.kicker}</span>
+					<span class="starter-title">{task.title}</span>
+					<span class="starter-body">{task.body}</span>
+				</button>
+			{/each}
+		</div>
+
+		<div class="concept-card">
+			<div class="concept-head">
+				<h2 class="concept-title">How Stardust maps to Temporal</h2>
+				<span class="spacer"></span>
+				<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- external Temporal Web URL, not an app route -->
+				<a class="concept-link" href="http://localhost:8233" target="_blank" rel="noreferrer">
+					Open Temporal Web ↗
+				</a>
+			</div>
+			<div class="concept-grid">
+				{#each CONCEPT_MAP as concept (concept.app)}
+					<div class="concept-cell">
+						<span class="concept-app">{concept.app}</span>
+						<span class="concept-temporal">{concept.temporal}</span>
+					</div>
 				{/each}
 			</div>
+			<p class="concept-footnote">
+				Runs locally: Temporal dev server, one worker, SQLite, and your Anthropic key. No other
+				accounts, no other API keys.
+			</p>
 		</div>
 	</div>
 {/if}
 
 <style>
-	/* ── Loading / error states ───────────────────────────────────── */
-	.sessions-loading,
-	.sessions-error {
+	.state-screen {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
@@ -421,373 +243,253 @@
 		gap: 14px;
 	}
 
-	.sessions-loading-text,
-	.sessions-error-text {
-		font: 400 13px system-ui;
+	.state-text {
+		font-size: var(--cinder-text-sm);
 		color: var(--cinder-text-muted);
 		margin: 0;
-	}
-
-	/* ── Populated sessions view ──────────────────────────────────── */
-	.sessions {
-		display: flex;
-		flex-direction: column;
-		height: 100%;
-	}
-
-	.sessions-header {
-		flex: none;
-		padding: 20px 24px 0;
-		display: flex;
-		align-items: center;
-		gap: 14px;
-	}
-
-	.sessions-heading {
-		display: flex;
-		align-items: baseline;
-		gap: 12px;
-		min-width: 0;
-	}
-
-	.sessions-title {
-		font: 650 21px/1.2 system-ui;
-		letter-spacing: -0.01em;
-		margin: 0;
-		color: var(--cinder-text);
-	}
-
-	.sessions-count {
-		font: 500 12px system-ui;
-		color: var(--cinder-text-muted);
-	}
-
-	.header-spacer {
-		flex: 1;
-	}
-
-	.new-session-content {
-		display: inline-flex;
-		align-items: center;
-		gap: 7px;
-	}
-
-	.filter-bar {
-		flex: none;
-		padding: 16px 24px 4px;
-		display: flex;
-		align-items: end;
-		gap: 12px;
-	}
-
-	.session-search-control {
-		flex: 1 1 18rem;
-		min-width: 14rem;
-	}
-
-	.session-status-control {
-		flex: 0 0 10rem;
-	}
-
-	.sessions-list {
-		flex: 1;
-		overflow-y: auto;
-		padding: 12px 24px 24px;
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
-		scrollbar-width: thin;
-		scrollbar-color: var(--cinder-scrollbar-thumb) var(--cinder-scrollbar-track);
-	}
-
-	.session-item {
-		border: 1px solid var(--cinder-border);
-		border-radius: 12px;
-		background: var(--cinder-surface);
-		padding: 16px 18px;
-		display: flex;
-		align-items: center;
-		gap: 18px;
-		cursor: pointer;
-		transition: border-color 0.1s ease;
-	}
-
-	.session-item:hover {
-		background: var(--cinder-surface-hover);
-	}
-
-	.session-dot {
-		width: 9px;
-		height: 9px;
-		border-radius: 50%;
-		flex-shrink: 0;
-	}
-
-	.session-body {
-		min-width: 0;
-		flex: 1;
-	}
-
-	.session-name-row {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-	}
-
-	.session-name {
-		font: 600 14.5px system-ui;
-		color: var(--cinder-text);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.session-id {
-		font-family: var(--cinder-font-mono);
-		font-size: 11px;
-		color: var(--cinder-text-subtle);
-		flex-shrink: 0;
-	}
-
-	.session-eng {
-		flex: none;
-	}
-
-	.no-results {
-		font: 400 13px system-ui;
-		color: var(--cinder-text-subtle);
-		text-align: center;
-		padding: 32px 0;
-		margin: 0;
-	}
-
-	/* dot color classes — mirror +layout.svelte ──────────────────── */
-	.dot-success {
-		background: var(--cinder-success);
-	}
-
-	.dot-danger {
-		background: var(--cinder-danger);
-	}
-
-	.dot-accent {
-		background: var(--cinder-accent);
-	}
-
-	.dot-warning {
-		background: var(--cinder-warning);
-	}
-
-	.dot-info {
-		background: var(--cinder-info);
-	}
-
-	.dot-muted {
-		background: var(--cinder-text-disabled);
-	}
-
-	.dot-pulse {
-		animation: pulse 2s ease-in-out infinite;
-	}
-
-	@keyframes pulse {
-		0%,
-		100% {
-			opacity: 1;
-		}
-		50% {
-			opacity: 0.4;
-		}
-	}
-
-	/* ── State-specific affordances ──────────────────────────────────── */
-	.session-chips {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 5px;
-		margin-top: 6px;
-	}
-
-	.chip {
-		display: inline-flex;
-		align-items: center;
-		padding: 2px 8px;
-		border-radius: var(--cinder-radius-full);
-		font-family: var(--cinder-font-mono);
-		font-size: 10px;
-		font-weight: 600;
-		border: 1px solid;
-	}
-
-	.chip-success {
-		color: var(--cinder-color-success-fg);
-		background: var(--cinder-color-success-bg);
-		border-color: var(--cinder-color-success-border);
-	}
-
-	.chip-danger {
-		color: var(--cinder-color-danger-fg);
-		background: var(--cinder-color-danger-bg);
-		border-color: var(--cinder-color-danger-border);
-	}
-
-	.chip-neutral {
-		color: var(--cinder-text-subtle);
-		background: var(--cinder-surface-inset);
-		border-color: var(--cinder-border-muted);
-	}
-
-	.session-reconnect {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		margin-top: 6px;
-		padding: 4px 8px;
-		border: 1px solid var(--cinder-color-warning-border);
-		background: var(--cinder-color-warning-bg);
-		border-radius: 6px;
-		width: fit-content;
-	}
-
-	.reconnect-spinner {
-		display: inline-block;
-		width: 10px;
-		height: 10px;
-		border: 1.5px solid var(--cinder-color-warning-fg);
-		border-top-color: transparent;
-		border-radius: 50%;
-		animation: spin 0.8s linear infinite;
-		flex-shrink: 0;
-	}
-
-	.reconnect-text {
-		font: 500 10.5px system-ui;
-		color: var(--cinder-color-warning-fg);
-	}
-
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
-
-	/* ── Welcome / first-run view ──────────────────────────────────── */
-	.welcome {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		height: 100%;
-		padding: 40px;
-	}
-
-	.welcome-content {
-		max-width: 560px;
-		width: 100%;
-		text-align: center;
-	}
-
-	.welcome-icon {
-		width: 48px;
-		height: 48px;
-		border-radius: 12px;
-		background: var(--cinder-surface-inset);
-		border: 1px solid var(--cinder-border);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		margin: 0 auto;
-		color: var(--cinder-accent-text);
-	}
-
-	.welcome-heading {
-		font: 650 24px/1.2 system-ui;
-		letter-spacing: -0.01em;
-		margin: 18px 0 0;
-		color: var(--cinder-text);
-	}
-
-	.welcome-description {
-		font: 400 14px/1.6 system-ui;
-		margin: 10px 0 0;
-		color: var(--cinder-text-muted);
-	}
-
-	.task-input {
-		margin-top: 22px;
-		text-align: left;
-	}
-
-	.task-actions {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		margin-top: 14px;
 	}
 
 	.spacer {
 		flex: 1;
 	}
 
-	.enter-hint {
-		font: 500 11px system-ui;
-		color: var(--cinder-text-subtle);
-	}
-
 	.mono {
 		font-family: var(--cinder-font-mono);
 	}
 
-	.btn-content {
-		display: inline-flex;
-		align-items: center;
-		gap: 7px;
+	/* ── Sessions list ─────────────────────────────────────────── */
+	.page {
+		max-width: var(--cinder-content-width);
+		margin: 0 auto;
+		padding: 28px 32px 48px;
+		display: flex;
+		flex-direction: column;
+		gap: 18px;
 	}
 
-	.prompt-section {
-		margin-top: 26px;
+	.page-head {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+
+	.page-title {
+		margin: 0;
+		font-size: var(--cinder-text-lg);
+		font-weight: 650;
+		letter-spacing: -0.01em;
+	}
+
+	.session-rows {
 		display: flex;
 		flex-direction: column;
 		gap: 8px;
 	}
 
-	.prompt-heading {
-		font: 600 10px system-ui;
-		letter-spacing: 0.09em;
-		text-transform: uppercase;
-		text-align: left;
+	.no-results {
+		font-size: var(--cinder-text-sm);
+		color: var(--cinder-text-subtle);
+		text-align: center;
+		padding: 32px 0;
+		margin: 0;
+	}
+
+	.explainer {
+		display: flex;
+		align-items: flex-start;
+		gap: 10px;
+		padding: 12px 14px;
+		border: 1px dashed var(--cinder-border);
+		border-radius: var(--cinder-radius-lg);
+		background: var(--cinder-surface);
+	}
+
+	.explainer-tag {
+		flex: none;
+		display: inline-flex;
+		padding: 2px 7px;
+		border-radius: var(--cinder-radius-sm);
+		border: 1px solid var(--cinder-border-muted);
+		font-family: var(--cinder-font-mono);
+		font-size: 10.5px;
+		font-weight: 650;
+		color: var(--cinder-accent-text);
+		background: var(--cinder-surface-inset);
+		margin-top: 1px;
+	}
+
+	.explainer-text {
+		margin: 0;
+		font-size: var(--cinder-text-xs);
+		line-height: 1.55;
 		color: var(--cinder-text-subtle);
 	}
 
-	.prompt-card {
+	/* ── First-run ─────────────────────────────────────────────── */
+	.first-run {
+		max-width: 880px;
+		margin: 0 auto;
+		padding: 64px 32px 48px;
+		display: flex;
+		flex-direction: column;
+		gap: 36px;
+	}
+
+	.hero {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		align-items: center;
+		text-align: center;
+	}
+
+	.hero-kicker {
+		font-size: var(--cinder-text-sm);
+		font-weight: 700;
+		letter-spacing: 0.24em;
+		color: var(--cinder-text-subtle);
+	}
+
+	.hero-title {
+		margin: 0;
+		font-size: 28px;
+		font-weight: 650;
+		letter-spacing: -0.01em;
+		text-wrap: balance;
+	}
+
+	.hero-description {
+		margin: 0;
+		max-width: 520px;
+		font-size: var(--cinder-text-sm);
+		line-height: 1.6;
+		color: var(--cinder-text-subtle);
+		text-wrap: pretty;
+	}
+
+	.composer-actions {
 		display: flex;
 		align-items: center;
-		gap: 11px;
+		gap: 10px;
+		margin-top: 12px;
+	}
+
+	.enter-hint {
+		font-size: 11px;
+		font-weight: 500;
+		color: var(--cinder-text-subtle);
+	}
+
+	.starter-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 10px;
+	}
+
+	.starter-card {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		text-align: left;
+		padding: 16px;
 		border: 1px solid var(--cinder-border);
-		border-radius: 10px;
+		border-radius: var(--cinder-radius-lg);
 		background: var(--cinder-surface);
-		padding: 12px 14px;
 		cursor: pointer;
 		font: inherit;
 		color: var(--cinder-text);
-		text-align: left;
+		box-shadow: var(--cinder-shadow-sm);
 	}
 
-	.prompt-card:hover {
-		border-color: var(--cinder-border-strong);
+	.starter-card:hover {
+		border-color: var(--cinder-accent);
 		background: var(--cinder-surface-hover);
 	}
 
-	.prompt-icon {
+	.starter-kicker {
+		font-size: 10.5px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
 		color: var(--cinder-accent-text);
-		flex-shrink: 0;
 	}
 
-	.prompt-text {
-		font: 500 13px system-ui;
+	.starter-title {
+		font-size: var(--cinder-text-sm);
+		font-weight: 600;
 	}
 
-	.prompt-arrow {
+	.starter-body {
+		font-size: var(--cinder-text-xs);
+		line-height: 1.55;
 		color: var(--cinder-text-subtle);
-		flex-shrink: 0;
+	}
+
+	.concept-card {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		padding: 18px;
+		border: 1px solid var(--cinder-border-muted);
+		border-radius: var(--cinder-radius-lg);
+		background: var(--cinder-surface);
+	}
+
+	.concept-head {
+		display: flex;
+		align-items: baseline;
+		gap: 10px;
+	}
+
+	.concept-title {
+		margin: 0;
+		font-size: var(--cinder-text-sm);
+		font-weight: 650;
+	}
+
+	.concept-link {
+		font-size: var(--cinder-text-xs);
+		font-weight: 600;
+		color: var(--cinder-accent-text);
+		text-decoration: none;
+	}
+
+	.concept-link:hover {
+		text-decoration: underline;
+	}
+
+	.concept-grid {
+		display: grid;
+		grid-template-columns: repeat(5, 1fr);
+		gap: 8px;
+	}
+
+	.concept-cell {
+		display: grid;
+		gap: 4px;
+		padding: 10px 11px;
+		background: var(--cinder-surface-inset);
+		border: 1px solid var(--cinder-border-muted);
+		border-radius: var(--cinder-radius-md);
+	}
+
+	.concept-app {
+		font-size: var(--cinder-text-xs);
+		font-weight: 600;
+		color: var(--cinder-text);
+	}
+
+	.concept-temporal {
+		font-family: var(--cinder-font-mono);
+		font-size: 10.5px;
+		font-weight: 500;
+		color: var(--cinder-accent-text);
+	}
+
+	.concept-footnote {
+		margin: 0;
+		font-size: 11.5px;
+		line-height: 1.5;
+		color: var(--cinder-text-subtle);
 	}
 </style>

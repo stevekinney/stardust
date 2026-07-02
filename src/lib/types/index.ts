@@ -20,6 +20,53 @@ export type SubmitTurnResult = {
 	runId: string;
 };
 
+/** A session as returned by GET /api/sessions. */
+export type SessionRow = {
+	id: string;
+	sessionKey: string;
+	status: string;
+	workflowId: string;
+	createdAt: string;
+	updatedAt: string;
+	/** Human-readable label; falls back to sessionKey when absent. */
+	name?: string | null;
+	/** ISO timestamp when archived; null/undefined means not archived. */
+	archivedAt?: string | null;
+	/** Deep link to this session's workflow in Temporal Web. */
+	temporalWebUrl?: string;
+};
+
+/** A pending approval as returned by the session and global approvals endpoints. */
+export type PendingApprovalEntry = {
+	approvalId: string;
+	/** Equals the sessionKey used to start the session (workflow id `agent-session:{sessionId}`). */
+	sessionId: string;
+	toolCall: { id: string; name: string; arguments: unknown };
+	status: 'pending';
+	createdAt: string;
+	expiresAt: string;
+};
+
+/** Any approval request (pending or resolved) as returned by GET /api/approvals. */
+export type ApprovalEntry = Omit<PendingApprovalEntry, 'status'> & {
+	status: 'pending' | 'approved' | 'denied' | 'remembered' | 'cancelled' | 'expired';
+	resolution?: { action: string; resolvedAt: string; reason?: string };
+};
+
+/** An unconfirmed memory candidate as returned by GET /api/memory. */
+export type InboxMemoryCandidate = {
+	id: string;
+	sessionId: string;
+	/** Human session key for the owning session, joined server-side; null if the session is gone. */
+	sessionKey: string | null;
+	runId: string;
+	layer: string;
+	content: string;
+	tags: string[];
+	reason: string | null;
+	createdAt: string;
+};
+
 export type SessionState = {
 	sessionKey: string;
 	status: 'active' | 'idle' | 'finalizing' | 'complete';
@@ -205,6 +252,8 @@ export type ScheduleProjection = {
 	fireEvents: ScheduleFireProjection[];
 	createdAt: string;
 	updatedAt: string;
+	/** Deep link to this schedule in Temporal Web, added by GET /api/schedules. */
+	temporalWebUrl?: string;
 };
 
 export type ScheduleFireProjection = {
@@ -220,6 +269,40 @@ export type ScheduleFireProjection = {
 	acceptedRunId: string | null;
 	status: 'started' | 'accepted' | 'failed';
 	error: string | null;
+	/** Wall-clock duration of the accepted run, joined in by GET /api/schedules when the run finished. */
+	runDurationMs?: number | null;
+	/** Estimated cost of the accepted run in USD, joined in by GET /api/schedules when recorded. */
+	runCostUsd?: number | null;
+};
+
+/** A cross-session artifact row as returned by GET /api/artifacts. */
+export type ArtifactListItem = {
+	id: string;
+	sessionKey: string | null;
+	sessionName: string | null;
+	runId: string;
+	toolName: string | null;
+	objectKey: string;
+	mimeType: string;
+	sizeBytes: number;
+	createdAt: string;
+	/** Tokenized download URL (`/api/artifacts/{id}?token=…`). */
+	downloadUrl: string;
+};
+
+/** Cross-run aggregates for today, as returned by GET /api/insights. */
+export type InsightsSummary = {
+	spendTodayUsd: number;
+	tokensToday: number;
+	runsToday: number;
+	sessionsToday: number;
+	/** Failed activity attempts Temporal retried to success today. */
+	retriesAutoHealed: number;
+	approvalsResolvedToday: number;
+	/** Median milliseconds from approval creation to resolution today. */
+	approvalMedianWaitMs: number | null;
+	scheduleFiresToday: number;
+	spendBySession: Array<{ sessionKey: string | null; title: string; costUsd: number }>;
 };
 
 export type TriggerScheduleResult = {

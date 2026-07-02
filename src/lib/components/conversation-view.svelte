@@ -1,11 +1,35 @@
+<script lang="ts" module>
+	import type { ApprovalOperation } from '@lostgradient/cinder/approval-card';
+
+	/** Build a Cinder ApprovalOperation from a pending approval's tool call. */
+	export function toApprovalOperation(toolCall: {
+		name: string;
+		arguments: unknown;
+	}): ApprovalOperation {
+		const args = toolCall.arguments;
+		if (typeof args === 'object' && args !== null) {
+			const obj = args as Record<string, unknown>;
+			if (typeof obj.command === 'string') {
+				return { kind: 'command', command: obj.command, argsPreview: args };
+			}
+			if (typeof obj.cmd === 'string') {
+				return { kind: 'command', command: obj.cmd, argsPreview: args };
+			}
+		}
+		return { kind: 'other', argsPreview: args };
+	}
+</script>
+
 <script lang="ts">
 	import Chat from '@lostgradient/cinder/chat';
 	import type { ChatSubmitEvent, Message } from '@lostgradient/cinder/chat';
+	import ApprovalCard from '@lostgradient/cinder/approval-card';
 	import {
 		buildConversation,
 		type StreamEvent,
 		type UserMessage
 	} from '$lib/stream-to-conversation';
+	import type { PendingApprovalEntry } from '$lib/types';
 
 	type Props = {
 		sessionId: string;
@@ -16,6 +40,13 @@
 		onRetry?: (() => void) | null;
 		onSteer?: (message: string) => void;
 		onInterrupt?: () => void;
+		/** Replay cursor — rows with a durable sequence above this dim out. Null means live. */
+		dimAfterSequence?: number | null;
+		/** The session's pending approval, rendered as an inline ApprovalCard. */
+		pendingApproval?: PendingApprovalEntry | null;
+		/** How the last approval was resolved, for the card's settled state. */
+		approvalResolution?: 'approve' | 'deny' | null;
+		onResolveApproval?: (approvalId: string, action: 'approve' | 'deny') => void;
 	};
 
 	let {
@@ -26,7 +57,11 @@
 		onSubmit,
 		onRetry = null,
 		onSteer,
-		onInterrupt
+		onInterrupt,
+		dimAfterSequence = null,
+		pendingApproval = null,
+		approvalResolution = null,
+		onResolveApproval
 	}: Props = $props();
 
 	const conversation = $derived(buildConversation(sessionId, userMessage, events));
@@ -53,8 +88,8 @@
 
 	/**
 	 * Custom row rendering for Stardust-specific message types (subagents,
-	 * lifecycle markers, memory candidates). Cinder's default row handles
-	 * user, assistant, tool-call, and tool-result natively.
+	 * lifecycle markers, memory candidates, inline approvals). Cinder's default
+	 * row handles user, assistant, tool-call, and tool-result natively.
 	 */
 	function isStardustSystemMessage(message: Message): boolean {
 		return 'stardust:type' in message.metadata;
@@ -63,61 +98,120 @@
 	function getStardustType(message: Message): string {
 		return (message.metadata['stardust:type'] as string) ?? '';
 	}
+
+	function isDimmed(message: Message): boolean {
+		if (dimAfterSequence === null) return false;
+		const sequence = message.metadata['stardust:sequence'];
+		return typeof sequence === 'number' && sequence > dimAfterSequence;
+	}
 </script>
 
 {#snippet stardustRow(message: Message, renderDefault: import('svelte').Snippet)}
-	{#if isStardustSystemMessage(message)}
-		{@const type = getStardustType(message)}
-		{#if type === 'lifecycle'}
-			{@const status = (message.metadata['stardust:status'] as string) ?? ''}
-			{@const reason = (message.metadata['stardust:reason'] as string) ?? ''}
-			<div
-				class="lifecycle-marker"
-				class:lifecycle-terminal={status === 'complete'}
-				class:lifecycle-failed={status === 'failed'}
-				class:lifecycle-cancelled={status === 'cancelled'}
-				role="status"
-				aria-label="Run {status}"
-			>
-				<span class="lifecycle-dot"></span>
-				<span class="lifecycle-label">Run {status}</span>
-				{#if status === 'failed' && reason}
-					<span class="lifecycle-reason">{reason}</span>
-				{/if}
-				{#if status === 'failed' && onRetry}
-					<button class="lifecycle-retry" onclick={() => onRetry?.()}>Retry</button>
-				{/if}
-			</div>
-		{:else if type === 'subagent'}
-			{@const subStatus = (message.metadata['stardust:status'] as string) ?? 'running'}
-			{@const label = (message.metadata['stardust:subagentLabel'] as string) ?? ''}
-			{@const kind = (message.metadata['stardust:subagentKind'] as string) ?? ''}
-			<div class="subagent-lane" data-status={subStatus} aria-label="Subagent: {label}">
-				{#if kind}
-					<span class="subagent-kind">{kind}</span>
-				{/if}
-				<span class="subagent-label">{label}</span>
-				<span class="subagent-status">{subStatus}</span>
-			</div>
-		{:else if type === 'memory-candidate'}
-			<div class="memory-notice" aria-label="Memory candidate">
-				<span class="memory-icon">🧠</span>
-				<span class="memory-content"
-					>{typeof message.content === 'string' ? message.content : ''}</span
+	<div class="row-shell" class:row-dimmed={isDimmed(message)}>
+		{#if isStardustSystemMessage(message)}
+			{@const type = getStardustType(message)}
+			{#if type === 'lifecycle'}
+				{@const status = (message.metadata['stardust:status'] as string) ?? ''}
+				{@const reason = (message.metadata['stardust:reason'] as string) ?? ''}
+				<div
+					class="lifecycle-marker"
+					class:lifecycle-terminal={status === 'complete'}
+					class:lifecycle-failed={status === 'failed'}
+					class:lifecycle-cancelled={status === 'cancelled'}
+					role="status"
+					aria-label="Run {status}"
 				>
-			</div>
-		{:else if type === 'approval-request'}
-			{@const toolName = (message.metadata['stardust:toolName'] as string) ?? 'unknown'}
-			<div class="approval-notice" role="alert" aria-label="Approval required: {toolName}">
-				<span class="approval-icon">⏳</span>
-				<span>Waiting for approval: <strong>{toolName}</strong></span>
-			</div>
+					<span class="lifecycle-dot"></span>
+					<span class="lifecycle-label">Run {status}</span>
+					{#if status === 'failed' && reason}
+						<span class="lifecycle-reason">{reason}</span>
+					{/if}
+					{#if status === 'failed' && onRetry}
+						<button class="lifecycle-retry" onclick={() => onRetry?.()}>Retry</button>
+					{/if}
+				</div>
+			{:else if type === 'subagent'}
+				{@const subStatus = (message.metadata['stardust:status'] as string) ?? 'running'}
+				{@const label = (message.metadata['stardust:subagentLabel'] as string) ?? ''}
+				{@const kind = (message.metadata['stardust:subagentKind'] as string) ?? ''}
+				<div class="subagent-lane" data-status={subStatus} aria-label="Subagent: {label}">
+					{#if kind}
+						<span class="subagent-kind">{kind}</span>
+					{/if}
+					<span class="subagent-label">{label}</span>
+					<span class="subagent-status">{subStatus}</span>
+				</div>
+			{:else if type === 'memory-candidate'}
+				<div class="memory-notice" aria-label="Memory candidate">
+					<!-- lucide brain -->
+					<svg
+						class="memory-icon"
+						width="15"
+						height="15"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path
+							d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"
+						/>
+						<path
+							d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"
+						/>
+						<path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4" />
+					</svg>
+					<span class="memory-content"
+						>{typeof message.content === 'string' ? message.content : ''}</span
+					>
+				</div>
+			{:else if type === 'approval-request'}
+				{@const toolName = (message.metadata['stardust:toolName'] as string) ?? 'unknown'}
+				{#if pendingApproval && onResolveApproval}
+					{@const approval = pendingApproval}
+					<div class="inline-approval">
+						<ApprovalCard
+							tool={{ name: approval.toolCall.name, risk: 'high' }}
+							operation={toApprovalOperation(approval.toolCall)}
+							policyVersion="policy-2026-06"
+							idempotencyKey={approval.approvalId}
+							expiresAt={approval.expiresAt}
+							state="pending"
+							editableArgs={true}
+							onapprove={() => onResolveApproval(approval.approvalId, 'approve')}
+							ondeny={() => onResolveApproval(approval.approvalId, 'deny')}
+							onapprovewithedits={() => onResolveApproval(approval.approvalId, 'approve')}
+						/>
+						<p class="inline-approval-note">
+							Approve here or from the Inbox — either way it is the same durable signal to the same
+							workflow.
+						</p>
+					</div>
+				{:else if approvalResolution}
+					<div
+						class="approval-settled"
+						class:approval-denied={approvalResolution === 'deny'}
+						role="status"
+					>
+						{approvalResolution === 'approve'
+							? `Approved — the signal woke the workflow and ${toolName} is running`
+							: 'Denied — the run was told no and is wrapping up safely'}
+					</div>
+				{:else}
+					<div class="approval-notice" role="alert" aria-label="Approval required: {toolName}">
+						<span>Waiting for approval: <strong>{toolName}</strong></span>
+					</div>
+				{/if}
+			{:else}
+				{@render renderDefault()}
+			{/if}
 		{:else}
 			{@render renderDefault()}
 		{/if}
-	{:else}
-		{@render renderDefault()}
-	{/if}
+	</div>
 {/snippet}
 
 <div class="conversation-chat" aria-label="Conversation">
@@ -148,10 +242,23 @@
 		display: flex;
 		flex-direction: column;
 		height: 100%;
+		width: 100%;
+		max-width: 760px;
+		margin: 0 auto;
 		overflow: hidden;
 	}
 
 	/* Stardust-specific row styles */
+
+	.row-shell {
+		transition: opacity 0.2s ease;
+	}
+
+	.row-dimmed {
+		opacity: 0.25;
+		filter: saturate(0.4);
+		pointer-events: none;
+	}
 
 	.lifecycle-marker {
 		display: flex;
@@ -240,6 +347,38 @@
 		color: var(--cinder-text-subtle);
 	}
 
+	.inline-approval {
+		margin: 0 16px;
+		max-width: 560px;
+	}
+
+	.inline-approval-note {
+		margin: 6px 0 0;
+		font-size: 11px;
+		line-height: 1.5;
+		color: var(--cinder-text-subtle);
+	}
+
+	.approval-settled {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 12px 14px;
+		margin: 0 16px;
+		border: 1px solid var(--cinder-color-success-border);
+		border-radius: var(--cinder-radius-md);
+		background: var(--cinder-color-success-bg);
+		color: var(--cinder-color-success-fg);
+		font-size: var(--cinder-text-xs);
+		font-weight: 600;
+	}
+
+	.approval-settled.approval-denied {
+		border-color: var(--cinder-border-muted);
+		background: var(--cinder-surface-inset);
+		color: var(--cinder-text-subtle);
+	}
+
 	.approval-notice {
 		display: flex;
 		align-items: center;
@@ -251,10 +390,6 @@
 		background: var(--cinder-color-warning-bg);
 		color: var(--cinder-color-warning-fg);
 		font-size: var(--cinder-text-sm);
-	}
-
-	.approval-icon {
-		flex-shrink: 0;
 	}
 
 	.memory-notice {

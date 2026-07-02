@@ -3,16 +3,22 @@ import type { RequestHandler } from './$types';
 import { desc, isNull } from 'drizzle-orm';
 import { db } from '$lib/server/db/client';
 import { sessions } from '$lib/server/db/schema';
+import { buildTemporalWebWorkflowUrl } from '$lib/server/observability/projection';
 import { mintSessionKey } from '$lib/server/session-key';
 
-/** List all non-archived sessions, newest first. */
+/** List all non-archived sessions, newest first, each with its Temporal Web deep link. */
 export const GET: RequestHandler = async () => {
 	const rows = await db
 		.select()
 		.from(sessions)
 		.where(isNull(sessions.archivedAt))
 		.orderBy(desc(sessions.updatedAt));
-	return json({ sessions: rows });
+	return json({
+		sessions: rows.map((row) => ({
+			...row,
+			temporalWebUrl: buildTemporalWebWorkflowUrl({ workflowId: row.workflowId })
+		}))
+	});
 };
 
 /**

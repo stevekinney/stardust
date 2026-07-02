@@ -1,4 +1,4 @@
-import type { SessionRow } from '$lib/components/session-list.svelte';
+import type { SessionRow } from '$lib/types';
 
 /** Human-readable label for a session; falls back to the session key when no name is set. */
 export function displayLabel(session: SessionRow): string {

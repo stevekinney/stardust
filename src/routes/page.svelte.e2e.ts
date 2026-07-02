@@ -33,9 +33,9 @@ test('home page shows welcome screen when there are no sessions', async ({ page 
 
 	await page.goto('/');
 
-	await expect(page.getByRole('heading', { name: 'What should the agent work on?' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Your agent, crash-proof.' })).toBeVisible();
 	await expect(page.getByLabel('Describe a task')).toBeVisible();
-	await expect(page.getByText('Under the hood')).toHaveCount(0);
+	await expect(page.getByText('How Stardust maps to Temporal')).toBeVisible();
 
 	// Top nav replaces the old left rail: primary tabs plus the health cluster.
 	const nav = page.getByRole('navigation', { name: 'Primary' });
@@ -144,6 +144,8 @@ test('home page shows the session list when sessions exist', async ({ page }) =>
 						name: 'Refactor auth guards',
 						status: 'idle',
 						workflowId: 'agent-session:my-test-session',
+						temporalWebUrl:
+							'http://localhost:8233/namespaces/default/workflows/agent-session%3Amy-test-session/history',
 						createdAt: new Date().toISOString(),
 						updatedAt: new Date().toISOString()
 					}
@@ -157,9 +159,10 @@ test('home page shows the session list when sessions exist', async ({ page }) =>
 	// Scope content assertions to <main> to stay clear of top-nav chrome.
 	const main = page.getByRole('main');
 	await expect(main.getByText('Refactor auth guards')).toBeVisible();
-	await expect(main.getByText('my-test-session', { exact: true })).toBeVisible();
+	await expect(main.getByRole('link', { name: 'wf my-test-session ↗' })).toBeVisible();
 	await expect(main.getByText('Ready to resume where you left off.')).toHaveCount(0);
-	await expect(main.getByRole('searchbox')).toBeVisible();
+	await expect(main.getByRole('group', { name: 'Filter sessions' })).toBeVisible();
+	await expect(main.getByRole('button', { name: 'Needs you 0' })).toBeVisible();
 });
 
 test('resume: navigating to an existing session rehydrates the conversation from transcript', async ({
