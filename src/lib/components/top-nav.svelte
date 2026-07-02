@@ -3,11 +3,18 @@
 	import Badge from '@lostgradient/cinder/badge';
 	import NavigationBar from '@lostgradient/cinder/navigation-bar';
 	import NavigationItem from '@lostgradient/cinder/navigation-item';
-	import HealthPopover, { type HealthSnapshot } from './health-popover.svelte';
+	import Kbd from '@lostgradient/cinder/kbd';
+	import HealthPopover from './health-popover.svelte';
 	import { inbox } from '$lib/inbox.svelte';
+	import type { HealthSnapshot } from '$lib/types';
 
-	let { currentPath, health = null }: { currentPath: string; health?: HealthSnapshot | null } =
-		$props();
+	type Props = {
+		currentPath: string;
+		health?: HealthSnapshot | null;
+		onOpenPalette?: () => void;
+	};
+
+	let { currentPath, health = null, onOpenPalette }: Props = $props();
 
 	const tabs = $derived([
 		{
@@ -47,6 +54,27 @@
 	{/snippet}
 
 	{#snippet actions()}
+		{#if onOpenPalette}
+			<button type="button" class="palette-trigger" onclick={onOpenPalette}>
+				<!-- lucide search -->
+				<svg
+					width="13"
+					height="13"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<circle cx="11" cy="11" r="8" />
+					<path d="m21 21-4.3-4.3" />
+				</svg>
+				<span class="palette-hint">Search or run a command…</span>
+				<Kbd label="⌘K" size="sm" />
+			</button>
+		{/if}
 		<HealthPopover {health} />
 		<a href={resolve('/settings')} class="icon-button" aria-label="Settings">
 			<!-- settings -->
@@ -77,6 +105,32 @@
 		letter-spacing: 0.2em;
 		color: var(--cinder-text);
 		text-decoration: none;
+	}
+
+	.palette-trigger {
+		display: inline-flex;
+		align-items: center;
+		gap: 10px;
+		height: 30px;
+		padding: 0 8px 0 10px;
+		border: 1px solid var(--cinder-border);
+		border-radius: var(--cinder-radius-md);
+		background: var(--cinder-surface-inset);
+		color: var(--cinder-text-subtle);
+		font-size: var(--cinder-text-xs);
+		cursor: pointer;
+		min-width: 220px;
+	}
+
+	.palette-trigger:hover {
+		border-color: var(--cinder-border-strong);
+		color: var(--cinder-text);
+	}
+
+	.palette-hint {
+		flex: 1;
+		text-align: left;
+		white-space: nowrap;
 	}
 
 	.icon-button {

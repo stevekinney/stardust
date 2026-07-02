@@ -290,6 +290,19 @@ export type ArtifactListItem = {
 	downloadUrl: string;
 };
 
+/** Snapshot of infrastructure health, as returned by GET /api/health. */
+export type HealthSnapshot = {
+	address: string;
+	namespace: string;
+	reachable: boolean;
+	/** Distinct worker identities polling any known task queue; null when unreachable. */
+	workerCount: number | null;
+	taskQueues: Array<{ name: string; healthy: boolean }>;
+	spendTodayUsd: number | null;
+	tokensToday: number | null;
+	temporalWebUrl: string;
+};
+
 /** Cross-run aggregates for today, as returned by GET /api/insights. */
 export type InsightsSummary = {
 	spendTodayUsd: number;

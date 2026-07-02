@@ -1,20 +1,7 @@
-<script lang="ts" module>
-	/** Snapshot of infrastructure health shown in the header cluster. Populated from GET /api/health; null while unavailable. */
-	export type HealthSnapshot = {
-		address: string;
-		namespace: string;
-		reachable: boolean;
-		workerCount: number | null;
-		taskQueues: Array<{ name: string; healthy: boolean }>;
-		spendTodayUsd: number | null;
-		tokensToday: number | null;
-		temporalWebUrl: string;
-	};
-</script>
-
 <script lang="ts">
 	import Popover from '@lostgradient/cinder/popover';
 	import StatusDot from '@lostgradient/cinder/status-dot';
+	import type { HealthSnapshot } from '$lib/types';
 
 	let { health = null }: { health?: HealthSnapshot | null } = $props();
 
