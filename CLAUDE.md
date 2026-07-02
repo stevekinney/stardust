@@ -8,7 +8,7 @@
 
 ## Design Spec
 
-The Claude Design handoff lives at `Stardust Console - Redesign.dc.html` (1566 lines). It contains 11 numbered sections (01–11), each with full HTML/CSS prototypes. When implementing UI, read the relevant section from this file—don't improvise layouts or spacing.
+The current design handoff is `Stardust Console v2.dc.html` (1384 lines) — the top-nav "Console v2" IA the app now implements: `Sessions · Inbox · Schedules · Artifacts · Insights`, a ⌘K command palette, and a header health cluster. When implementing UI, read the relevant section from this file—don't improvise layouts or spacing. The earlier `Stardust Console - Redesign.dc.html` (1566 lines, sidebar-era) is kept for reference only; its section index follows.
 
 **Design section index:**
 
@@ -55,18 +55,15 @@ import FacetedFilterBar from '@lostgradient/cinder/faceted-filter-bar';
 
 ## Architecture Patterns
 
-**App shell** (`+layout.svelte`): 52px top bar + 236px left rail + main content. Top bar has STARDUST brand, session chip, worker StatusDot, UTH toggle, settings gear. Rail has session list + global nav (Approvals, Schedules, Memory, Settings) + Temporal footer.
+**App shell** (`+layout.svelte`): Cinder `NavigationBar` top bar (`src/lib/components/top-nav.svelte`) with STARDUST brand, the five section tabs (Inbox shows a count badge from `src/lib/inbox.svelte.ts`), the ⌘K palette trigger, the health cluster popover (`health-popover.svelte`, fed by `GET /api/health`, polled every 30s), and the settings gear. There is no sidebar. The command palette host (`command-palette.svelte`) is mounted globally in the layout.
 
-**View mode** (`src/lib/view-mode.svelte.ts`): `'operator' | 'engineer'` toggle persisted to localStorage. Controls whether Temporal internals (EventStreamViewer, engineer lens chips) are visible.
+**Page layout pattern:** Every top-level page is one centered column at `max-width: var(--cinder-content-width)` (72rem). Intentional exceptions: the chat transcript's ~760px reading column and the first-run hero (880px).
 
-**Page layout pattern:** Most pages use `PageHeader` component + either a centered column (settings) or a split view (sidebar + detail pane for approvals, schedules, memory).
+**Shared stores** (runes classes in `.svelte.ts`): `sessionsStore` (`src/lib/sessions.svelte.ts`, session list shared by the sessions page and palette) and `inbox` (`src/lib/inbox.svelte.ts`, polls `/api/approvals` + `/api/memory` every 10s for the badge and the Inbox page).
 
-**Split view pattern:**
+**Session workspace** (`/sessions/[sessionKey]`): session strip (back, status, title, run/spend meta, Temporal Web link) over a split surface—left pane is Conversation (Chat component, approvals render inline as `ApprovalCard`), right pane is the 560px run pane (`run-pane.svelte`): "This turn" identity card, replay scrubber over the durable transcript (`replay-scrubber.svelte`, client-only replay driven by transcript sequences), and Timeline / Events / Workspace / Costs tabs. The split can be toggled on tablet via a Conversation/Run segmented control.
 
-- Sidebar width varies: 288px (approvals), 340px (schedules), 372px (memory review pane)
-- Detail pane fills remaining space with `flex: 1; min-width: 0; overflow: auto`
-
-**Session workspace** (`/sessions/[sessionKey]`): Split surface—left pane is Conversation (Chat component), right pane is Run inspector (durability ribbon + RunStepTimeline). The split can be toggled on tablet via a Conversation/Run segmented control.
+**Approvals:** the Inbox (`/inbox`) and the in-conversation card both resolve through `POST /api/approvals/[approvalId]/resolve`, which fires the same `resolveApproval` Temporal Update against `agent-session:{sessionKey}` — one durable signal path, two surfaces.
 
 **Nine run states:** empty, loading, streaming, waiting_approval, disconnected, recovered, failed, cancelled, complete. Each maps to a dot color and has specific UI treatment (see design section 10).
 
@@ -74,9 +71,9 @@ import FacetedFilterBar from '@lostgradient/cinder/faceted-filter-bar';
 
 **Responsive breakpoints:**
 
-- Desktop: full rail + side-by-side split
-- Tablet (≤1024px): rail collapses to 56px icon-only; split panes become a Conversation/Run toggle
-- Phone (≤640px): rail hidden behind overlay; session view becomes monitor-only (status + steps + "Open on desktop" nudge)
+- Desktop: top nav + side-by-side split
+- Tablet (≤1024px): session split panes become a Conversation/Run toggle
+- Phone (≤640px): session view becomes monitor-only (`session-phone-surfaces.svelte` — status + steps + "Open on desktop" nudge, or a full-screen approval surface)
 
 **Demo data:** Where the backend doesn't supply real data, use realistic mock data that matches the design's examples (session names like "Refactor auth guards", IDs like `ses_7af3`, workflow IDs like `wf_7af3`). The crash recovery demo is the hero beat—`bun run chaos` is the demo script.
 
