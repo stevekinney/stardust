@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import Badge from '@lostgradient/cinder/badge';
 	import NavigationBar from '@lostgradient/cinder/navigation-bar';
 	import NavigationItem from '@lostgradient/cinder/navigation-item';
 	import HealthPopover, { type HealthSnapshot } from './health-popover.svelte';
+	import { inbox } from '$lib/inbox.svelte';
 
 	let { currentPath, health = null }: { currentPath: string; health?: HealthSnapshot | null } =
 		$props();
@@ -13,17 +15,12 @@
 			href: resolve('/'),
 			active: currentPath === '/' || currentPath.startsWith('/sessions')
 		},
-		{
-			label: 'Approvals',
-			href: resolve('/approvals'),
-			active: currentPath.startsWith('/approvals')
-		},
+		{ label: 'Inbox', href: resolve('/inbox'), active: currentPath.startsWith('/inbox') },
 		{
 			label: 'Schedules',
 			href: resolve('/schedules'),
 			active: currentPath.startsWith('/schedules')
-		},
-		{ label: 'Memory', href: resolve('/memory'), active: currentPath.startsWith('/memory') }
+		}
 	]);
 </script>
 
@@ -34,7 +31,12 @@
 
 	{#snippet items()}
 		{#each tabs as tab (tab.href)}
-			<NavigationItem href={tab.href} active={tab.active}>{tab.label}</NavigationItem>
+			<NavigationItem href={tab.href} active={tab.active}>
+				{tab.label}
+				{#if tab.label === 'Inbox' && inbox.total > 0}
+					<Badge variant="accent" size="xs" mono>{inbox.total}</Badge>
+				{/if}
+			</NavigationItem>
 		{/each}
 	{/snippet}
 
