@@ -1,0 +1,1384 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/tokens/colors.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/tokens/typography.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/tokens/spacing.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/tokens/motion.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/tokens/component-tokens.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/foundation.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/components.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/components/operational/approval-card.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/components/operational/event-stream-viewer.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/components/operational/run-step-timeline.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/components/operational/payload-inspector.css">
+  <link rel="stylesheet" href="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/styles.css">
+  <script src="_ds/cinder-design-system-3e8bc53b-41d7-4dc8-99c0-6181feb05c38/_ds_bundle.js"></script>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; }
+    @keyframes stardust-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+    .stardust-scroll { scrollbar-width: thin; scrollbar-color: var(--cinder-scrollbar-thumb) var(--cinder-scrollbar-track); }
+  </style>
+</helmet>
+
+<div data-theme="dark" data-screen-label="Stardust Console v2" style="color-scheme: dark; display: flex; flex-direction: column; height: 100vh; min-width: 1440px; overflow: hidden; background: var(--cinder-bg); color: var(--cinder-text); font-family: var(--cinder-font-sans, system-ui); font-size: 14px; position: relative;">
+
+  <!-- ══════════ Top bar: brand + tabs + command + health ══════════ -->
+  <header style="height: 48px; flex: none; display: flex; align-items: center; gap: 20px; padding: 0 16px; border-bottom: 1px solid var(--cinder-border); background: var(--cinder-surface); box-sizing: border-box; position: relative; z-index: 30;">
+    <span style="font-size: 12.5px; font-weight: 700; letter-spacing: 0.2em; color: var(--cinder-text);">STARDUST</span>
+
+    <nav aria-label="Primary" style="display: flex; align-items: stretch; gap: 2px; height: 100%;">
+      <button type="button" onClick="{{ goSessions }}" style="{{ tabSessionsStyle }}">Sessions</button>
+      <button type="button" onClick="{{ goInbox }}" style="{{ tabInboxStyle }}">
+        <span style="display: inline-flex; align-items: center; gap: 6px;">Inbox
+          <sc-if value="{{ inboxHasItems }}" hint-placeholder-val="{{ true }}">
+            <span style="min-width: 16px; height: 16px; padding: 0 4px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; background: var(--cinder-accent); color: var(--cinder-accent-contrast); font: 700 10px var(--cinder-font-mono);">{{ inboxCount }}</span>
+          </sc-if>
+        </span>
+      </button>
+      <button type="button" onClick="{{ goSchedules }}" style="{{ tabSchedulesStyle }}">Schedules</button>
+      <button type="button" onClick="{{ goArtifacts }}" style="{{ tabArtifactsStyle }}">Artifacts</button>
+      <button type="button" onClick="{{ goInsights }}" style="{{ tabInsightsStyle }}">Insights</button>
+    </nav>
+
+    <span style="flex: 1;"></span>
+
+    <button type="button" onClick="{{ openPalette }}" aria-label="Open command palette" style="display: inline-flex; align-items: center; gap: 10px; height: 30px; padding: 0 8px 0 10px; border: 1px solid var(--cinder-border); border-radius: var(--cinder-radius-md, 8px); background: var(--cinder-surface-inset); color: var(--cinder-text-subtle); font: 400 12px system-ui; cursor: pointer; min-width: 220px;" style-hover="border-color: var(--cinder-border-strong); color: var(--cinder-text);">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+      <span style="flex: 1; text-align: left; white-space: nowrap;">Search or run a command…</span>
+      <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Kbd" hint-size="auto,18px">⌘K</x-import>
+    </button>
+
+    <!-- Health cluster: the ONE place infra status lives -->
+    <div style="position: relative;">
+      <button type="button" onClick="{{ toggleHealth }}" aria-expanded="{{ healthOpen }}" style="display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border: 1px solid var(--cinder-border); border-radius: var(--cinder-radius-md, 8px); background: var(--cinder-surface-inset); cursor: pointer; font: 500 11.5px var(--cinder-font-mono); color: var(--cinder-text-subtle); white-space: nowrap;" style-hover="border-color: var(--cinder-border-strong); color: var(--cinder-text);">
+        <span style="width: 7px; height: 7px; border-radius: 50%; background: var(--cinder-success);"></span>
+        <span>temporal :7233</span>
+        <span style="color: var(--cinder-border-strong);">·</span>
+        <span>1 worker</span>
+        <span style="color: var(--cinder-border-strong);">·</span>
+        <span>$0.47 today</span>
+      </button>
+      <sc-if value="{{ healthOpen }}" hint-placeholder-val="{{ false }}">
+        <div style="position: absolute; top: 38px; right: 0; width: 340px; background: var(--cinder-surface-raised); border: 1px solid var(--cinder-border); border-radius: var(--cinder-radius-lg, 12px); box-shadow: var(--cinder-shadow-lg); padding: 14px; z-index: 50; display: flex; flex-direction: column; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--cinder-success);"></span>
+            <span style="font: 600 13px system-ui; color: var(--cinder-text);">Everything durable</span>
+            <span style="flex: 1;"></span>
+            <span style="font: 500 10.5px var(--cinder-font-mono); color: var(--cinder-text-subtle);">namespace default</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div style="padding: 9px 11px; background: var(--cinder-surface-inset); border: 1px solid var(--cinder-border-muted); border-radius: 8px; display: grid; gap: 2px;">
+              <span style="font: 700 10.5px system-ui; text-transform: uppercase; letter-spacing: 0.04em; color: var(--cinder-text-subtle);">Temporal server</span>
+              <span style="font: 500 12px var(--cinder-font-mono); color: var(--cinder-text);">localhost:7233 ✓</span>
+            </div>
+            <div style="padding: 9px 11px; background: var(--cinder-surface-inset); border: 1px solid var(--cinder-border-muted); border-radius: 8px; display: grid; gap: 2px;">
+              <span style="font: 700 10.5px system-ui; text-transform: uppercase; letter-spacing: 0.04em; color: var(--cinder-text-subtle);">Workers</span>
+              <span style="font: 500 12px var(--cinder-font-mono); color: var(--cinder-text);">worker-1 · 2 queues</span>
+            </div>
+            <div style="padding: 9px 11px; background: var(--cinder-surface-inset); border: 1px solid var(--cinder-border-muted); border-radius: 8px; display: grid; gap: 2px;">
+              <span style="font: 700 10.5px system-ui; text-transform: uppercase; letter-spacing: 0.04em; color: var(--cinder-text-subtle);">Task queues</span>
+              <span style="font: 500 12px var(--cinder-font-mono); color: var(--cinder-text);">agent-orchestrator ✓<br>agent-tools ✓</span>
+            </div>
+            <div style="padding: 9px 11px; background: var(--cinder-surface-inset); border: 1px solid var(--cinder-border-muted); border-radius: 8px; display: grid; gap: 2px;">
+              <span style="font: 700 10.5px system-ui; text-transform: uppercase; letter-spacing: 0.04em; color: var(--cinder-text-subtle);">Spend today</span>
+              <span style="font: 500 12px var(--cinder-font-mono); color: var(--cinder-text);">$0.47 · 182k tokens</span>
+            </div>
+          </div>
+          <p style="margin: 0; font: 400 11.5px/1.5 system-ui; color: var(--cinder-text-subtle);">If a worker dies mid-run, another picks up from the last durable event. Close this tab freely — nothing here lives in the browser.</p>
+          <div style="display: flex; gap: 8px;">
+            <a href="http://localhost:8233" target="_blank" rel="noreferrer" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--cinder-border); border-radius: var(--cinder-radius-md, 8px); background: var(--cinder-surface); color: var(--cinder-accent-text); font: 600 12px system-ui; text-decoration: none;" style-hover="border-color: var(--cinder-accent);">Open Temporal Web ↗</a>
+            <a href="http://localhost:8233/namespaces/default/task-queues/agent-orchestrator" target="_blank" rel="noreferrer" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--cinder-border); border-radius: var(--cinder-radius-md, 8px); background: var(--cinder-surface); color: var(--cinder-text-subtle); font: 600 12px system-ui; text-decoration: none;" style-hover="color: var(--cinder-text);">Task queue ↗</a>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+
+    <button type="button" aria-label="Settings" style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: none; border-radius: var(--cinder-radius-md, 8px); background: transparent; color: var(--cinder-text-subtle); cursor: pointer;" style-hover="background: var(--cinder-surface-hover); color: var(--cinder-text);">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+    </button>
+  </header>
+
+  <!-- ══════════ SESSIONS TAB ══════════ -->
+  <sc-if value="{{ showSessionsList }}" hint-placeholder-val="{{ true }}">
+    <div class="stardust-scroll" style="flex: 1; overflow-y: auto;">
+      <div style="max-width: var(--cinder-content-width); margin: 0 auto; padding: 28px 32px 48px; display: flex; flex-direction: column; gap: 18px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <h1 style="margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.01em;">Sessions</h1>
+          <span style="flex: 1;"></span>
+          <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="primary" size="sm" onClick="{{ newSession }}" hint-size="110px,32px">New session</x-import>
+        </div>
+
+        <div style="display: flex; gap: 6px;">
+          <sc-for list="{{ sessionFilters }}" as="f" hint-placeholder-count="4">
+            <button type="button" onClick="{{ f.onClick }}" style="{{ f.style }}">{{ f.label }}</button>
+          </sc-for>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <sc-for list="{{ visibleSessions }}" as="s" hint-placeholder-count="4">
+            <button type="button" onClick="{{ s.open }}" style="display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; width: 100%; text-align: left; padding: 13px 16px; border: 1px solid {{ s.borderColor }}; border-radius: var(--cinder-radius-lg, 12px); background: var(--cinder-surface); cursor: pointer; font: inherit; color: var(--cinder-text); box-shadow: var(--cinder-shadow-sm); box-sizing: border-box;" style-hover="background: var(--cinder-surface-hover); border-color: var(--cinder-border-strong);">
+              <span style="grid-column: 1; grid-row: 1 / 3; width: 8px; height: 8px; border-radius: 50%; background: {{ s.dotColor }}; {{ s.dotAnim }}"></span>
+              <span style="grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: 10px; min-width: 0;">
+                <span style="font: 600 14px system-ui; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ s.title }}</span>
+                <span style="flex: none; display: inline-flex;"><x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Badge" variant="{{ s.badgeVariant }}" size="sm" hint-size="auto,20px">{{ s.statusLabel }}</x-import></span>
+                <sc-if value="{{ s.needsYou }}" hint-placeholder-val="{{ false }}">
+                  <span style="flex: none; font: 600 11px system-ui; color: var(--cinder-color-warning-fg);">Review approval →</span>
+                </sc-if>
+              </span>
+              <a href="{{ s.wfUrl }}" target="_blank" rel="noreferrer" onClick="{{ stop }}" style="grid-column: 3; grid-row: 1 / 3; align-self: center; display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border: 1px solid var(--cinder-border-muted); border-radius: var(--cinder-radius-sm, 6px); background: var(--cinder-surface-inset); font: 500 10.5px var(--cinder-font-mono); color: var(--cinder-text-subtle); text-decoration: none; white-space: nowrap;" style-hover="color: var(--cinder-accent-text); border-color: var(--cinder-border);">wf {{ s.key }} ↗</a>
+              <span style="grid-column: 2; grid-row: 2; font: 500 11px var(--cinder-font-mono); color: var(--cinder-text-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ s.meta }}</span>
+            </button>
+          </sc-for>
+        </div>
+
+        <sc-if value="{{ showExplainers }}" hint-placeholder-val="{{ true }}">
+          <div style="display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border: 1px dashed var(--cinder-border); border-radius: var(--cinder-radius-lg, 12px); background: var(--cinder-surface);">
+            <span style="flex: none; display: inline-flex; padding: 2px 7px; border-radius: var(--cinder-radius-sm, 6px); border: 1px solid var(--cinder-border-muted); font: 650 10.5px var(--cinder-font-mono); color: var(--cinder-accent-text); background: var(--cinder-surface-inset); margin-top: 1px;">workflow</span>
+            <p style="margin: 0; font: 400 12px/1.55 system-ui; color: var(--cinder-text-subtle);">Every session is a long-lived Temporal Workflow; every turn runs as a child workflow with its own event history. The <span style="font-family: var(--cinder-font-mono);">wf</span> chips open the exact execution in Temporal Web.</p>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ══════════ FIRST-RUN EMPTY STATE ══════════ -->
+  <sc-if value="{{ showFirstRun }}" hint-placeholder-val="{{ false }}">
+    <div class="stardust-scroll" style="flex: 1; overflow-y: auto;">
+      <div style="max-width: 880px; margin: 0 auto; padding: 64px 32px 48px; display: flex; flex-direction: column; gap: 36px;">
+        <div style="display: flex; flex-direction: column; gap: 10px; align-items: center; text-align: center;">
+          <span style="font-size: 13px; font-weight: 700; letter-spacing: 0.24em; color: var(--cinder-text-subtle);">STARDUST</span>
+          <h1 style="margin: 0; font-size: 28px; font-weight: 650; letter-spacing: -0.01em; text-wrap: balance;">Your agent, crash-proof.</h1>
+          <p style="margin: 0; max-width: 520px; font: 400 14px/1.6 system-ui; color: var(--cinder-text-subtle); text-wrap: pretty;">Every conversation is a durable Temporal Workflow. Kill the tab, kill the worker, kill the laptop — the run picks up exactly where it left off.</p>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <sc-for list="{{ starterTasks }}" as="t" hint-placeholder-count="4">
+            <button type="button" onClick="{{ t.onClick }}" style="display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 16px; border: 1px solid var(--cinder-border); border-radius: var(--cinder-radius-lg, 12px); background: var(--cinder-surface); cursor: pointer; font: inherit; color: var(--cinder-text); box-shadow: var(--cinder-shadow-sm);" style-hover="border-color: var(--cinder-accent); background: var(--cinder-surface-hover);">
+              <span style="font: 700 10.5px system-ui; text-transform: uppercase; letter-spacing: 0.06em; color: var(--cinder-accent-text);">{{ t.kicker }}</span>
+              <span style="font: 600 14px system-ui;">{{ t.title }}</span>
+              <span style="font: 400 12px/1.55 system-ui; color: var(--cinder-text-subtle);">{{ t.body }}</span>
+            </button>
+          </sc-for>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 10px; padding: 18px; border: 1px solid var(--cinder-border-muted); border-radius: var(--cinder-radius-lg, 12px); background: var(--cinder-surface);">
+          <div style="display: flex; align-items: baseline; gap: 10px;">
+            <h2 style="margin: 0; font-size: 13px; font-weight: 650;">How Stardust maps to Temporal</h2>
+            <span style="flex: 1;"></span>
+            <a href="http://localhost:8233" target="_blank" rel="noreferrer" style="font: 600 12px system-ui; color: var(--cinder-accent-text); text-decoration: none;" style-hover="text-decoration: underline;">Open Temporal Web ↗</a>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;">
+            <sc-for list="{{ conceptMap }}" as="c" hint-placeholder-count="5">
+              <div style="display: grid; gap: 4px; padding: 10px 11px; background: var(--cinder-surface-inset); border: 1px solid var(--cinder-border-muted); border-radius: 8px;">
+                <span style="font: 600 12px system-ui; color: var(--cinder-text);">{{ c.app }}</span>
+                <span style="font: 500 10.5px var(--cinder-font-mono); color: var(--cinder-accent-text);">{{ c.temporal }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <p style="margin: 0; font: 400 11.5px/1.5 system-ui; color: var(--cinder-text-subtle);">Runs locally: Temporal dev server, one worker, SQLite, and your Anthropic key. No other accounts, no other API keys.</p>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ══════════ SESSION DETAIL (hero) ══════════ -->
+  <sc-if value="{{ showDetail }}" hint-placeholder-val="{{ false }}">
+    <!-- Session strip -->
+    <div style="flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--cinder-border); background: var(--cinder-surface);">
+      <button type="button" onClick="{{ backToList }}" aria-label="Back to sessions" style="display: inline-flex; align-items: center; gap: 5px; border: none; background: transparent; color: var(--cinder-text-subtle); font: 600 12px system-ui; cursor: pointer; padding: 4px 6px; border-radius: 6px;" style-hover="background: var(--cinder-surface-hover); color: var(--cinder-text);">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>
+        Sessions
+      </button>
+      <span style="width: 1px; height: 18px; background: var(--cinder-border-muted);"></span>
+      <span style="width: 8px; height: 8px; border-radius: 50%; background: {{ detail.dotColor }}; {{ detail.dotAnim }}"></span>
+      <h1 style="margin: 0; font-size: 14.5px; font-weight: 650; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ detail.title }}</h1>
+      <span style="display: inline-flex; flex: none;"><x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Badge" variant="{{ detail.badgeVariant }}" size="sm" hint-size="auto,20px">{{ detail.statusLabel }}</x-import></span>
+      <span style="font: 500 11px var(--cinder-font-mono); color: var(--cinder-text-subtle); white-space: nowrap;">{{ detail.key }} · run {{ detail.runN }} · {{ detail.cost }} spent</span>
+      <span style="flex: 1;"></span>
+      <a href="{{ detail.wfUrl }}" target="_blank" rel="noreferrer" style="display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border: 1px solid var(--cinder-border); border-radius: var(--cinder-radius-md, 8px); background: var(--cinder-surface-inset); color: var(--cinder-text); font: 600 12px system-ui; text-decoration: none; white-space: nowrap;" style-hover="border-color: var(--cinder-accent); color: var(--cinder-accent-text);">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+        Temporal Web
+      </a>
+    </div>
+
+    <div style="display: flex; flex: 1; overflow: hidden;">
+      <!-- ── Conversation ── -->
+      <section aria-label="Conversation" style="display: flex; flex-direction: column; flex: 1; min-width: 0; overflow: hidden; border-right: 1px solid var(--cinder-border);">
+        <div class="stardust-scroll" style="flex: 1; overflow-y: auto; padding: 18px 28px 20px; box-sizing: border-box;">
+          <div style="max-width: 760px; margin: 0 auto; display: flex; flex-direction: column;">
+            <sc-for list="{{ rows }}" as="row" hint-placeholder-count="5">
+              <div style="{{ row.wrapStyle }}">
+
+                <sc-if value="{{ row.isUser }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-left: 22%; display: flex; flex-direction: column; gap: 6px; align-items: flex-end;">
+                    <span style="font: 700 10.5px system-ui; letter-spacing: 0.08em; color: var(--cinder-text-subtle);">YOU</span>
+                    <p style="margin: 0; padding: 10px 14px; border-radius: 12px 12px 4px 12px; background: var(--cinder-surface-raised); border: 1px solid var(--cinder-border-muted); font-size: 13.5px; line-height: 1.6; color: var(--cinder-text); text-wrap: pretty;">{{ row.text }}</p>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{ row.isAssistant }}" hint-placeholder-val="{{ false }}">
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <span style="font: 700 10.5px system-ui; letter-spacing: 0.08em; color: var(--cinder-text-subtle);">ASSISTANT</span>
+                    <p style="margin: 0; font-size: 13.5px; line-height: 1.65; color: var(--cinder-text); text-wrap: pretty;">{{ row.text }}<sc-if value="{{ row.streaming }}" hint-placeholder-val="{{ false }}"><span style="display: inline-block; width: 7px; height: 14px; margin-left: 3px; vertical-align: text-bottom; background: var(--cinder-accent); animation: stardust-pulse 1s ease-in-out infinite;"></span></sc-if></p>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{ row.isTool }}" hint-placeholder-val="{{ false }}">
+                  <div style="border: 1px solid {{ row.toolBorder }}; border-radius: var(--cinder-radius-md, 8px); background: var(--cinder-surface); overflow: hidden;">
+                    <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--cinder-surface-inset); border-bottom: 1px solid var(--cinder-border-muted);">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--cinder-text-subtle);"><path d="m7 11 2-2-2-2"></path><path d="M11 13h4"></path><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect></svg>
+                      <span style="font: 600 12px var(--cinder-font-mono); color: var(--cinder-text);">{{ row.name }}</span>
+                      <span style="font: 500 10.5px system-ui; color: var(--cinder-text-subtle);">{{ row.durable }}</span>
+                      <sc-if value="{{ row.retried }}" hint-placeholder-val="{{ false }}">
+                        <span style="padding: 1px 6px; border-radius: 4px; background: var(--cinder-color-warning-bg); color: var(--cinder-color-warning-fg); font: 700 10px var(--cinder-font-mono);">×2</span>
+                      </sc-if>
+                      <sc-if value="{{ row.waiting }}" hint-placeholder-val="{{ false }}">
+                        <span style="padding: 1px 6px; border-radius: 4px; background: var(--cinder-color-warning-bg); color: var(--cinder-color-warning-fg); font: 700 10px system-ui;">waiting approval</span>
+                      </sc-if>
+                      <span style="flex: 1;"></span>
+                      <button type="button" onClick="{{ row.jump }}" style="border: none; background: transparent; color: var(--cinder-accent-text); font: 600 10.5px var(--cinder-font-mono); cursor: pointer; padding: 2px 4px; white-space: nowrap;" style-hover="text-decoration: underline;">event {{ row.seq }} →</button>
+                    </div>
+                    <div style="padding: 9px 12px; display: grid; gap: 6px;">
+                      <code style="font: 500 11.5px/1.5 var(--cinder-font-mono); color: var(--cinder-text-subtle); white-space: pre-wrap; overflow-wrap: anywhere;">{{ row.args }}</code>
+                      <sc-if value="{{ row.result }}" hint-placeholder-val="{{ false }}">
+                        <div style="display: flex; align-items: baseline; gap: 8px; border-top: 1px dashed var(--cinder-border-muted); padding-top: 7px;">
+                          <span style="font: 700 9.5px system-ui; text-transform: uppercase; letter-spacing: 0.06em; color: var(--cinder-text-subtle); flex: none;">Result</span>
+                          <span style="font: 500 11.5px/1.5 var(--cinder-font-mono); color: var(--cinder-text);">{{ row.result }}</span>
+                        </div>
+                      </sc-if>
+                    </div>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{ row.isSubagents }}" hint-placeholder-val="{{ false }}">
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span style="font: 700 10px system-ui; text-transform: uppercase; letter-spacing: 0.07em; color: var(--cinder-accent-text);">Parallel delegates</span>
+                      <span style="font: 500 10.5px system-ui; color: var(--cinder-text-subtle);">3 child workflows, own histories, own budgets</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+                      <sc-for list="{{ row.lanes }}" as="lane" hint-placeholder-count="3">
+                        <div style="display: grid; gap: 4px; padding: 9px 11px; border: 1px solid var(--cinder-border-muted); border-left: 3px solid {{ lane.edge }}; border-radius: var(--cinder-radius-sm, 6px); background: var(--cinder-surface);">
+                          <span style="font: 600 11.5px var(--cinder-font-mono); color: var(--cinder-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ lane.label }}</span>
+                          <span style="display: flex; align-items: center; gap: 6px; font: 500 10.5px var(--cinder-font-mono); color: var(--cinder-text-subtle);">
+                            <span style="width: 6px; height: 6px; border-radius: 50%; background: {{ lane.dot }}; {{ lane.anim }}"></span>
+                            {{ lane.meta }}
+                          </span>
+                        </div>
+                      </sc-for>
+                    </div>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{ row.isLifecycle }}" hint-placeholder-val="{{ false }}">
+                  <div role="status" style="display: flex; align-items: center; gap: 8px;">
+                    <span style="width: 7px; height: 7px; border-radius: 50%; background: {{ row.dot }}; flex-shrink: 0;"></span>
+                    <span style="font-size: 11.5px; color: var(--cinder-text-subtle);">{{ row.text }}</span>
+                    <span style="flex: 1; height: 1px; background: var(--cinder-border-muted);"></span>
+                    <span style="font: 500 10px var(--cinder-font-mono); color: var(--cinder-text-disabled);">event {{ row.seq }}</span>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{ row.isExplainer }}" hint-placeholder-val="{{ false }}">
+                  <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 13px; border: 1px solid var(--cinder-color-info-border); border-radius: var(--cinder-radius-md, 8px); background: var(--cinder-color-info-bg);">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--cinder-color-info-fg); flex-shrink: 0; margin-top: 2px;"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                    <div style="display: grid; gap: 3px; flex: 1;">
+                      <span style="font: 600 12px system-ui; color: var(--cinder-color-info-fg);">{{ row.title }}</span>
+                      <span style="font: 400 11.5px/1.55 system-ui; color: var(--cinder-color-info-fg); opacity: 0.9;">{{ row.text }}</span>
+                    </div>
+                    <button type="button" onClick="{{ row.jump }}" style="flex: none; border: none; background: transparent; color: var(--cinder-color-info-fg); font: 600 11px system-ui; cursor: pointer; text-decoration: underline; padding: 0;">See events 13–15</button>
+                    <button type="button" onClick="{{ dismissExplainer }}" aria-label="Dismiss" style="flex: none; border: none; background: transparent; color: var(--cinder-color-info-fg); font: 600 13px system-ui; cursor: pointer; padding: 0 2px; opacity: 0.7;">✕</button>
+                  </div>
+                </sc-if>
+
+                <sc-if value="{{ row.isApproval }}" hint-placeholder-val="{{ false }}">
+                  <div style="max-width: 560px;">
+                    <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.ApprovalCard" dc-props="{{ approvalProps }}" hint-size="100%,420px"></x-import>
+                    <p style="margin: 6px 0 0; font: 400 11px/1.5 system-ui; color: var(--cinder-text-subtle);">Approve here or from the Inbox — either way it is the same durable signal to the same workflow.</p>
+                  </div>
+                </sc-if>
+
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <!-- Composer -->
+        <div style="flex: none; padding: 12px 28px 16px;">
+          <div style="max-width: 760px; margin: 0 auto;">
+            <sc-if value="{{ detail.running }}" hint-placeholder-val="{{ false }}">
+              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                <span style="width: 7px; height: 7px; border-radius: 50%; background: var(--cinder-info); animation: stardust-pulse 2s ease-in-out infinite;"></span>
+                <span style="font: 500 11.5px system-ui; color: var(--cinder-text-subtle);">Streaming — anything you type steers the run</span>
+                <span style="flex: 1;"></span>
+                <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="soft-danger" size="xs" hint-size="86px,28px">Interrupt</x-import>
+              </div>
+            </sc-if>
+            <div style="border: 1px solid var(--cinder-border); border-radius: var(--cinder-radius-lg, 12px); background: var(--cinder-surface); padding: 11px 12px; box-sizing: border-box;">
+              <textarea aria-label="Message" rows="2" placeholder="{{ detail.placeholder }}" style="width: 100%; border: none; background: transparent; resize: none; outline: none; font: 400 13.5px/1.5 var(--cinder-font-sans, system-ui); color: var(--cinder-text); padding: 1px 0; box-sizing: border-box;"></textarea>
+              <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px;">
+                <span style="font: 400 11px system-ui; color: var(--cinder-text-disabled);">Enter to send · Shift+Enter for newline</span>
+                <span style="flex: 1;"></span>
+                <button type="button" aria-label="Send message" style="display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: none; border-radius: 999px; background: var(--cinder-accent); color: var(--cinder-accent-contrast); cursor: pointer;" style-hover="background: var(--cinder-accent-hover);">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Run pane ── -->
+      <aside aria-label="Run" style="width: 560px; flex: none; display: flex; flex-direction: column; background: var(--cinder-surface); overflow: hidden; box-sizing: border-box;">
+
+        <!-- Identity card -->
+        <div style="flex: none; padding: 12px 16px 10px; border-bottom: 1px solid var(--cinder-border-muted); display: grid; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font: 700 10px system-ui; text-transform: uppercase; letter-spacing: 0.07em; color: var(--cinder-text-subtle);">This turn</span>
+            <code style="font: 500 11.5px var(--cinder-font-mono); color: var(--cinder-text); background: var(--cinder-surface-inset); border: 1px solid var(--cinder-border-muted); border-radius: 5px; padding: 2px 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;">{{ detail.wfId }}</code>
+            <span style="flex: 1;"></span>
+            <a href="{{ detail.wfUrl }}" target="_blank" rel="noreferrer" style="flex: none; font: 600 11px system-ui; color: var(--cinder-accent-text); text-decoration: none; white-space: nowrap;" style-hover="text-decoration: underline;">history ↗</a>
+          </div>
+          <div style="display: flex; align-items: center; gap: 14px; font: 500 11px var(--cinder-font-mono); color: var(--cinder-text-subtle);">
+            <span>queue <span style="color: var(--cinder-text);">agent-orchestrator</span></span>
+            <span>attempt <span style="color: var(--cinder-text);">1</span></span>
+            <span>budget <span style="color: var(--cinder-text);">{{ detail.budgetLabel }}</span></span>
+            <span style="flex: 1;"></span>
+            <span style="display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;">
+              <span style="width: 6px; height: 6px; border-radius: 50%; background: {{ detail.dotColor }}; {{ detail.dotAnim }}"></span>
+              {{ detail.stateLabel }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Replay scrubber -->
+        <div style="flex: none; padding: 10px 16px 12px; border-bottom: 1px solid var(--cinder-border-muted); background: linear-gradient(180deg, var(--cinder-surface-inset) 0%, var(--cinder-surface) 100%); display: grid; gap: 6px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font: 700 10px system-ui; text-transform: uppercase; letter-spacing: 0.07em; color: var(--cinder-text-subtle);">Event history</span>
+            <span style="font: 500 10.5px var(--cinder-font-mono); color: var(--cinder-text-subtle);">{{ scrubLabel }}</span>
+            <span style="flex: 1;"></span>
+            <sc-if value="{{ isReplaying }}" hint-placeholder-val="{{ false }}">
+              <span style="padding: 1px 7px; border-radius: 4px; background: var(--cinder-color-warning-bg); color: var(--cinder-color-warning-fg); font: 700 10px var(--cinder-font-mono); letter-spacing: 0.05em;">REPLAY</span>
+              <button type="button" onClick="{{ jumpToLive }}" style="border: none; background: transparent; color: var(--cinder-accent-text); font: 600 11px system-ui; cursor: pointer; padding: 0;" style-hover="text-decoration: underline;">Jump to live</button>
+            </sc-if>
+            <sc-if value="{{ isLive }}" hint-placeholder-val="{{ true }}">
+              <span style="padding: 1px 7px; border-radius: 4px; background: var(--cinder-color-success-bg); color: var(--cinder-color-success-fg); font: 700 10px var(--cinder-font-mono); letter-spacing: 0.05em;">LIVE</span>
+            </sc-if>
+          </div>
+          <input type="range" min="1" max="{{ scrubMax }}" value="{{ scrubValue }}" onChange="{{ onScrub }}" onInput="{{ onScrub }}" aria-label="Replay history scrubber" style="width: 100%; accent-color: var(--cinder-accent); cursor: ew-resize; margin: 0;">
+          <p style="margin: 0; font: 400 10.5px/1.5 system-ui; color: var(--cinder-text-subtle);">{{ scrubCaption }}</p>
+        </div>
+
+        <!-- Mode switch -->
+        <div style="flex: none; display: flex; align-items: center; gap: 2px; padding: 8px 16px; border-bottom: 1px solid var(--cinder-border-muted);">
+          <button type="button" onClick="{{ modeTimeline }}" style="{{ modeTimelineStyle }}">Timeline</button>
+          <button type="button" onClick="{{ modeEvents }}" style="{{ modeEventsStyle }}">Events</button>
+          <button type="button" onClick="{{ modeWorkspace }}" style="{{ modeWorkspaceStyle }}">Workspace</button>
+          <button type="button" onClick="{{ modeCosts }}" style="{{ modeCostsStyle }}">Costs</button>
+          <span style="flex: 1;"></span>
+          <span style="font: 500 10.5px var(--cinder-font-mono); color: var(--cinder-text-disabled);">{{ modeHint }}</span>
+        </div>
+
+        <!-- Mode body -->
+        <div class="stardust-scroll" style="flex: 1; overflow-y: auto; padding: 14px 16px; box-sizing: border-box;">
+
+          <sc-if value="{{ showTimeline }}" hint-placeholder-val="{{ true }}">
+            <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.RunStepTimeline" dc-props="{{ timelineProps }}" hint-size="100%,420px"></x-import>
+          </sc-if>
+
+          <sc-if value="{{ showEvents }}" hint-placeholder-val="{{ false }}">
+            <div style="display: grid; gap: 10px;">
+              <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.EventStreamViewer" dc-props="{{ eventsProps }}" hint-size="100%,420px"></x-import>
+              <sc-if value="{{ showExplainers }}" hint-placeholder-val="{{ true }}">
+                <p style="margin: 0; font: 400 11px/1.55 system-ui; color: var(--cinder-text-subtle);">This is the same history Temporal Web shows — every decision the workflow made, in order. A worker that crashes replays these events to rebuild state; that is the whole durability trick.</p>
+              </sc-if>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ showWorkspace }}" hint-placeholder-val="{{ false }}">
+            <div style="display: grid; gap: 12px;">
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                <span style="font: 700 10px system-ui; text-transform: uppercase; letter-spacing: 0.07em; color: var(--cinder-text-subtle);">Session workspace</span>
+                <sc-for list="{{ wsFiles }}" as="f" hint-placeholder-count="3">
+                  <button type="button" onClick="{{ f.onClick }}" style="display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 7px 10px; border: 1px solid {{ f.border }}; border-radius: var(--cinder-radius-sm, 6px); background: {{ f.bg }}; cursor: pointer; font: inherit;" style-hover="border-color: var(--cinder-border-strong);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--cinder-text-subtle); flex-shrink: 0;"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path></svg>
+                    <span style="font: 500 12px var(--cinder-font-mono); color: var(--cinder-text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ f.path }}</span>
+                    <sc-if value="{{ f.tag }}" hint-placeholder-val="{{ false }}">
+                      <span style="padding: 1px 6px; border-radius: 4px; font: 700 9.5px var(--cinder-font-mono); background: {{ f.tagBg }}; color: {{ f.tagFg }};">{{ f.tag }}</span>
+                    </sc-if>
+                    <span style="font: 500 10.5px var(--cinder-font-mono); color: var(--cinder-text-disabled);">{{ f.size }}</span>
+                  </button>
+                </sc-for>
+              </div>
+
+              <div style="border: 1px solid var(--cinder-border-muted); border-radius: var(--cinder-radius-md, 8px); overflow: hidden;">
+                <div style="display: flex; align-items: center; gap: 8px; padding: 7px 11px; background: var(--cinder-surface-inset); border-bottom: 1px solid var(--cinder-border-muted);">
+                  <span style="font: 600 11.5px var(--cinder-font-mono); color: var(--cinder-text);">{{ wsSelectedPath }}</span>
+                  <span style="font: 500 10px var(--cinder-font-mono); color: var(--cinder-text-subtle);">diff vs snapshot #11</span>
+                  <span style="flex: 1;"></span>
+                  <span style="font: 600 10.5px var(--cinder-font-mono); color: var(--cinder-color-success-fg);">+9</span>
+                  <span style="font: 600 10.5px var(--cinder-font-mono); color: var(--cinder-color-danger-fg);">−1</span>
+                </div>
+                <div style="font: 500 11px/1.7 var(--cinder-font-mono); padding: 8px 0;">
+                  <sc-for list="{{ wsDiff }}" as="d" hint-placeholder-count="6">
+                    <div style="display: flex; gap: 10px; padding: 0 11px; background: {{ d.bg }}; color: {{ d.fg }};">
+                      <span style="flex: none; width: 12px; text-align: center; opacity: 0.7;">{{ d.sign }}</span>
+                      <span style="white-space: pre-wrap; overflow-wrap: anywhere;">{{ d.text }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <span style="font: 700 10px system-ui; text-transform: uppercase; letter-spacing: 0.07em; color: var(--cinder-text-subtle);">Snapshots — taken before every mutation</span>
+                <sc-for list="{{ wsSnapshots }}" as="snap" hint-placeholder-count="2">
+                  <div style="display: flex; align-items: center; gap: 10px; padding: 8px 11px; border: 1px solid var(--cinder-border-muted); border-radius: var(--cinder-radius-sm, 6px); background: var(--cinder-surface);">
+                    <span style="font: 600 11px var(--cinder-font-mono); color: var(--cinder-text);">{{ snap.id }}</span>
+                    <span style="font: 400 11px system-ui; color: var(--cinder-text-subtle); flex: 1;">{{ snap.label }}</span>
+                    <span style="font: 500 10.5px var(--cinder-font-mono); color: var(--cinder-text-disabled);">{{ snap.time }}</span>
+                    <button type="button" onClick="{{ snap.onRollback }}" style="border: 1px solid var(--cinder-color-danger-border); border-radius: var(--cinder-radius-sm, 6px); background: transparent; color: var(--cinder-color-danger-fg); font: 600 11px system-ui; padding: 3px 9px; cursor: pointer;" style-hover="background: var(--cinder-color-danger-bg);">{{ snap.cta }}</button>
+                  </div>
+                </sc-for>
+                <sc-if value="{{ showExplainers }}" hint-placeholder-val="{{ true }}">
+                  <p style="margin: 0; font: 400 11px/1.55 system-ui; color: var(--cinder-text-subtle);">Rollback runs as its own activity with an idempotency key — safe to retry, recorded in history like everything else.</p>
+                </sc-if>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ showCosts }}" hint-placeholder-val="{{ false }}">
+            <div style="display: grid; gap: 14px;">
+              <div style="display: grid; gap: 6px;">
+                <div style="display: flex; justify-content: space-between; font: 600 11px system-ui;">
+                  <span style="color: var(--cinder-text-subtle);">Budget — enforced in-workflow</span>
+                  <span style="font-family: var(--cinder-font-mono); color: var(--cinder-text);">{{ detail.budgetLabel }}</span>
+                </div>
+                <div style="height: 6px; border-radius: 3px; background: var(--cinder-surface-inset); overflow: hidden;">
+                  <div style="height: 100%; width: {{ detail.budgetPct }}; background: var(--cinder-accent); border-radius: 3px;"></div>
+                </div>
+                <span style="font: 500 10.5px var(--cinder-font-mono); color: var(--cinder-text-subtle);">{{ detail.tokenLabel }}</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <span style="font: 700 10px system-ui; text-transform: uppercase; letter-spacing: 0.07em; color: var(--cinder-text-subtle);">By step</span>
+                <sc-for list="{{ costRows }}" as="c" hint-placeholder-count="3">
+                  <div style="display: grid; grid-template-columns: 140px 1fr auto auto; gap: 10px; align-items: center; font: 500 11.5px var(--cinder-font-mono);">
+                    <span style="color: var(--cinder-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ c.label }}</span>
+                    <span style="height: 6px; border-radius: 3px; background: var(--cinder-surface-inset); overflow: hidden; display: block;"><span style="display: block; height: 100%; width: {{ c.pct }}; background: var(--cinder-accent); opacity: 0.75; border-radius: 3px;"></span></span>
+                    <span style="color: var(--cinder-text-subtle);">{{ c.tokens }}</span>
+                    <span style="color: var(--cinder-text); min-width: 44px; text-align: right;">{{ c.cost }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <sc-if value="{{ showExplainers }}" hint-placeholder-val="{{ true }}">
+                <p style="margin: 0; font: 400 11px/1.55 system-ui; color: var(--cinder-text-subtle);">At the cap the workflow does not die — it pauses on a durable wait and asks you to raise the budget or stop.</p>
+              </sc-if>
+            </div>
+          </sc-if>
+
+        </div>
+      </aside>
+    </div>
+  </sc-if>
+
+  <!-- ══════════ INBOX TAB ══════════ -->
+  <sc-if value="{{ showInbox }}" hint-placeholder-val="{{ false }}">
+    <div class="stardust-scroll" style="flex: 1; overflow-y: auto;">
+      <div style="max-width: var(--cinder-content-width); margin: 0 auto; padding: 28px 32px 48px; display: flex; flex-direction: column; gap: 20px;">
+        <div style="display: flex; align-items: baseline; gap: 12px;">
+          <h1 style="margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.01em;">Inbox</h1>
+          <span style="font: 400 12.5px system-ui; color: var(--cinder-text-subtle);">Everything waiting on you, across every session.</span>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <span style="font: 700 10.5px system-ui; text-transform: uppercase; letter-spacing: 0.07em; color: var(--cinder-color-warning-fg);">Needs you now</span>
+          <sc-if value="{{ approvalPending }}" hint-placeholder-val="{{ true }}">
+            <div style="display: grid; gap: 6px;">
+              <div style="display: flex; align-items: center; gap: 8px; font: 500 11px var(--cinder-font-mono); color: var(--cinder-text-subtle);">
+                <span>from</span>
+                <button type="button" onClick="{{ openChangelog }}" style="border: none; background: transparent; color: var(--cinder-accent-text); font: 600 11px system-ui; cursor: pointer; padding: 0;" style-hover="text-decoration: underline;">Draft weekly changelog</button>
+                <span>·</span>
+                <span>signal human_approval · run paused on a durable wait, nothing has executed</span>
+              </div>
+              <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.ApprovalCard" dc-props="{{ approvalProps }}" hint-size="100%,420px"></x-import>
+            </div>
+          </sc-if>
+          <sc-if value="{{ approvalResolved }}" hint-placeholder-val="{{ false }}">
+            <div style="display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--cinder-color-success-border); border-radius: var(--cinder-radius-md, 8px); background: var(--cinder-color-success-bg);">
+              <span style="font: 600 12.5px system-ui; color: var(--cinder-color-success-fg);">{{ approvalResolvedLabel }}</span>
+              <span style="flex: 1;"></span>
+              <span style="font: 500 10.5px var(--cinder-font-mono); color: var(--cinder-color-success-fg); opacity: 0.8;">signal delivered · appr_9f31c2d4</span>
+            </div>
+          </sc-if>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <span style="font: 700 10.5px system-ui; text-transform: uppercase; letter-spacing: 0.07em; color: var(--cinder-text-subtle);">Review when you can</span>
+          <sc-for list="{{ memoryItems }}" as="m" hint-placeholder-count="2">
+            <div style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--cinder-border-muted); border-radius: var(--cinder-radius-md, 8px); background: var(--cinder-surface);">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--cinder-text-subtle); flex-shrink: 0;"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"></path><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"></path><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"></path></svg>
+              <div style="display: grid; gap: 2px; flex: 1; min-width: 0;">
+                <sc-if value="{{ m.decided }}" hint-placeholder-val="{{ false }}">
+                  <span style="font: 500 12.5px system-ui; color: var(--cinder-text-subtle); text-decoration: line-through;">{{ m.text }}</span>
+                  <span style="font: 500 10.5px var(--cinder-font-mono); color: var(--cinder-text-subtle);">{{ m.decidedLabel }}</span>
+                </sc-if>
+                <sc-if value="{{ m.pending }}" hint-placeholder-val="{{ true }}">
+                  <span style="font: 500 12.5px system-ui; color: var(--cinder-text);">{{ m.text }}</span>
+                  <span style="font: 500 10.5px var(--cinder-font-mono); color: var(--cinder-text-subtle);">memory candidate · from {{ m.from }}</span>
+                </sc-if>
+              </div>
+              <sc-if value="{{ m.pending }}" hint-placeholder-val="{{ true }}">
+                <button type="button" onClick="{{ m.onSave }}" style="flex: none; border: 1px solid var(--cinder-border); border-radius: var(--cinder-radius-sm, 6px); background: var(--cinder-surface-inset); color: var(--cinder-text); font: 600 11.5px system-ui; padding: 4px 11px; cursor: pointer;" style-hover="border-color: var(--cinder-accent); color: var(--cinder-accent-text);">Save</button>
+                <button type="button" onClick="{{ m.onDiscard }}" style="flex: none; border: none; background: transparent; color: var(--cinder-text-subtle); font: 600 11.5px system-ui; padding: 4px 6px; cursor: pointer;" style-hover="color: var(--cinder-text);">Discard</button>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <span style="font: 700 10.5px system-ui; text-transform: uppercase; letter-spacing: 0.07em; color: var(--cinder-text-subtle);">FYI — handled without you</span>
+          <div style="display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border: 1px solid var(--cinder-border-muted); border-radius: var(--cinder-radius-md, 8px); background: var(--cinder-surface);">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--cinder-success); flex-shrink: 0; margin-top: 1px;"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+            <div style="display: grid; gap: 2px; flex: 1;">
+              <span style="font: 500 12.5px system-ui; color: var(--cinder-text);">Run recovered after a worker crash — resumed from event 41 on worker-2, no state lost</span>
+              <span style="font: 500 10.5px var(--cinder-font-mono); color: var(--cinder-text-subtle);">agent-run:5f2a91c3…-run-4 · 6:12 AM</span>
+            </div>
+            <a href="http://localhost:8233/namespaces/default/workflows/agent-run%3A5f2a91c3-run-4" target="_blank" rel="noreferrer" style="flex: none; font: 600 11px system-ui; color: var(--cinder-accent-text); text-decoration: none;" style-hover="text-decoration: underline;">events ↗</a>
+          </div>
+          <div style="display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border: 1px solid var(--cinder-border-muted); border-radius: var(--cinder-radius-md, 8px); background: var(--cinder-surface);">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--cinder-text-subtle); flex-shrink: 0; margin-top: 1px;"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"></path><path d="M16 2v4"></path><path d="M8 2v4"></path><path d="M3 10h5"></path><path d="M17.5 17.5 16 16.3V14"></path><circle cx="16" cy="16" r="6"></circle></svg>
+            <div style="display: grid; gap: 2px; flex: 1;">
+              <span style="font: 500 12.5px system-ui; color: var(--cinder-text);">morning-digest fired at 6:00 AM — completed in 41s, $0.04</span>
+              <span style="font: 500 10.5px var(--cinder-font-mono); color: var(--cinder-text-subtle);">schedule:morning-digest · next fire in 15h 26m</span>
+            </div>
+            <button type="button" onClick="{{ openDigest }}" style="flex: none; border: none; background: transparent; color: var(--cinder-accent-text); font: 600 11px system-ui; cursor: pointer; padding: 0;" style-hover="text-decoration: underline;">view session</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ══════════ SCHEDULES TAB ══════════ -->
+  <sc-if value="{{ showSchedules }}" hint-placeholder-val="{{ false }}">
+    <div class="stardust-scroll" style="flex: 1; overflow-y: auto;">
+      <div style="max-width: var(--cinder-content-width); margin: 0 auto; padding: 28px 32px 48px; display: flex; flex-direction: column; gap: 18px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <h1 style="margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.01em;">Schedules</h1>
+          <span style="font: 400 12.5px system-ui; color: var(--cinder-text-subtle);">Native Temporal Schedules — they fire even when this app is closed.</span>
+          <span style="flex: 1;"></span>
+          <x-import component-from-global-scope="CinderDesignSystem_3e8bc5.Button" variant="primary" size="sm" hint-size="118px,32px">New schedule</x-import>
+        </div>
+
+        <!-- 24h fire timeline -->
+        <div style="border: 1px solid var(--cinder-border-muted); border-radius: var(--cinder-radius-lg, 12px); background: var(--cinder-surface); padding: 14px 16px 10px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+            <span style="font: 700 10px system-ui; text-transform: uppercase; letter-spacing: 0.07em; color: var(--cinder-text-subtle);">Next 24 hours</span>
+            <span style="flex: 1;"></span>
+            <span style="display: inline-flex; align-items: center; gap: 5px; font: 500 10.5px system-ui; color: var(--cinder-text-subtle);"><span style="width: 7px; height: 7px; border-radius: 50%; background: var(--cinder-success);"></span>fired</span>
+            <span style="display: inline-flex; align-items: center; gap: 5px; font: 500 10.5px system-ui; color: var(--cinder-text-subtle);"><span style="width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--cinder-accent); box-sizing: border-box;"></span>upcoming</span>
+          </div>
+          <div style="position: relative; height: 44px;">
+            <div style="position: absolute; left: 0; right: 0; top: 20px; height: 2px; background: var(--cinder-border-muted); border-radius: 1px;"></div>
+            <div style="position: absolute; left: 25%; top: 20px; bottom: auto; width: 2px; height: 10px; margin-top: -4px; background: var(--cinder-danger); border-radius: 1px;" title="now — 2:10 PM"></div>
+            <sc-for list="{{ scheduleFires }}" as="fire" hint-placeholder-count="3">
+              <div style="position: absolute; left: {{ fire.x }}; top: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; transform: translateX(-50%);">
+                <span style="font: 500 9.5px var(--cinder-font-mono); color: var(--cinder-text-subtle); white-space: nowrap;">{{ fire.label }}</span>
+                <span style="width: 9px; height: 9px; border-radius: 50%; background: {{ fire.fill }}; border: {{ fire.ring }}; box-sizing: border-box;"></span>
+                <span style="font: 400 9.5px system-ui; color: var(--cinder-text-disabled); white-space: nowrap;">{{ fire.time }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <sc-for list="{{ schedules }}" as="sch" hint-placeholder-count="2">
+            <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; padding: 14px 16px; border: 1px solid var(--cinder-border-muted); border-radius: var(--cinder-radius-lg, 12px); background: var(--cinder-surface); box-shadow: var(--cinder-shadow-sm);">
+              <div style="grid-column: 1; grid-row: 1; display: flex; align-items: center; gap: 10px; min-width: 0;">
+                <span style="font: 600 13.5px var(--cinder-font-mono); color: var(--cinder-text);">{{ sch.name }}</span>
+                <code style="font: 500 11px var(--cinder-font-mono); color: var(--cinder-text-subtle); background: var(--cinder-surface-inset); border: 1px solid var(--cinder-border-muted); border-radius: 4px; padding: 1px 6px;">{{ sch.cron }}</code>
+                <sc-if value="{{ sch.paused }}" hint-placeholder-val="{{ false }}">
+                  <span style="padding: 1px 7px; border-radius: 4px; background: var(--cinder-color-warning-bg); color: var(--cinder-color-warning-fg); font: 700 10px system-ui;">paused</span>
+                </sc-if>
+              </div>
+              <div style="grid-column: 2; grid-row: 1 / 3; display: flex; align-items: center; gap: 8px;">
+                <a href="{{ sch.url }}" target="_blank" rel="noreferrer" style="display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border: 1px solid var(--cinder-border-muted); border-radius: var(--cinder-radius-sm, 6px); background: var(--cinder-surface-inset); font: 500 10.5px var(--cinder-font-mono); color: var(--cinder-text-subtle); text-decoration: none; white-space: nowrap;" style-hover="color: var(--cinder-accent-text);">schedule ↗</a>
+                <button type="button" onClick="{{ sch.onPause }}" style="border: 1px solid var(--cinder-border); border-radius: var(--cinder-radius-sm, 6px); background: var(--cinder-surface-inset); color: var(--cinder-text); font: 600 11.5px system-ui; padding: 4px 11px; cursor: pointer; white-space: nowrap;" style-hover="border-color: var(--cinder-border-strong);">{{ sch.pauseLabel }}</button>
+                <button type="button" onClick="{{ sch.onTrigger }}" style="border: 1px solid var(--cinder-border); border-radius: var(--cinder-radius-sm, 6px); background: var(--cinder-surface-inset); color: var(--cinder-text); font: 600 11.5px system-ui; padding: 4px 11px; cursor: pointer; white-space: nowrap;" style-hover="border-color: var(--cinder-accent); color: var(--cinder-accent-text);">{{ sch.triggerLabel }}</button>
+              </div>
+              <div style="grid-column: 1; grid-row: 2; display: flex; align-items: center; gap: 12px; font: 500 11px var(--cinder-font-mono); color: var(--cinder-text-subtle); min-width: 0;">
+                <span style="display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;">last 5
+                  <sc-for list="{{ sch.history }}" as="h" hint-placeholder-count="5">
+                    <span title="{{ h.title }}" style="width: 7px; height: 7px; border-radius: 50%; background: {{ h.color }};"></span>
+                  </sc-for>
+                </span>
+                <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;">{{ sch.summary }}</span>
+                <span style="color: var(--cinder-text); white-space: nowrap;">next {{ sch.next }}</span>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ══════════ ARTIFACTS TAB ══════════ -->
+  <sc-if value="{{ showArtifacts }}" hint-placeholder-val="{{ false }}">
+    <div class="stardust-scroll" style="flex: 1; overflow-y: auto;">
+      <div style="max-width: var(--cinder-content-width); margin: 0 auto; padding: 28px 32px 48px; display: flex; flex-direction: column; gap: 18px;">
+        <div style="display: flex; align-items: baseline; gap: 12px;">
+          <h1 style="margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.01em;">Artifacts</h1>
+          <span style="font: 400 12.5px system-ui; color: var(--cinder-text-subtle);">Reports, diffs, and tool output too large to keep inline — spilled to disk, linked from history.</span>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+          <sc-for list="{{ artifacts }}" as="a" hint-placeholder-count="6">
+            <div style="display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid var(--cinder-border-muted); border-radius: var(--cinder-radius-lg, 12px); background: var(--cinder-surface); box-shadow: var(--cinder-shadow-sm);">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font: 600 12.5px var(--cinder-font-mono); color: var(--cinder-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">{{ a.name }}</span>
+                <span style="flex: none; padding: 1px 7px; border-radius: 4px; font: 700 9.5px system-ui; text-transform: uppercase; letter-spacing: 0.04em; background: var(--cinder-surface-inset); border: 1px solid var(--cinder-border-muted); color: var(--cinder-text-subtle); white-space: nowrap;">{{ a.kind }}</span>
+              </div>
+              <p style="margin: 0; font: 400 11.5px/1.5 system-ui; color: var(--cinder-text-subtle);">{{ a.desc }}</p>
+              <div style="display: flex; align-items: center; gap: 8px; font: 500 10.5px var(--cinder-font-mono); color: var(--cinder-text-disabled); margin-top: auto;">
+                <span>{{ a.meta }}</span>
+                <span style="flex: 1;"></span>
+                <button type="button" onClick="{{ a.onOpen }}" style="border: none; background: transparent; color: var(--cinder-accent-text); font: 600 11px system-ui; cursor: pointer; padding: 0; white-space: nowrap;" style-hover="text-decoration: underline;">open ↗</button>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ══════════ INSIGHTS TAB ══════════ -->
+  <sc-if value="{{ showInsights }}" hint-placeholder-val="{{ false }}">
+    <div class="stardust-scroll" style="flex: 1; overflow-y: auto;">
+      <div style="max-width: var(--cinder-content-width); margin: 0 auto; padding: 28px 32px 48px; display: flex; flex-direction: column; gap: 18px;">
+        <div style="display: flex; align-items: baseline; gap: 12px;">
+          <h1 style="margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.01em;">Insights</h1>
+          <span style="font: 400 12.5px system-ui; color: var(--cinder-text-subtle);">Cost and reliability across runs — usage is recorded per activity, so the numbers are exact.</span>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
+          <sc-for list="{{ insightCards }}" as="i" hint-placeholder-count="4">
+            <div style="display: grid; gap: 4px; padding: 14px 16px; border: 1px solid var(--cinder-border-muted); border-radius: var(--cinder-radius-lg, 12px); background: var(--cinder-surface); box-shadow: var(--cinder-shadow-sm);">
+              <span style="font: 700 10.5px system-ui; text-transform: uppercase; letter-spacing: 0.05em; color: var(--cinder-text-subtle);">{{ i.label }}</span>
+              <span style="font: 700 22px var(--cinder-font-mono); color: {{ i.color }}; letter-spacing: -0.02em;">{{ i.value }}</span>
+              <span style="font: 400 11px system-ui; color: var(--cinder-text-subtle);">{{ i.sub }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px; padding: 16px; border: 1px solid var(--cinder-border-muted); border-radius: var(--cinder-radius-lg, 12px); background: var(--cinder-surface);">
+          <span style="font: 700 10px system-ui; text-transform: uppercase; letter-spacing: 0.07em; color: var(--cinder-text-subtle);">Spend by session — today</span>
+          <sc-for list="{{ spendRows }}" as="sp" hint-placeholder-count="4">
+            <div style="display: grid; grid-template-columns: 220px 1fr auto; gap: 12px; align-items: center;">
+              <button type="button" onClick="{{ sp.open }}" style="border: none; background: transparent; text-align: left; font: 500 12px system-ui; color: var(--cinder-text); cursor: pointer; padding: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" style-hover="color: var(--cinder-accent-text);">{{ sp.title }}</button>
+              <span style="height: 8px; border-radius: 4px; background: var(--cinder-surface-inset); overflow: hidden; display: block;"><span style="display: block; height: 100%; width: {{ sp.pct }}; background: var(--cinder-accent); opacity: 0.8; border-radius: 4px;"></span></span>
+              <span style="font: 600 11.5px var(--cinder-font-mono); color: var(--cinder-text); min-width: 48px; text-align: right;">{{ sp.cost }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+          <div style="display: grid; gap: 4px; padding: 13px 15px; border: 1px solid var(--cinder-border-muted); border-radius: var(--cinder-radius-lg, 12px); background: var(--cinder-surface);">
+            <span style="font: 600 12px system-ui; color: var(--cinder-text);">3 retries auto-healed</span>
+            <span style="font: 400 11px/1.5 system-ui; color: var(--cinder-text-subtle);">Failed activities Temporal retried with backoff. Zero needed you.</span>
+          </div>
+          <div style="display: grid; gap: 4px; padding: 13px 15px; border: 1px solid var(--cinder-border-muted); border-radius: var(--cinder-radius-lg, 12px); background: var(--cinder-surface);">
+            <span style="font: 600 12px system-ui; color: var(--cinder-text);">1 worker crash survived</span>
+            <span style="font: 400 11px/1.5 system-ui; color: var(--cinder-text-subtle);">Run resumed on another worker by replaying its event history.</span>
+          </div>
+          <div style="display: grid; gap: 4px; padding: 13px 15px; border: 1px solid var(--cinder-border-muted); border-radius: var(--cinder-radius-lg, 12px); background: var(--cinder-surface);">
+            <span style="font: 600 12px system-ui; color: var(--cinder-text);">2 approvals resolved</span>
+            <span style="font: 400 11px/1.5 system-ui; color: var(--cinder-text-subtle);">Median wait 4m 12s. Runs pause durably while they wait.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ══════════ COMMAND PALETTE ══════════ -->
+  <sc-if value="{{ paletteOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closePalette }}" style="position: absolute; inset: 0; z-index: 90; background: var(--cinder-overlay-backdrop); backdrop-filter: blur(4px); display: flex; align-items: flex-start; justify-content: center; padding-top: 96px;">
+      <div onClick="{{ stop }}" role="dialog" aria-label="Command palette" style="width: 560px; max-height: 480px; display: flex; flex-direction: column; background: var(--cinder-surface-raised); border: 1px solid var(--cinder-border); border-radius: var(--cinder-radius-lg, 12px); box-shadow: var(--cinder-shadow-lg); overflow: hidden;">
+        <div style="display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--cinder-border-muted);">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--cinder-text-subtle);"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+          <input type="text" placeholder="Type a command or search sessions…" style="flex: 1; border: none; background: transparent; outline: none; font: 400 14px system-ui; color: var(--cinder-text);">
+          <kbd style="display: inline-flex; align-items: center; height: 18px; padding: 0 5px; font: 500 10px var(--cinder-font-mono); color: var(--cinder-text-subtle); background: var(--cinder-surface); border: 1px solid var(--cinder-border-muted); border-radius: 4px;">esc</kbd>
+        </div>
+        <div class="stardust-scroll" style="flex: 1; overflow-y: auto; padding: 8px;">
+          <sc-for list="{{ paletteGroups }}" as="g" hint-placeholder-count="3">
+            <div style="padding: 6px 0;">
+              <div style="padding: 2px 10px 6px; font: 700 10px system-ui; text-transform: uppercase; letter-spacing: 0.07em; color: var(--cinder-text-subtle);">{{ g.label }}</div>
+              <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="3">
+                <button type="button" onClick="{{ it.onClick }}" style="display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 8px 10px; border: none; border-radius: var(--cinder-radius-md, 8px); background: transparent; color: var(--cinder-text); font: 500 13px system-ui; cursor: pointer;" style-hover="background: var(--cinder-surface-hover);">
+                  <span style="flex: none; width: 7px; height: 7px; border-radius: 50%; background: {{ it.dot }};"></span>
+                  <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ it.label }}</span>
+                  <span style="flex: none; font: 500 10.5px var(--cinder-font-mono); color: var(--cinder-text-disabled);">{{ it.hint }}</span>
+                </button>
+              </sc-for>
+            </div>
+          </sc-for>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-top: 1px solid var(--cinder-border-muted); font: 400 10.5px system-ui; color: var(--cinder-text-disabled);">
+          <span>↑↓ navigate</span><span>⏎ run</span><span>esc close</span>
+          <span style="flex: 1;"></span>
+          <span style="font-family: var(--cinder-font-mono);">every action here is durable</span>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;firstRun&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: false, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Guidance&quot;}, &quot;showExplainers&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Guidance&quot;}}">
+class Component extends DCLogic {
+  state = {
+    tab: 'sessions',
+    selected: null,
+    mode: 'timeline',
+    scrub: null,
+    paletteOpen: false,
+    healthOpen: false,
+    explainerDismissed: false,
+    approvalState: 'pending',
+    memoryDecisions: {},
+    schedulePaused: {},
+    triggered: {},
+    rolledBack: false,
+    sessionFilter: 'all',
+    wsSelected: 'reports/ci-summary.md'
+  };
+
+  componentDidMount() {
+    this._onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === 'k') {
+        e.preventDefault();
+        this.setState((s) => ({ paletteOpen: !s.paletteOpen }));
+      } else if (e.key === 'Escape') {
+        this.setState({ paletteOpen: false, healthOpen: false });
+      }
+    };
+    window.addEventListener('keydown', this._onKey);
+  }
+
+  componentWillUnmount() {
+    window.removeEventListener('keydown', this._onKey);
+  }
+
+  // ── static data ──
+  sessionsData() {
+    const wfBase = 'http://localhost:8233/namespaces/default/workflows/';
+    return [
+      { id: 'ci', title: 'Summarize overnight CI failures', status: 'running', key: '5f2a91c3', meta: '5f2a91c3 · run 7 · started 2m ago · $0.12 · 3 delegates', running: true },
+      { id: 'changelog', title: 'Draft weekly changelog', status: 'waiting approval', key: 'fb86feab', meta: 'fb86feab · run 3 · paused 18m · $0.31 · git push held', needsYou: true },
+      { id: 'hello', title: 'Create hello.txt in workspace', status: 'complete', key: '93bed9ac', meta: '93bed9ac · run 2 · 2h ago · $0.00 · 2.6s', complete: true },
+      { id: 'digest', title: 'Morning digest — Jul 1', status: 'complete', key: 'c41d02aa', meta: 'c41d02aa · run 1 · fired by schedule:morning-digest · 6:00 AM · $0.04', complete: true, scheduled: true }
+    ].map((s) => Object.assign(s, { wfUrl: wfBase + encodeURIComponent('agent-session:' + s.key) }));
+  }
+
+  detailData(id) {
+    const D = {
+      ci: {
+        title: 'Summarize overnight CI failures', status: 'running', key: '5f2a91c3', runN: 7, cost: '$0.12',
+        wfId: 'agent-run:5f2a91c3-run-7', running: true,
+        budgetLabel: '$0.12 / $1.00', budgetPct: '12%', tokenLabel: '47.5k / 100k tokens · 4 model calls',
+        stateLabel: 'running on worker-1', placeholder: 'Steer the run — e.g. "focus on the e2e suite first"',
+        maxSeq: 18
+      },
+      changelog: {
+        title: 'Draft weekly changelog', status: 'waiting approval', key: 'fb86feab', runN: 3, cost: '$0.31',
+        wfId: 'agent-run:fb86feab-run-3', waiting: true,
+        budgetLabel: '$0.31 / $1.00', budgetPct: '31%', tokenLabel: '61.2k / 100k tokens · 6 model calls',
+        stateLabel: 'paused on durable wait', placeholder: 'The run is paused — resolve the approval to continue',
+        maxSeq: 12
+      },
+      hello: {
+        title: 'Create hello.txt in workspace', status: 'complete', key: '93bed9ac', runN: 2, cost: '$0.00',
+        wfId: 'agent-run:93bed9ac-run-2', complete: true,
+        budgetLabel: '$0.00 / $1.00', budgetPct: '0.4%', tokenLabel: '129 / 100k tokens · 1 model call',
+        stateLabel: 'complete · 2.6s', placeholder: 'Ask a follow-up…',
+        maxSeq: 6
+      },
+      digest: {
+        title: 'Morning digest — Jul 1', status: 'complete', key: 'c41d02aa', runN: 1, cost: '$0.04',
+        wfId: 'agent-run:c41d02aa-run-1', complete: true,
+        budgetLabel: '$0.04 / $0.25', budgetPct: '16%', tokenLabel: '18.9k / 25k tokens · 2 model calls',
+        stateLabel: 'complete · 41s', placeholder: 'Ask a follow-up…',
+        maxSeq: 8
+      }
+    };
+    return D[id] || D.ci;
+  }
+
+  eventsData(id) {
+    const mk = (seq, name, sev, summary, source, details) => ({
+      id: id + '-e' + seq, sequence: seq, datetime: '2026-07-01T13:0' + (seq % 10) + ':00', timestamp: '2:0' + (seq % 10) + ' PM',
+      severity: sev, source: source || 'worker-1', summary: seq + '  ' + name + ' — ' + summary, details
+    });
+    if (id === 'ci') {
+      return [
+        mk(1, 'WorkflowExecutionStarted', 'info', 'AgentRunWorkflow · input received', 'temporal', { workflowId: 'agent-run:5f2a91c3-run-7', taskQueue: 'agent-orchestrator' }),
+        mk(2, 'WorkflowTaskCompleted', 'debug', 'first decision recorded'),
+        mk(3, 'MarkerRecorded', 'info', 'model_call · plan (claude-sonnet-4-5) · 1.8s', 'anthropic', { inputTokens: 11840, outputTokens: 412 }),
+        mk(4, 'ActivityTaskScheduled', 'info', 'read_ci_runs · queue agent-tools'),
+        mk(5, 'ActivityTaskStarted', 'debug', 'read_ci_runs · attempt 1'),
+        mk(6, 'ActivityTaskCompleted', 'success', 'read_ci_runs · 1.1s · 3 failing suites'),
+        mk(7, 'StartChildWorkflowExecutionInitiated', 'info', 'delegate:e2e-suite'),
+        mk(8, 'StartChildWorkflowExecutionInitiated', 'info', 'delegate:unit-suite'),
+        mk(9, 'StartChildWorkflowExecutionInitiated', 'info', 'delegate:lint-suite'),
+        mk(10, 'ChildWorkflowExecutionCompleted', 'success', 'delegate:unit-suite · 12s · 3.1k tokens'),
+        mk(11, 'ChildWorkflowExecutionCompleted', 'success', 'delegate:e2e-suite · 41s · 8.2k tokens'),
+        mk(12, 'ActivityTaskScheduled', 'info', 'read_artifact · tmp/e2e.log'),
+        mk(13, 'ActivityTaskFailed', 'error', 'read_artifact · ETIMEDOUT · retry 1 of 3 in 2s', 'worker-1', { error: 'ETIMEDOUT', backoffMs: 2000 }),
+        mk(14, 'ActivityTaskStarted', 'warning', 'read_artifact · attempt 2'),
+        mk(15, 'ActivityTaskCompleted', 'success', 'read_artifact · attempt 2 · 0.9s'),
+        { id: 'ci-reconnect', kind: 'reconnected', replayedCount: 6, datetime: '2026-07-01T13:06:30', timestamp: '2:06 PM' },
+        mk(16, 'MarkerRecorded', 'info', 'model_call · draft summary (streaming)', 'anthropic'),
+        mk(17, 'WorkflowTaskScheduled', 'debug', 'awaiting model stream'),
+        mk(18, 'MarkerRecorded', 'info', 'transcript checkpoint · seq 18 durable', 'sqlite')
+      ];
+    }
+    if (id === 'changelog') {
+      return [
+        mk(1, 'WorkflowExecutionStarted', 'info', 'AgentRunWorkflow · input received', 'temporal'),
+        mk(3, 'MarkerRecorded', 'info', 'model_call · draft (claude-sonnet-4-5) · 3.2s', 'anthropic'),
+        mk(5, 'ActivityTaskCompleted', 'success', 'write_file · CHANGELOG.md · 12 entries'),
+        mk(8, 'MarkerRecorded', 'info', 'policy_check · run_command matched high-risk rule', 'policy'),
+        mk(11, 'WorkflowExecutionSignaled', 'warning', 'human_approval requested · git push origin main', 'temporal', { approvalId: 'appr_9f31c2d4', expiresIn: '9m' }),
+        mk(12, 'TimerStarted', 'debug', 'approval expiry · 15m')
+      ];
+    }
+    if (id === 'hello') {
+      return [
+        mk(1, 'WorkflowExecutionStarted', 'info', 'AgentRunWorkflow · input received', 'temporal'),
+        mk(2, 'MarkerRecorded', 'info', 'model_call · claude-sonnet-4-5 · 1.4s', 'anthropic'),
+        mk(3, 'ActivityTaskScheduled', 'info', 'write_file · notes/hello.txt'),
+        mk(4, 'ActivityTaskCompleted', 'success', 'write_file · 19 bytes written'),
+        mk(5, 'MarkerRecorded', 'info', 'model_call · final message', 'anthropic'),
+        mk(6, 'WorkflowExecutionCompleted', 'success', 'run complete · 2.6s · $0.00', 'temporal')
+      ];
+    }
+    return [
+      mk(1, 'WorkflowExecutionStarted', 'info', 'fired by schedule:morning-digest', 'temporal'),
+      mk(2, 'MarkerRecorded', 'info', 'model_call · digest draft', 'anthropic'),
+      mk(4, 'ActivityTaskCompleted', 'success', 'write_artifact · morning-digest.md'),
+      mk(8, 'WorkflowExecutionCompleted', 'success', 'run complete · 41s · $0.04', 'temporal')
+    ];
+  }
+
+  rowsData(id) {
+    if (id === 'ci') {
+      return [
+        { type: 'user', seq: 1, text: 'Check the overnight CI runs, figure out what broke, and draft a summary for the team channel.' },
+        { type: 'lifecycle', seq: 1, text: 'Run started · picked up by worker-1', tone: 'muted' },
+        { type: 'assistant', seq: 3, text: 'Pulling the overnight CI runs first, then fanning out one delegate per failing suite.' },
+        { type: 'tool', seq: 6, name: 'read_ci_runs', args: '{ "since": "2026-06-30T22:00" }', result: '3 failing suites: e2e, unit, lint', durable: 'Activity · completed in 1.1s' },
+        { type: 'subagents', seq: 11 },
+        { type: 'tool', seq: 15, name: 'read_artifact', args: '{ "path": "tmp/e2e.log" }', result: '48 KB — spilled to artifact e2e.log', durable: 'Activity · attempt 2 of 3', retried: true },
+        { type: 'explainer', seq: 15, title: 'That ×2 was Temporal, not luck', text: 'The read timed out once, was retried with backoff, and completed. The failure and both attempts are events 13–15 in the durable history — nothing was lost, and nobody was paged.' },
+        { type: 'assistant', seq: 16, streaming: true, text: 'Root cause: the e2e suite is failing on DNS resolution for the staging mesh — 14 of 17 failures share it. Unit failures are a stale snapshot. Drafting the summary for #eng-updates now' }
+      ];
+    }
+    if (id === 'changelog') {
+      return [
+        { type: 'user', seq: 1, text: 'Draft the weekly changelog from merged PRs and push it to the repo.' },
+        { type: 'lifecycle', seq: 1, text: 'Run started · picked up by worker-1', tone: 'muted' },
+        { type: 'assistant', seq: 3, text: 'Drafted CHANGELOG.md from 12 merged PRs. Pushing needs your approval — git push is a high-risk command under the current policy.' },
+        { type: 'tool', seq: 11, name: 'run_command', args: '{ "command": "git push origin main" }', durable: 'Activity · gated by policy', waiting: true },
+        { type: 'approval', seq: 11 },
+        { type: 'lifecycle', seq: 12, text: 'Run paused · durable wait on human_approval · survives restarts', tone: 'warning' }
+      ];
+    }
+    if (id === 'hello') {
+      return [
+        { type: 'user', seq: 1, text: "Please create a file at notes/hello.txt in the workspace containing the text 'Hello from Stardust'. Use your workspace file-writing tool." },
+        { type: 'lifecycle', seq: 1, text: 'Run started · picked up by worker-1', tone: 'muted' },
+        { type: 'assistant', seq: 2, text: "I'll create that file for you now." },
+        { type: 'tool', seq: 4, name: 'write_file', args: '{ "path": "notes/hello.txt", "content": "Hello from Stardust" }', result: 'Wrote 19 bytes to notes/hello.txt', durable: 'Activity · completed in 0.3s' },
+        { type: 'assistant', seq: 5, text: 'The file has been successfully created at notes/hello.txt with the text "Hello from Stardust".' },
+        { type: 'lifecycle', seq: 6, text: 'Run complete · 2.6s · $0.00', tone: 'success' }
+      ];
+    }
+    return [
+      { type: 'lifecycle', seq: 1, text: 'Fired by schedule:morning-digest at 6:00 AM — no one was awake, it ran anyway', tone: 'muted' },
+      { type: 'assistant', seq: 2, text: 'Overnight: 2 sessions completed, 1 approval pending (git push in Draft weekly changelog), CI red on e2e. Full digest written to morning-digest.md.' },
+      { type: 'tool', seq: 4, name: 'write_artifact', args: '{ "path": "morning-digest.md" }', result: '2.4 KB written', durable: 'Activity · completed in 0.2s' },
+      { type: 'lifecycle', seq: 8, text: 'Run complete · 41s · $0.04', tone: 'success' }
+    ];
+  }
+
+  timelineData(id) {
+    const link = (seq) => ({ href: 'http://localhost:8233/namespaces/default/workflows', label: 'event ' + seq + ' ↗' });
+    if (id === 'ci') {
+      return [
+        { id: 't1', label: 'Receive task', status: 'succeeded', duration: '0.2s', link: link(1) },
+        { id: 't2', label: 'Plan checks · model call', status: 'succeeded', duration: '1.8s', actionsCount: 1, link: link(3) },
+        { id: 't3', label: 'Fan out delegates', status: 'running', actionsCount: 3, link: link(9), children: [
+          { id: 't3a', label: 'delegate:e2e-suite', status: 'succeeded', duration: '41s' },
+          { id: 't3b', label: 'delegate:unit-suite', status: 'succeeded', duration: '12s' },
+          { id: 't3c', label: 'delegate:lint-suite', status: 'running' }
+        ] },
+        { id: 't4', label: 'Read CI artifacts', status: 'succeeded', duration: '3.1s', attemptCount: 2, link: link(15), details: [{ id: 't4d', label: 'Retry detail', content: 'Attempt 1 failed: ETIMEDOUT.\nTemporal applied 2s backoff and rescheduled.\nAttempt 2 completed in 0.9s. No state lost.' }] },
+        { id: 't5', label: 'Draft summary · model call', status: 'running', link: link(16) },
+        { id: 't6', label: 'Post to #eng-updates', status: 'pending' }
+      ];
+    }
+    if (id === 'changelog') {
+      return [
+        { id: 'c1', label: 'Receive task', status: 'succeeded', duration: '0.2s', link: link(1) },
+        { id: 'c2', label: 'Draft CHANGELOG.md', status: 'succeeded', duration: '3.2s', actionsCount: 2, link: link(5) },
+        { id: 'c3', label: 'git push origin main', status: 'waiting_approval', link: link(11), details: [{ id: 'c3d', label: 'Why it is waiting', content: 'Policy policy-2026-06 marks run_command with git push as high risk.\nThe workflow is paused on a durable wait — it survives worker restarts\nand expires in 15m if unresolved.' }] },
+        { id: 'c4', label: 'Confirm and finish', status: 'pending' }
+      ];
+    }
+    if (id === 'hello') {
+      return [
+        { id: 'h1', label: 'Receive task', status: 'succeeded', duration: '0.1s', link: link(1) },
+        { id: 'h2', label: 'Plan · model call', status: 'succeeded', duration: '1.4s', link: link(2) },
+        { id: 'h3', label: 'write_file notes/hello.txt', status: 'succeeded', duration: '0.3s', link: link(4) },
+        { id: 'h4', label: 'Final message · model call', status: 'succeeded', duration: '0.8s', link: link(5) }
+      ];
+    }
+    return [
+      { id: 'd1', label: 'Schedule fire · morning-digest', status: 'succeeded', duration: '0.1s', link: link(1) },
+      { id: 'd2', label: 'Gather overnight state', status: 'succeeded', duration: '12s', actionsCount: 4, link: link(2) },
+      { id: 'd3', label: 'Write morning-digest.md', status: 'succeeded', duration: '0.2s', link: link(4) },
+      { id: 'd4', label: 'Complete', status: 'succeeded', duration: '41s total', link: link(8) }
+    ];
+  }
+
+  renderVals() {
+    const s = this.state;
+    const firstRun = this.props.firstRun ?? false;
+    const showExplainers = this.props.showExplainers ?? true;
+
+    const tab = s.tab;
+    const detailId = s.selected;
+    const showDetail = tab === 'sessions' && detailId !== null && !firstRun;
+    const showSessionsList = tab === 'sessions' && detailId === null && !firstRun;
+    const showFirstRun = tab === 'sessions' && firstRun;
+
+    // ── tabs ──
+    const tabBase = 'border: none; background: transparent; cursor: pointer; padding: 0 12px; font: 600 13px system-ui; display: inline-flex; align-items: center; height: 100%; box-sizing: border-box; border-bottom: 2px solid transparent; border-top: 2px solid transparent;';
+    const tabStyle = (t) => tabBase + (tab === t
+      ? ' color: var(--cinder-text); border-bottom-color: var(--cinder-accent);'
+      : ' color: var(--cinder-text-subtle);');
+    const setTab = (t) => () => this.setState({ tab: t, healthOpen: false, paletteOpen: false });
+
+    // ── sessions list ──
+    const all = this.sessionsData();
+    const filter = s.sessionFilter;
+    const visible = all.filter((x) => {
+      if (filter === 'running') return x.running;
+      if (filter === 'needs') return x.needsYou;
+      if (filter === 'complete') return x.complete;
+      return true;
+    });
+    const chipBase = 'border: 1px solid var(--cinder-border-muted); cursor: pointer; border-radius: 999px; padding: 4px 12px; font: 600 11.5px system-ui; white-space: nowrap;';
+    const filterChip = (key, label) => ({
+      label,
+      onClick: () => this.setState({ sessionFilter: key }),
+      style: chipBase + (filter === key
+        ? ' background: var(--cinder-accent); border-color: var(--cinder-accent); color: var(--cinder-accent-contrast);'
+        : ' background: var(--cinder-surface-inset); color: var(--cinder-text-subtle);')
+    });
+
+    const cap = (str) => (str ? str.charAt(0).toUpperCase() + str.slice(1) : str);
+    const tone = (x) => x.running
+      ? { variant: 'info', dot: 'var(--cinder-info)', anim: 'animation: stardust-pulse 2s ease-in-out infinite;', bg: 'var(--cinder-color-info-bg)', fg: 'var(--cinder-color-info-fg)', border: 'var(--cinder-border-muted)' }
+      : x.needsYou
+        ? { variant: 'warning', dot: 'var(--cinder-warning)', anim: '', bg: 'var(--cinder-color-warning-bg)', fg: 'var(--cinder-color-warning-fg)', border: 'var(--cinder-color-warning-border)' }
+        : { variant: 'success', dot: 'var(--cinder-success)', anim: '', bg: 'var(--cinder-color-success-bg)', fg: 'var(--cinder-color-success-fg)', border: 'var(--cinder-border-muted)' };
+
+    const visibleSessions = visible.map((x) => {
+      const t = tone(x);
+      return {
+        title: x.title, status: x.status, meta: x.meta, key: x.key, wfUrl: x.wfUrl, needsYou: !!x.needsYou,
+        dotColor: t.dot, dotAnim: t.anim, badgeBg: t.bg, badgeFg: t.fg, borderColor: t.border, badgeVariant: t.variant, statusLabel: cap(x.status),
+        open: () => this.setState({ tab: 'sessions', selected: x.id, mode: 'timeline', scrub: null })
+      };
+    });
+
+    // ── detail ──
+    const d = this.detailData(detailId || 'ci');
+    const dTone = d.running
+      ? { variant: 'info', dot: 'var(--cinder-info)', anim: 'animation: stardust-pulse 2s ease-in-out infinite;', bg: 'var(--cinder-color-info-bg)', fg: 'var(--cinder-color-info-fg)' }
+      : d.waiting
+        ? { variant: 'warning', dot: 'var(--cinder-warning)', anim: '', bg: 'var(--cinder-color-warning-bg)', fg: 'var(--cinder-color-warning-fg)' }
+        : { variant: 'success', dot: 'var(--cinder-success)', anim: '', bg: 'var(--cinder-color-success-bg)', fg: 'var(--cinder-color-success-fg)' };
+    const wfUrl = 'http://localhost:8233/namespaces/default/workflows/' + encodeURIComponent(d.wfId);
+    const detail = Object.assign({}, d, {
+      dotColor: dTone.dot, dotAnim: dTone.anim, badgeBg: dTone.bg, badgeFg: dTone.fg, badgeVariant: dTone.variant, statusLabel: cap(d.status), wfUrl,
+      running: !!d.running
+    });
+
+    // ── scrubber ──
+    const maxSeq = d.maxSeq;
+    const cursor = s.scrub === null ? maxSeq : Math.min(s.scrub, maxSeq);
+    const isLive = cursor >= maxSeq;
+    const events = this.eventsData(detailId || 'ci');
+    const cursorEvent = events.filter((e) => !e.kind && e.sequence <= cursor).slice(-1)[0];
+    const scrubCaption = isLive
+      ? 'Drag left to rebuild the run at any past event — the same replay a recovering worker performs.'
+      : 'State rebuilt at event ' + cursor + (cursorEvent ? ' — ' + cursorEvent.summary.replace(/^\d+\s+/, '') : '') + '. Later events are dimmed; this view is derived purely from history.';
+
+    // ── conversation rows ──
+    const laneStyles = [
+      { label: 'delegate:e2e-suite', meta: 'complete · 41s · 8.2k tok', dot: 'var(--cinder-success)', edge: 'var(--cinder-success)', anim: '' },
+      { label: 'delegate:unit-suite', meta: 'complete · 12s · 3.1k tok', dot: 'var(--cinder-success)', edge: 'var(--cinder-success)', anim: '' },
+      { label: 'delegate:lint-suite', meta: 'running · 2.4k tok', dot: 'var(--cinder-info)', edge: 'var(--cinder-info)', anim: 'animation: stardust-pulse 2s ease-in-out infinite;' }
+    ];
+    const jumpToEvents = () => this.setState({ mode: 'events' });
+    const rows = this.rowsData(detailId || 'ci')
+      .filter((r) => !(r.type === 'explainer' && (s.explainerDismissed || !showExplainers)))
+      .map((r, i) => {
+        const dimmed = r.seq > cursor;
+        const toneMap = { muted: 'var(--cinder-text-disabled)', success: 'var(--cinder-success)', warning: 'var(--cinder-warning)' };
+        return {
+          isUser: r.type === 'user', isAssistant: r.type === 'assistant', isTool: r.type === 'tool',
+          isLifecycle: r.type === 'lifecycle', isSubagents: r.type === 'subagents',
+          isExplainer: r.type === 'explainer', isApproval: r.type === 'approval',
+          text: r.text || '', title: r.title || '', name: r.name || '', args: r.args || '',
+          result: r.result || false, durable: r.durable || '', seq: r.seq,
+          retried: !!r.retried, waiting: !!r.waiting, streaming: !!r.streaming,
+          dot: toneMap[r.tone] || 'var(--cinder-text-disabled)',
+          toolBorder: r.waiting ? 'var(--cinder-color-warning-border)' : 'var(--cinder-border-muted)',
+          lanes: laneStyles,
+          jump: jumpToEvents,
+          wrapStyle: 'margin-top: ' + (i === 0 ? '4px' : '20px') + ';' + (dimmed ? ' opacity: 0.22; filter: saturate(0.4); transition: opacity 0.2s;' : ' transition: opacity 0.2s;')
+        };
+      });
+
+    // ── modes ──
+    const modeBase = 'border: none; cursor: pointer; padding: 4px 11px; border-radius: 6px; font: 600 12px system-ui;';
+    const modeStyle = (m) => modeBase + (s.mode === m
+      ? ' background: var(--cinder-accent); color: var(--cinder-accent-contrast);'
+      : ' background: transparent; color: var(--cinder-text-subtle);');
+    const modeHints = { timeline: 'steps map to activities', events: 'raw workflow history', workspace: 'diff + rollback', costs: 'exact, per activity' };
+
+    // ── events viewer props ──
+    const filteredEvents = events.filter((e) => e.kind === 'reconnected' || e.sequence <= cursor);
+    const eventsProps = {
+      events: filteredEvents,
+      connectionState: d.running ? 'connected' : undefined,
+      followLatest: isLive && !!d.running,
+      detectSequenceGaps: true,
+      label: 'Temporal event history'
+    };
+
+    // ── approval card ──
+    const approvalProps = {
+      tool: { name: 'run_command', risk: 'high' },
+      sandbox: { provider: 'local-subprocess', name: 'workspace-rw', workingDir: '~/.stardust/workspaces/fb86feab' },
+      operation: { kind: 'command', command: 'git push origin main', filesTouched: ['CHANGELOG.md'], argsPreview: { cwd: '~/.stardust/workspaces/fb86feab', timeoutMs: 120000 } },
+      env: ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL'],
+      snapshotId: 'snap_0042',
+      policyVersion: 'policy-2026-06',
+      idempotencyKey: 'appr_9f31c2d4',
+      state: s.approvalState,
+      editableArgs: true,
+      onapprove: () => this.setState({ approvalState: 'approved' }),
+      onapprovewithedits: () => this.setState({ approvalState: 'approved_with_edits' }),
+      ondeny: () => this.setState({ approvalState: 'denied' })
+    };
+    const approvalPending = s.approvalState === 'pending';
+    const approvalResolvedLabel = s.approvalState === 'denied'
+      ? 'Denied — the run was told no and is wrapping up safely'
+      : 'Approved — the signal woke the workflow and git push is running';
+
+    // ── inbox ──
+    const memoryData = [
+      { id: 'm1', text: 'Prefers Bun over npm for all commands', from: 'Create hello.txt in workspace' },
+      { id: 'm2', text: 'Team updates go to #eng-updates', from: 'Summarize overnight CI failures' }
+    ];
+    const memoryItems = memoryData.map((m) => {
+      const decision = s.memoryDecisions[m.id];
+      return {
+        text: m.text, from: m.from,
+        pending: !decision, decided: !!decision,
+        decidedLabel: decision === 'saved' ? 'saved to memory · idempotent write recorded' : 'discarded',
+        onSave: () => this.setState((st) => ({ memoryDecisions: Object.assign({}, st.memoryDecisions, { [m.id]: 'saved' }) })),
+        onDiscard: () => this.setState((st) => ({ memoryDecisions: Object.assign({}, st.memoryDecisions, { [m.id]: 'discarded' }) }))
+      };
+    });
+    const memoryPendingCount = memoryData.filter((m) => !s.memoryDecisions[m.id]).length;
+    const inboxCount = (approvalPending ? 1 : 0) + memoryPendingCount;
+
+    // ── workspace ──
+    const G = { ok: 'var(--cinder-color-success-bg)', okFg: 'var(--cinder-color-success-fg)', bad: 'var(--cinder-color-danger-bg)', badFg: 'var(--cinder-color-danger-fg)', mut: 'var(--cinder-text-subtle)' };
+    const wsData = {
+      ci: {
+        files: [
+          { path: 'reports/ci-summary.md', tag: 'M', warn: true, size: '4.1 KB' },
+          { path: 'tmp/e2e.log', tag: 'artifact', size: '48 KB' },
+          { path: 'notes/hello.txt', size: '19 B' }
+        ],
+        diffOf: 'reports/ci-summary.md', diffVs: '#11', plus: '+9', minus: '−1',
+        diff: [
+          { sign: ' ', text: '# CI failure summary — Jul 1', bg: 'transparent', fg: G.mut },
+          { sign: '+', text: 'Root cause: e2e DNS resolution against staging mesh', bg: G.ok, fg: G.okFg },
+          { sign: '+', text: '14 of 17 e2e failures share the same DNS timeout', bg: G.ok, fg: G.okFg },
+          { sign: '-', text: 'TODO: root cause pending', bg: G.bad, fg: G.badFg },
+          { sign: '+', text: 'Unit failures: stale snapshot in date-utils (regen fixes)', bg: G.ok, fg: G.okFg },
+          { sign: ' ', text: '## Suggested next steps', bg: 'transparent', fg: G.mut }
+        ],
+        snapshots: [
+          { id: '#12', label: 'before write_file reports/ci-summary.md', time: '2:07 PM' },
+          { id: '#11', label: 'before read_artifact tmp/e2e.log', time: '2:05 PM' }
+        ]
+      },
+      changelog: {
+        files: [
+          { path: 'CHANGELOG.md', tag: 'M', warn: true, size: '6.8 KB' },
+          { path: '.git/', size: 'repo' }
+        ],
+        diffOf: 'CHANGELOG.md', diffVs: '#41', plus: '+14', minus: '−0',
+        diff: [
+          { sign: ' ', text: '# Changelog — week of Jun 29', bg: 'transparent', fg: G.mut },
+          { sign: '+', text: 'feat: durable approval slide-over (#412)', bg: G.ok, fg: G.okFg },
+          { sign: '+', text: 'feat: replay scrubber in run inspector (#415)', bg: G.ok, fg: G.okFg },
+          { sign: '+', text: 'fix: stream reconnect rebuilds from transcript (#418)', bg: G.ok, fg: G.okFg },
+          { sign: '+', text: '…and 9 more entries from merged PRs', bg: G.ok, fg: G.okFg }
+        ],
+        snapshots: [
+          { id: '#41', label: 'before write_file CHANGELOG.md', time: '1:52 PM' }
+        ]
+      },
+      hello: {
+        files: [
+          { path: 'notes/hello.txt', tag: 'A', warn: true, size: '19 B' }
+        ],
+        diffOf: 'notes/hello.txt', diffVs: '#3', plus: '+1', minus: '−0',
+        diff: [
+          { sign: '+', text: 'Hello from Stardust', bg: G.ok, fg: G.okFg }
+        ],
+        snapshots: [
+          { id: '#3', label: 'before write_file notes/hello.txt', time: '3:34 PM' }
+        ]
+      },
+      digest: {
+        files: [
+          { path: 'morning-digest.md', tag: 'A', warn: true, size: '2.4 KB' }
+        ],
+        diffOf: 'morning-digest.md', diffVs: '#1', plus: '+38', minus: '−0',
+        diff: [
+          { sign: '+', text: '# Morning digest — Jul 1, 6:00 AM', bg: G.ok, fg: G.okFg },
+          { sign: '+', text: '2 sessions completed overnight; 1 approval pending', bg: G.ok, fg: G.okFg },
+          { sign: '+', text: 'CI: e2e suite red — see Summarize overnight CI failures', bg: G.ok, fg: G.okFg }
+        ],
+        snapshots: [
+          { id: '#1', label: 'before write_artifact morning-digest.md', time: '6:00 AM' }
+        ]
+      }
+    };
+    const ws = wsData[detailId] || wsData.ci;
+    const wsSelectedPath = ws.files.some((f) => f.path === s.wsSelected) ? s.wsSelected : ws.files[0].path;
+    const wsFiles = ws.files.map((f) => ({
+      path: f.path, tag: f.tag || false,
+      tagBg: f.warn ? 'var(--cinder-color-warning-bg)' : 'var(--cinder-surface-inset)',
+      tagFg: f.warn ? 'var(--cinder-color-warning-fg)' : 'var(--cinder-text-subtle)',
+      size: f.size,
+      border: wsSelectedPath === f.path ? 'var(--cinder-border-strong)' : 'var(--cinder-border-muted)',
+      bg: wsSelectedPath === f.path ? 'var(--cinder-surface-inset)' : 'var(--cinder-surface)',
+      onClick: () => this.setState({ wsSelected: f.path })
+    }));
+    const wsDiff = ws.diff;
+    const wsDiffMeta = { of: ws.diffOf, vs: ws.diffVs, plus: ws.plus, minus: ws.minus };
+    const wsSnapshots = ws.snapshots.map((snap, i) => ({
+      id: snap.id, label: snap.label, time: snap.time,
+      cta: s.rolledBack && i === 0 ? 'Restored ✓' : 'Rollback',
+      onRollback: () => this.setState({ rolledBack: true })
+    }));
+
+    // ── costs ──
+    const costsData = {
+      ci: [
+        { label: 'plan', pct: '25%', tokens: '12.2k tok', cost: '$0.03' },
+        { label: 'delegates ×3', pct: '65%', tokens: '31.1k tok', cost: '$0.07' },
+        { label: 'draft summary', pct: '19%', tokens: '9.1k tok', cost: '$0.02' }
+      ],
+      changelog: [
+        { label: 'gather PRs', pct: '38%', tokens: '23.4k tok', cost: '$0.12' },
+        { label: 'draft entries', pct: '52%', tokens: '31.9k tok', cost: '$0.16' },
+        { label: 'policy check', pct: '10%', tokens: '5.9k tok', cost: '$0.03' }
+      ],
+      hello: [
+        { label: 'plan + write', pct: '2%', tokens: '129 tok', cost: '$0.00' }
+      ],
+      digest: [
+        { label: 'gather state', pct: '70%', tokens: '13.2k tok', cost: '$0.03' },
+        { label: 'write digest', pct: '30%', tokens: '5.7k tok', cost: '$0.01' }
+      ]
+    };
+    const costRows = costsData[detailId] || costsData.ci;
+
+    // ── schedules ──
+    const okDot = 'var(--cinder-success)';
+    const failDot = 'var(--cinder-danger)';
+    const schedules = [
+      {
+        id: 'digest', name: 'morning-digest', cron: '0 6 * * *',
+        summary: 'runs Morning digest · avg 38s · $0.04/fire', next: 'in 15h 26m',
+        url: 'http://localhost:8233/namespaces/default/schedules/morning-digest',
+        history: [{ color: okDot, title: 'ok' }, { color: okDot, title: 'ok' }, { color: okDot, title: 'ok' }, { color: failDot, title: 'failed — retried next fire' }, { color: okDot, title: 'ok' }]
+      },
+      {
+        id: 'changelog', name: 'weekly-changelog', cron: '0 9 * * 1',
+        summary: 'runs Draft weekly changelog · avg 2m 10s · $0.31/fire', next: 'Mon 9:00 AM',
+        url: 'http://localhost:8233/namespaces/default/schedules/weekly-changelog',
+        history: [{ color: okDot, title: 'ok' }, { color: okDot, title: 'ok' }, { color: okDot, title: 'ok' }, { color: okDot, title: 'ok' }, { color: okDot, title: 'ok' }]
+      }
+    ].map((sch) => Object.assign(sch, {
+      paused: !!s.schedulePaused[sch.id],
+      pauseLabel: s.schedulePaused[sch.id] ? 'Resume' : 'Pause',
+      triggerLabel: s.triggered[sch.id] ? 'Triggered ✓' : 'Trigger now',
+      onPause: () => this.setState((st) => ({ schedulePaused: Object.assign({}, st.schedulePaused, { [sch.id]: !st.schedulePaused[sch.id] }) })),
+      onTrigger: () => this.setState((st) => ({ triggered: Object.assign({}, st.triggered, { [sch.id]: true }) }))
+    }));
+    const scheduleFires = [
+      { x: '8%', label: 'morning-digest', time: '6:00 AM ✓', fill: okDot, ring: 'none' },
+      { x: '62%', label: 'morning-digest', time: 'tomorrow 6:00 AM', fill: 'transparent', ring: '1.5px solid var(--cinder-accent)' },
+      { x: '88%', label: 'weekly-changelog', time: 'Mon 9:00 AM', fill: 'transparent', ring: '1.5px solid var(--cinder-accent)' }
+    ];
+
+    // ── artifacts ──
+    const openSession = (id) => () => this.setState({ tab: 'sessions', selected: id, mode: 'timeline', scrub: null });
+    const artifacts = [
+      { name: 'ci-summary.md', kind: 'report', desc: 'Draft summary of overnight CI failures with root cause and next steps.', meta: '4.1 KB · 2m ago · Summarize overnight CI failures', onOpen: openSession('ci') },
+      { name: 'e2e.log', kind: 'tool output', desc: 'Full e2e runner output — spilled to disk over the 8 KB inline limit.', meta: '48 KB · 9m ago · Summarize overnight CI failures', onOpen: openSession('ci') },
+      { name: 'CHANGELOG.md', kind: 'diff', desc: '12 changelog entries drafted from merged PRs, awaiting push approval.', meta: '6.8 KB · 18m ago · Draft weekly changelog', onOpen: openSession('changelog') },
+      { name: 'morning-digest.md', kind: 'report', desc: 'Daily digest: session outcomes, pending approvals, CI status.', meta: '2.4 KB · 6:00 AM · Morning digest — Jul 1', onOpen: openSession('digest') },
+      { name: 'workspace.patch', kind: 'diff', desc: 'Combined diff of every workspace mutation this week, per snapshot.', meta: '11 KB · 1d ago · rollup', onOpen: openSession('ci') },
+      { name: 'hello.txt', kind: 'file', desc: 'The 19-byte proof that the demo works.', meta: '19 B · 2h ago · Create hello.txt in workspace', onOpen: openSession('hello') }
+    ];
+
+    // ── insights ──
+    const insightCards = [
+      { label: 'Spend today', value: '$0.47', sub: 'budget caps enforced in-workflow', color: 'var(--cinder-text)' },
+      { label: 'Tokens', value: '182k', sub: '9 runs · 4 sessions', color: 'var(--cinder-text)' },
+      { label: 'Auto-recoveries', value: '4', sub: '3 retries + 1 worker crash', color: 'var(--cinder-success)' },
+      { label: 'Human waits', value: '2', sub: 'median 4m 12s to resolve', color: 'var(--cinder-text)' }
+    ];
+    const spendRows = [
+      { title: 'Draft weekly changelog', pct: '66%', cost: '$0.31', open: openSession('changelog') },
+      { title: 'Summarize overnight CI failures', pct: '26%', cost: '$0.12', open: openSession('ci') },
+      { title: 'Morning digest — Jul 1', pct: '9%', cost: '$0.04', open: openSession('digest') },
+      { title: 'Create hello.txt in workspace', pct: '1%', cost: '$0.00', open: openSession('hello') }
+    ];
+
+    // ── palette ──
+    const paletteGroups = [
+      { label: 'Actions', items: [
+        { label: 'New session', hint: '⏎', dot: 'var(--cinder-accent)', onClick: () => this.setState({ paletteOpen: false, tab: 'sessions', selected: null }) },
+        { label: 'Approve pending: git push origin main', hint: 'inbox', dot: 'var(--cinder-warning)', onClick: () => this.setState({ paletteOpen: false, tab: 'inbox' }) },
+        { label: 'Trigger schedule: morning-digest', hint: 'schedules', dot: 'var(--cinder-text-disabled)', onClick: () => this.setState((st) => ({ paletteOpen: false, tab: 'schedules', triggered: Object.assign({}, st.triggered, { digest: true }) })) },
+        { label: 'Chaos demo: kill worker-1 mid-run', hint: 'it will recover', dot: 'var(--cinder-danger)', onClick: () => this.setState({ paletteOpen: false, tab: 'sessions', selected: 'ci', mode: 'events' }) }
+      ] },
+      { label: 'Jump to session', items: this.sessionsData().map((x) => ({
+        label: x.title, hint: x.key, dot: x.running ? 'var(--cinder-info)' : x.needsYou ? 'var(--cinder-warning)' : 'var(--cinder-success)',
+        onClick: () => this.setState({ paletteOpen: false, tab: 'sessions', selected: x.id, mode: 'timeline', scrub: null })
+      })) },
+      { label: 'Temporal', items: [
+        { label: 'Open current run in Temporal Web', hint: '↗', dot: 'var(--cinder-accent)', onClick: () => { window.open('http://localhost:8233', '_blank'); this.setState({ paletteOpen: false }); } },
+        { label: 'Open task queue agent-orchestrator', hint: '↗', dot: 'var(--cinder-accent)', onClick: () => { window.open('http://localhost:8233/namespaces/default/task-queues/agent-orchestrator', '_blank'); this.setState({ paletteOpen: false }); } }
+      ] }
+    ];
+
+    // ── first-run ──
+    const starterTasks = [
+      { kicker: 'Try the basics', title: 'Write a file to the workspace', body: 'One tool call, one activity, one durable event history you can open in Temporal Web.', onClick: () => this.setState({ selected: 'hello' }) },
+      { kicker: 'The headline trick', title: 'Prove durability — kill the worker mid-run', body: 'Start a long task, kill the worker process, and watch the run resume on a survivor.', onClick: () => this.setState({ selected: 'ci' }) },
+      { kicker: 'Fan out', title: 'Research three topics in parallel', body: 'Each delegate is a child workflow with its own history, budget, and retry policy.', onClick: () => this.setState({ selected: 'ci' }) },
+      { kicker: 'Set and forget', title: 'Schedule a morning digest', body: 'A native Temporal Schedule that fires at 6:00 AM whether or not this app is open.', onClick: () => this.setState({ tab: 'schedules' }) }
+    ];
+    const conceptMap = [
+      { app: 'Session', temporal: 'Workflow' },
+      { app: 'Turn', temporal: 'Child workflow' },
+      { app: 'Tool call', temporal: 'Activity' },
+      { app: 'Approval', temporal: 'Signal + wait' },
+      { app: 'Schedule', temporal: 'Schedule' }
+    ];
+
+    return {
+      // tabs
+      goSessions: () => this.setState({ tab: 'sessions', selected: null, healthOpen: false }),
+      goInbox: setTab('inbox'), goSchedules: setTab('schedules'), goArtifacts: setTab('artifacts'), goInsights: setTab('insights'),
+      tabSessionsStyle: tabStyle('sessions'), tabInboxStyle: tabStyle('inbox'), tabSchedulesStyle: tabStyle('schedules'),
+      tabArtifactsStyle: tabStyle('artifacts'), tabInsightsStyle: tabStyle('insights'),
+      inboxCount, inboxHasItems: inboxCount > 0,
+
+      // chrome
+      openPalette: () => this.setState({ paletteOpen: true }),
+      closePalette: () => this.setState({ paletteOpen: false }),
+      paletteOpen: s.paletteOpen, paletteGroups,
+      toggleHealth: () => this.setState((st) => ({ healthOpen: !st.healthOpen })),
+      healthOpen: s.healthOpen,
+      stop: (e) => { if (e && e.stopPropagation) e.stopPropagation(); },
+
+      // surfaces
+      showSessionsList, showFirstRun, showDetail,
+      showInbox: tab === 'inbox', showSchedules: tab === 'schedules',
+      showArtifacts: tab === 'artifacts', showInsights: tab === 'insights',
+      showExplainers,
+
+      // sessions list
+      sessionFilters: [filterChip('all', 'All 4'), filterChip('running', 'Running 1'), filterChip('needs', 'Needs you 1'), filterChip('complete', 'Complete 2')],
+      visibleSessions,
+      newSession: () => this.setState({ tab: 'sessions', selected: 'hello' }),
+
+      // detail
+      detail, rows,
+      backToList: () => this.setState({ selected: null }),
+      dismissExplainer: () => this.setState({ explainerDismissed: true }),
+      approvalProps, approvalPending, approvalResolved: !approvalPending, approvalResolvedLabel,
+
+      // scrubber
+      scrubMax: maxSeq, scrubValue: cursor,
+      scrubLabel: cursor + ' / ' + maxSeq + ' events durable',
+      scrubCaption, isLive, isReplaying: !isLive,
+      onScrub: (e) => this.setState({ scrub: Number(e.target.value) }),
+      jumpToLive: () => this.setState({ scrub: null }),
+
+      // modes
+      modeTimeline: () => this.setState({ mode: 'timeline' }),
+      modeEvents: () => this.setState({ mode: 'events' }),
+      modeWorkspace: () => this.setState({ mode: 'workspace' }),
+      modeCosts: () => this.setState({ mode: 'costs' }),
+      modeTimelineStyle: modeStyle('timeline'), modeEventsStyle: modeStyle('events'),
+      modeWorkspaceStyle: modeStyle('workspace'), modeCostsStyle: modeStyle('costs'),
+      modeHint: modeHints[s.mode] || '',
+      showTimeline: s.mode === 'timeline', showEvents: s.mode === 'events',
+      showWorkspace: s.mode === 'workspace', showCosts: s.mode === 'costs',
+      timelineProps: { steps: this.timelineData(detailId || 'ci'), label: 'Run steps' },
+      eventsProps,
+
+      // workspace
+      wsFiles, wsDiff, wsSnapshots, wsSelectedPath: s.wsSelected,
+
+      // costs
+      costRows,
+
+      // inbox
+      memoryItems,
+      openChangelog: () => this.setState({ tab: 'sessions', selected: 'changelog', mode: 'timeline', scrub: null }),
+      openDigest: () => this.setState({ tab: 'sessions', selected: 'digest', mode: 'timeline', scrub: null }),
+
+      // schedules
+      schedules, scheduleFires,
+
+      // artifacts + insights
+      artifacts, insightCards, spendRows,
+
+      // first-run
+      starterTasks, conceptMap
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -34,17 +34,26 @@ test('home page shows welcome screen when there are no sessions', async ({ page 
 	await page.goto('/');
 
 	await expect(page.getByRole('heading', { name: 'What should the agent work on?' })).toBeVisible();
-	await expect(page.getByLabel('Session navigation')).toBeVisible();
 	await expect(page.getByLabel('Describe a task')).toBeVisible();
-	await expect(page.getByText('Worker')).toBeVisible();
 	await expect(page.getByText('Under the hood')).toHaveCount(0);
 
-	await page.getByRole('button', { name: 'Temporal UI' }).click();
-	await expect(page.getByRole('region', { name: 'Temporal UI' })).toBeVisible();
-	await expect(page.locator('iframe[title="Temporal UI"]')).toHaveAttribute('src', '/temporal-ui');
+	// Top nav replaces the old left rail: primary tabs plus the health cluster.
+	const nav = page.getByRole('navigation', { name: 'Primary' });
+	await expect(nav).toBeVisible();
+	await expect(nav.getByRole('link', { name: 'Sessions' })).toBeVisible();
+	await expect(nav.getByRole('link', { name: 'Schedules' })).toBeVisible();
 
-	await page.getByRole('button', { name: 'Close Temporal UI' }).click();
-	await expect(page.getByRole('region', { name: 'Temporal UI' })).toHaveCount(0);
+	await nav.getByRole('button', { name: /temporal/ }).click();
+	const health = page.getByRole('dialog', { name: 'Infrastructure health' });
+	await expect(health).toBeVisible();
+	await expect(health.getByText('Everything durable')).toBeVisible();
+	await expect(health.getByRole('link', { name: 'Open Temporal Web ↗' })).toHaveAttribute(
+		'href',
+		'http://localhost:8233'
+	);
+
+	await page.keyboard.press('Escape');
+	await expect(health).toHaveCount(0);
 });
 
 test('create → submit → stream: navigates to a conversation and renders the stream', async ({
@@ -145,8 +154,7 @@ test('home page shows the session list when sessions exist', async ({ page }) =>
 
 	await page.goto('/');
 
-	// Scope to <main>: the same session also appears in the left rail, so an unscoped
-	// getByText matches both the rail card and the main session card.
+	// Scope content assertions to <main> to stay clear of top-nav chrome.
 	const main = page.getByRole('main');
 	await expect(main.getByText('Refactor auth guards')).toBeVisible();
 	await expect(main.getByText('my-test-session', { exact: true })).toBeVisible();
