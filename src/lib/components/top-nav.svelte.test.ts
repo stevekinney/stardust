@@ -19,7 +19,7 @@ describe('TopNav', () => {
 		const labels = Array.from(nav!.querySelectorAll('a[data-cinder-navigation-item]')).map((link) =>
 			link.textContent?.trim()
 		);
-		expect(labels).toEqual(['Sessions', 'Inbox', 'Schedules']);
+		expect(labels).toEqual(['Sessions', 'Inbox', 'Schedules', 'Artifacts', 'Insights']);
 
 		unmount(component);
 	});

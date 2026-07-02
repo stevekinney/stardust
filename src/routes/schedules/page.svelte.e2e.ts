@@ -56,7 +56,10 @@ test('new schedule button opens the create form and submits a schedule', async (
 	await page.getByLabel('Prompt').fill('Run the checks and summarize failures.');
 	await page.getByRole('button', { name: 'Create schedule' }).click();
 
-	await expect(page.getByRole('button', { name: /Weekly checks/ })).toBeVisible();
+	const main = page.getByRole('main');
+	await expect(main.getByText('Weekly checks')).toBeVisible();
+	await expect(main.getByRole('button', { name: 'Pause' })).toBeVisible();
+	await expect(main.getByRole('button', { name: 'Trigger now' })).toBeVisible();
 	expect(createdScheduleBody).toEqual({
 		name: 'Weekly checks',
 		description: 'Run the weekly maintenance checklist',

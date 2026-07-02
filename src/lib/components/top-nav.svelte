@@ -20,7 +20,13 @@
 			label: 'Schedules',
 			href: resolve('/schedules'),
 			active: currentPath.startsWith('/schedules')
-		}
+		},
+		{
+			label: 'Artifacts',
+			href: resolve('/artifacts'),
+			active: currentPath.startsWith('/artifacts')
+		},
+		{ label: 'Insights', href: resolve('/insights'), active: currentPath.startsWith('/insights') }
 	]);
 </script>
 
