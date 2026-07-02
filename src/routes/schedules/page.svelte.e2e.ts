@@ -56,8 +56,10 @@ test('new schedule button opens the create form and submits a schedule', async (
 	await page.getByLabel('Prompt').fill('Run the checks and summarize failures.');
 	await page.getByRole('button', { name: 'Create schedule' }).click();
 
+	// "Weekly checks" appears in both the 24h fire timeline and the schedule row.
 	const main = page.getByRole('main');
-	await expect(main.getByText('Weekly checks')).toBeVisible();
+	await expect(main.getByText('Weekly checks')).toHaveCount(2);
+	await expect(main.getByText('0 9 * * 1')).toBeVisible();
 	await expect(main.getByRole('button', { name: 'Pause' })).toBeVisible();
 	await expect(main.getByRole('button', { name: 'Trigger now' })).toBeVisible();
 	expect(createdScheduleBody).toEqual({
