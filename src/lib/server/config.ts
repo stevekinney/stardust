@@ -2,6 +2,8 @@
 
 export const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
 export const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE ?? 'default';
+/** Temporal Cloud API key. Unset for the local dev server; presence with a local address is a leak. */
+export const TEMPORAL_API_KEY = process.env.TEMPORAL_API_KEY;
 export const DATABASE_URL = process.env.DATABASE_URL ?? 'file:~/.stardust/stardust.db';
 
 /** Port the Temporal Web UI is served on. */

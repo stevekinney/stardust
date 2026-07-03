@@ -9,7 +9,8 @@ import * as policyActivities from '../activities/policy.activities.ts';
 import * as sandboxActivities from '../activities/sandbox.activities.ts';
 import * as scheduleActivities from '../activities/schedule.activities.ts';
 import * as toolActivities from '../activities/tool.activities.ts';
-import { TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE } from '@src/lib/server/config';
+import { TEMPORAL_ADDRESS, TEMPORAL_API_KEY, TEMPORAL_NAMESPACE } from '@src/lib/server/config';
+import { assertTemporalConfig } from '@src/lib/server/temporal/config-check';
 import {
 	TASK_QUEUE_MEMORY,
 	TASK_QUEUE_MODEL,
@@ -67,6 +68,13 @@ export const memoryTaskQueueActivities = {
 };
 
 async function main() {
+	// Refuse to start against an incoherent Temporal target (most often Cloud
+	// credentials leaked from the shell, overriding .env's local configuration).
+	assertTemporalConfig({
+		address: TEMPORAL_ADDRESS,
+		namespace: TEMPORAL_NAMESPACE,
+		apiKey: TEMPORAL_API_KEY
+	});
 	const connection = await NativeConnection.connect({ address: TEMPORAL_ADDRESS });
 	const namespace = TEMPORAL_NAMESPACE;
 

@@ -28,7 +28,11 @@ import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Connection } from '@temporalio/client';
-import { TEMPORAL_ADDRESS } from '../src/lib/server/config';
+import { TEMPORAL_ADDRESS, TEMPORAL_API_KEY, TEMPORAL_NAMESPACE } from '../src/lib/server/config';
+import {
+	describeTemporalConfigProblem,
+	normalizeTemporalConfigForAddress
+} from '../src/lib/server/temporal/config-check';
 
 const [, preferredTemporalPortRaw] = TEMPORAL_ADDRESS.split(':');
 const preferredTemporalPort = Number(preferredTemporalPortRaw ?? 7233);
@@ -99,6 +103,25 @@ async function connectWithRetry(address: string, maxAttempts: number): Promise<C
 		}
 	}
 	return null;
+}
+
+/** Resolve a human-readable message when `namespace` is missing on the server, else null. */
+async function verifyNamespaceExists(address: string, namespace: string): Promise<string | null> {
+	const connection = await connectWithRetry(address, 5);
+	// Reachability is reported separately; don't double-report it as a namespace problem.
+	if (!connection) return null;
+	try {
+		await connection.workflowService.describeNamespace({ namespace });
+		return null;
+	} catch {
+		return (
+			`Temporal namespace "${namespace}" does not exist on ${address}.\n` +
+			'      The local dev server provides "default". If a Temporal Cloud namespace leaked into\n' +
+			'      your environment, clear it and restart:  unset TEMPORAL_NAMESPACE TEMPORAL_API_KEY'
+		);
+	} finally {
+		await connection.close();
+	}
 }
 
 /** Run a command to completion, inheriting stdio. Resolves with the exit code. */
@@ -185,10 +208,48 @@ async function main() {
 		console.log('[dev] Temporal dev server is up.');
 	}
 
-	// Propagate the actual Temporal endpoint to the worker/web children. Inherited
-	// env wins over .env, so the chosen ports take effect even if .env names others.
+	// The orchestrator is the authority on which Temporal server the stack talks to,
+	// so it *normalizes* the child configuration rather than refusing on a leak: when
+	// we're pointed at the local dev server, leaked Cloud credentials (a namespace/API
+	// key that overrode .env from the shell) don't apply — the local server only knows
+	// the "default" namespace and takes no key — so drop them for the children.
+	const effective = normalizeTemporalConfigForAddress({
+		address: temporalAddress,
+		namespace: TEMPORAL_NAMESPACE,
+		apiKey: TEMPORAL_API_KEY
+	});
+	if (effective.namespace !== TEMPORAL_NAMESPACE || effective.apiKey !== TEMPORAL_API_KEY) {
+		console.warn(
+			`[dev] Ignoring leaked Temporal Cloud credentials for the local server: using ` +
+				`namespace "${effective.namespace}" (shell set "${TEMPORAL_NAMESPACE}")` +
+				`${TEMPORAL_API_KEY ? ', dropping TEMPORAL_API_KEY' : ''}.`
+		);
+	}
+
+	// Propagate the actual Temporal endpoint and effective credentials to the
+	// worker/web children. Inherited env wins over .env, so the chosen ports and the
+	// normalized namespace/key take effect even if .env (or the shell) names others.
 	process.env.TEMPORAL_ADDRESS = temporalAddress;
 	process.env.TEMPORAL_WEB_PORT = String(temporalUiPort);
+	process.env.TEMPORAL_NAMESPACE = effective.namespace;
+	if (effective.apiKey === undefined) delete process.env.TEMPORAL_API_KEY;
+	else process.env.TEMPORAL_API_KEY = effective.apiKey;
+
+	// Guardrail: refuse to bring the stack up against an incoherent or unknown
+	// Temporal target. After normalization this only fires for a genuinely-intended
+	// remote target that is misconfigured (e.g. a Cloud address with no API key).
+	const configProblem = describeTemporalConfigProblem(effective);
+	if (configProblem) {
+		console.error(`[dev] ${configProblem.summary}\n\n${configProblem.detail}`);
+		await shutdown(1);
+		return;
+	}
+	const namespaceProblem = await verifyNamespaceExists(temporalAddress, effective.namespace);
+	if (namespaceProblem) {
+		console.error(`[dev] ${namespaceProblem}`);
+		await shutdown(1);
+		return;
+	}
 
 	// 2. Migrations — bring the SQLite schema current before the worker connects.
 	console.log('[dev] Applying database migrations ...');
