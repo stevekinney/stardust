@@ -34,15 +34,17 @@
 				showLabel={false}
 				size="sm"
 			/>
-			<span>temporal {port}</span>
-			{#if health?.workerCount != null}
-				<span class="sep">·</span>
-				<span>{health.workerCount} {health.workerCount === 1 ? 'worker' : 'workers'}</span>
-			{/if}
-			{#if health?.spendTodayUsd != null}
-				<span class="sep">·</span>
-				<span>{formatSpend(health.spendTodayUsd)} today</span>
-			{/if}
+			<span class="label">temporal {port}</span>
+			<span class="detail">
+				{#if health?.workerCount != null}
+					<span class="sep">·</span>
+					<span>{health.workerCount} {health.workerCount === 1 ? 'worker' : 'workers'}</span>
+				{/if}
+				{#if health?.spendTodayUsd != null}
+					<span class="sep">·</span>
+					<span>{formatSpend(health.spendTodayUsd)} today</span>
+				{/if}
+			</span>
 		</button>
 	{/snippet}
 
@@ -131,6 +133,39 @@
 
 	.sep {
 		color: var(--cinder-border-strong);
+	}
+
+	.detail {
+		display: contents;
+	}
+
+	/*
+	 * Matches the search trigger's collapse point in top-nav.svelte — below this
+	 * width the worker/spend detail is the next thing to shed so the tab list
+	 * stays readable. The status dot + port stay, since that's the one glance
+	 * clue for "is Temporal reachable".
+	 */
+	@container cinder-navigation-bar (max-width: 80rem) {
+		.detail {
+			display: none;
+		}
+	}
+
+	/*
+	 * Phone-width nav (matches the app's ≤640px phone breakpoint): even the
+	 * compact "temporal :port" label doesn't fit alongside the brand, menu
+	 * toggle, search icon, and settings icon. Drop to the status dot alone —
+	 * it still carries the reachable/unreachable state via its own aria-label,
+	 * and tapping it opens the full detail panel.
+	 */
+	@container cinder-navigation-bar (max-width: 40rem) {
+		.label {
+			display: none;
+		}
+
+		.cluster {
+			padding: 0 8px;
+		}
 	}
 
 	.panel {

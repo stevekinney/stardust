@@ -1,5 +1,5 @@
 import { mount, unmount } from 'svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import TopNav from './top-nav.svelte';
 
 describe('TopNav', () => {
@@ -63,6 +63,33 @@ describe('TopNav', () => {
 		const settings = document.querySelector('a[aria-label="Settings"]');
 		expect(settings).not.toBeNull();
 		expect(settings!.getAttribute('href')).toBe('/settings');
+
+		unmount(component);
+	});
+
+	// Regression: the nav overflows onto the search/health/settings controls at
+	// narrow container widths. Cinder's NavigationBar collapses the tab list
+	// behind a menu toggle to prevent that, but only if the bar opts in via a
+	// `menuToggle` snippet and forwards the `variant` it hands the `items`
+	// snippet — both were previously missing.
+	it('opens the mobile tab list from the menu toggle with the mobile variant applied', async () => {
+		const component = mount(TopNav, {
+			target: document.body,
+			props: { currentPath: '/' }
+		});
+
+		const toggle = document.querySelector('button[aria-label="Toggle navigation menu"]');
+		expect(toggle).not.toBeNull();
+		expect(toggle!.getAttribute('aria-expanded')).toBe('false');
+
+		(toggle as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(toggle!.getAttribute('aria-expanded')).toBe('true'));
+
+		const items = document.querySelectorAll('a[data-cinder-navigation-item]');
+		expect(items).toHaveLength(5);
+		for (const item of items) {
+			expect(item.getAttribute('data-variant')).toBe('mobile');
+		}
 
 		unmount(component);
 	});

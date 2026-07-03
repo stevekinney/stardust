@@ -65,15 +65,16 @@
 	</div>
 	<div class="track-area">
 		<div class="track"></div>
-		<div class="now-marker" style="left: {NOW_POSITION_PERCENT}%" title="now"></div>
-		{#each fires as fire (fire.id)}
-			<div class="fire" style="left: {fire.positionPercent}%">
-				<span class="fire-name">{fire.name}</span>
-				<span class="fire-dot" class:fired={fire.fired}></span>
-				<span class="fire-time">{fire.time}</span>
-			</div>
-		{/each}
-		{#if fires.length === 0}
+		{#if fires.length > 0}
+			<div class="now-marker" style="left: {NOW_POSITION_PERCENT}%" title="now"></div>
+			{#each fires as fire (fire.id)}
+				<div class="fire" style="left: {fire.positionPercent}%">
+					<span class="fire-name">{fire.name}</span>
+					<span class="fire-dot" class:fired={fire.fired}></span>
+					<span class="fire-time">{fire.time}</span>
+				</div>
+			{/each}
+		{:else}
 			<span class="track-empty">No fires in the next 24 hours.</span>
 		{/if}
 	</div>

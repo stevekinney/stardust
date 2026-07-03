@@ -56,6 +56,61 @@ test('home page shows welcome screen when there are no sessions', async ({ page 
 	await expect(health).toHaveCount(0);
 });
 
+// Regression: at narrower viewports the tab list, search trigger, and health
+// cluster don't shrink, so their combined content overflowed onto each other
+// instead of the bar shedding chrome or collapsing behind a menu toggle.
+test('top nav sheds chrome at narrower viewports without overlapping', async ({ page }) => {
+	await mockSessionRoutes(page);
+	await page.goto('/');
+
+	const nav = page.getByRole('navigation', { name: 'Primary' });
+
+	// Tablet width: previously the last tab overlapped the search trigger.
+	await page.setViewportSize({ width: 1024, height: 800 });
+	const insights = nav.getByRole('link', { name: 'Insights' });
+	const search = nav.getByRole('button', { name: /search or run a command/i });
+	await expect(insights).toBeVisible();
+	const insightsBox = await insights.boundingBox();
+	const searchBox = await search.boundingBox();
+	expect(insightsBox).not.toBeNull();
+	expect(searchBox).not.toBeNull();
+	expect(insightsBox!.x + insightsBox!.width).toBeLessThanOrEqual(searchBox!.x);
+
+	// Phone width: the tab list collapses behind a menu toggle, and the
+	// settings icon stays within the viewport instead of overflowing it.
+	await page.setViewportSize({ width: 375, height: 800 });
+	await expect(insights).toBeHidden();
+	const settings = nav.getByRole('link', { name: 'Settings' });
+	const settingsBox = await settings.boundingBox();
+	expect(settingsBox).not.toBeNull();
+	expect(settingsBox!.x + settingsBox!.width).toBeLessThanOrEqual(375);
+
+	const toggle = nav.getByRole('button', { name: 'Toggle navigation menu' });
+	const brand = nav.getByRole('link', { name: 'Stardust home' });
+
+	// The toggle reveals the menu it controls, so it reads left-to-right as
+	// "menu, then brand" rather than being stranded after the wordmark.
+	const toggleBox = await toggle.boundingBox();
+	const brandBox = await brand.boundingBox();
+	expect(toggleBox).not.toBeNull();
+	expect(brandBox).not.toBeNull();
+	expect(toggleBox!.x).toBeLessThan(brandBox!.x);
+
+	await toggle.click();
+	await expect(insights).toBeVisible();
+
+	// Regression: the dropdown had no backdrop, and stayed open across a
+	// route change — clicking a link inside it should close both.
+	const backdrop = page.locator('.menu-backdrop');
+	await expect(backdrop).toBeVisible();
+
+	const schedulesLink = nav.getByRole('link', { name: 'Schedules' });
+	await schedulesLink.click();
+	await expect(page).toHaveURL(/\/schedules$/);
+	await expect(backdrop).toBeHidden();
+	await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+});
+
 test('create → submit → stream: navigates to a conversation and renders the stream', async ({
 	page
 }) => {
@@ -159,7 +214,9 @@ test('home page shows the session list when sessions exist', async ({ page }) =>
 	// Scope content assertions to <main> to stay clear of top-nav chrome.
 	const main = page.getByRole('main');
 	await expect(main.getByText('Refactor auth guards')).toBeVisible();
-	await expect(main.getByRole('link', { name: 'wf my-test-session ↗' })).toBeVisible();
+	await expect(
+		main.getByRole('link', { name: 'Open my-test-session in Temporal Web' })
+	).toBeVisible();
 	await expect(main.getByText('Ready to resume where you left off.')).toHaveCount(0);
 	await expect(main.getByRole('group', { name: 'Filter sessions' })).toBeVisible();
 	await expect(main.getByRole('button', { name: 'Needs you 0' })).toBeVisible();

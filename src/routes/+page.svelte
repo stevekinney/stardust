@@ -154,15 +154,6 @@
 				<p class="no-results">No sessions match this filter.</p>
 			{/if}
 		</div>
-
-		<div class="explainer">
-			<span class="explainer-tag">workflow</span>
-			<p class="explainer-text">
-				Every session is a long-lived Temporal Workflow; every turn runs as a child workflow with
-				its own event history. The <span class="mono">wf</span> chips open the exact execution in Temporal
-				Web.
-			</p>
-		</div>
 	</div>
 {:else}
 	<!-- ── First-run empty state ────────────────────────────────── -->
@@ -292,37 +283,6 @@
 		text-align: center;
 		padding: 32px 0;
 		margin: 0;
-	}
-
-	.explainer {
-		display: flex;
-		align-items: flex-start;
-		gap: 10px;
-		padding: 12px 14px;
-		border: 1px dashed var(--cinder-border);
-		border-radius: var(--cinder-radius-lg);
-		background: var(--cinder-surface);
-	}
-
-	.explainer-tag {
-		flex: none;
-		display: inline-flex;
-		padding: 2px 7px;
-		border-radius: var(--cinder-radius-sm);
-		border: 1px solid var(--cinder-border-muted);
-		font-family: var(--cinder-font-mono);
-		font-size: 10.5px;
-		font-weight: 650;
-		color: var(--cinder-accent-text);
-		background: var(--cinder-surface-inset);
-		margin-top: 1px;
-	}
-
-	.explainer-text {
-		margin: 0;
-		font-size: var(--cinder-text-xs);
-		line-height: 1.55;
-		color: var(--cinder-text-subtle);
 	}
 
 	/* ── First-run ─────────────────────────────────────────────── */

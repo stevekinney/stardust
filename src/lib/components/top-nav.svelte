@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { afterNavigate } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import Badge from '@lostgradient/cinder/badge';
 	import NavigationBar from '@lostgradient/cinder/navigation-bar';
@@ -15,6 +16,15 @@
 	};
 
 	let { currentPath, health = null, onOpenPalette }: Props = $props();
+
+	let mobileMenuOpen = $state(false);
+
+	// The dropdown otherwise stays open across a route change (Cinder never
+	// closes it for you), which would leave the backdrop blurring the new
+	// page underneath it.
+	afterNavigate(() => {
+		mobileMenuOpen = false;
+	});
 
 	const tabs = $derived([
 		{
@@ -37,14 +47,14 @@
 	]);
 </script>
 
-<NavigationBar label="Primary" class="top-nav">
+<NavigationBar label="Primary" class="top-nav" bind:mobileMenuOpen>
 	{#snippet brand()}
 		<a href={resolve('/')} class="brand" aria-label="Stardust home">STARDUST</a>
 	{/snippet}
 
-	{#snippet items()}
+	{#snippet items({ variant })}
 		{#each tabs as tab (tab.href)}
-			<NavigationItem href={tab.href} active={tab.active}>
+			<NavigationItem href={tab.href} active={tab.active} {variant}>
 				{tab.label}
 				{#if tab.label === 'Inbox' && inbox.total > 0}
 					<Badge variant="accent" size="xs" mono>{inbox.total}</Badge>
@@ -53,9 +63,58 @@
 		{/each}
 	{/snippet}
 
+	{#snippet menuToggle({ 'aria-expanded': ariaExpanded, 'aria-controls': ariaControls, onclick })}
+		<button
+			type="button"
+			class="menu-toggle"
+			aria-label="Toggle navigation menu"
+			aria-expanded={ariaExpanded}
+			aria-controls={ariaControls}
+			{onclick}
+		>
+			{#if ariaExpanded === 'true'}
+				<svg
+					width="17"
+					height="17"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<path d="M18 6 6 18" />
+					<path d="m6 6 12 12" />
+				</svg>
+			{:else}
+				<svg
+					width="17"
+					height="17"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<line x1="4" x2="20" y1="6" y2="6" />
+					<line x1="4" x2="20" y1="12" y2="12" />
+					<line x1="4" x2="20" y1="18" y2="18" />
+				</svg>
+			{/if}
+		</button>
+	{/snippet}
+
 	{#snippet actions()}
 		{#if onOpenPalette}
-			<button type="button" class="palette-trigger" onclick={onOpenPalette}>
+			<button
+				type="button"
+				class="palette-trigger"
+				aria-label="Search or run a command"
+				onclick={onOpenPalette}
+			>
 				<!-- lucide search -->
 				<svg
 					width="13"
@@ -97,6 +156,10 @@
 		</a>
 	{/snippet}
 </NavigationBar>
+
+{#if mobileMenuOpen}
+	<div class="menu-backdrop" role="presentation" onclick={() => (mobileMenuOpen = false)}></div>
+{/if}
 
 <style>
 	.brand {
@@ -145,6 +208,97 @@
 
 	.icon-button:hover {
 		background: var(--cinder-surface-hover);
+		color: var(--cinder-text);
+	}
+
+	/*
+	 * Cinder renders the toggle after the brand in markup, but it reads as a
+	 * "reveal the menu" control, so it belongs to the left of the wordmark it
+	 * expands — visually reorder it first. When the tab list then collapses
+	 * out of flow, the nav is left with three flex children (toggle, brand,
+	 * actions) and the bar's own `justify-content: space-between` would
+	 * center the middle one; an auto margin on the brand's end side absorbs
+	 * the leftover space instead, so space-between has nothing left to
+	 * distribute between the toggle+brand pair and actions.
+	 */
+	:global(.cinder-navigation-bar__menu-toggle) {
+		order: -1;
+	}
+
+	:global(.cinder-navigation-bar__brand) {
+		margin-inline-end: auto;
+	}
+
+	.menu-toggle {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 30px;
+		height: 30px;
+		border: none;
+		border-radius: var(--cinder-radius-md);
+		background: transparent;
+		color: var(--cinder-text-subtle);
+		cursor: pointer;
+	}
+
+	.menu-toggle:hover {
+		background: var(--cinder-surface-hover);
+		color: var(--cinder-text);
+	}
+
+	/*
+	 * The tab list, search trigger, and health cluster are each sized to their
+	 * own content and don't shrink — below this container width their combined
+	 * content no longer fits the bar, so the search trigger drops to icon-only
+	 * first (least essential — ⌘K still opens it) to free room for the tabs.
+	 */
+	@container cinder-navigation-bar (max-width: 80rem) {
+		.palette-trigger {
+			min-width: 0;
+			width: 30px;
+			padding: 0;
+			justify-content: center;
+		}
+
+		.palette-hint,
+		.palette-trigger :global(.cinder-kbd) {
+			display: none;
+		}
+	}
+
+	.menu-backdrop {
+		position: fixed;
+		inset: 0;
+		background: color-mix(in srgb, var(--cinder-bg) 55%, transparent);
+		backdrop-filter: blur(3px);
+		/* One below Cinder's dropdown so the open menu still renders on top of it. */
+		z-index: calc(var(--cinder-z-dropdown, 1100) - 1);
+	}
+
+	/*
+	 * Cinder's collapsed-dropdown CSS (`[data-variant='mobile']` under a
+	 * top-placement bar) makes each item a full-width row, but never resets
+	 * the horizontal tab's active indicator — a 2px accent underline — so the
+	 * active row shows a stray line stretching the width of the dropdown
+	 * instead of reading as "selected". Give it a background highlight
+	 * instead, the conventional treatment for a vertical menu.
+	 */
+	:global(
+		.cinder-navigation-bar[data-collapsible='true']
+			.cinder-navigation-bar__items[data-open='true']
+			.cinder-navigation-item[data-variant='mobile']
+	) {
+		border-bottom-color: transparent;
+	}
+
+	:global(
+		.cinder-navigation-bar[data-collapsible='true']
+			.cinder-navigation-bar__items[data-open='true']
+			.cinder-navigation-item[data-variant='mobile'][data-active='true']
+	) {
+		background: var(--cinder-surface-inset);
+		border-radius: var(--cinder-radius-md);
 		color: var(--cinder-text);
 	}
 </style>

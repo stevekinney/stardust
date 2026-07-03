@@ -40,6 +40,7 @@
 	const meta = $derived(
 		`${session.sessionKey} · ${formatStatus(session.status)} · ${relativeTime(session.updatedAt)}`
 	);
+	const wfChipLabel = $derived(`Open ${session.sessionKey} in Temporal Web`);
 </script>
 
 <div class="row" class:needs-you={needsYou}>
@@ -59,10 +60,17 @@
 		</span>
 	</button>
 	{#if session.temporalWebUrl}
-		<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- external Temporal Web URL, not an app route -->
-		<a class="wf-chip" href={session.temporalWebUrl} target="_blank" rel="noreferrer">
-			wf {session.sessionKey} ↗
+		<!-- eslint-disable svelte/no-navigation-without-resolve -- external Temporal Web URL, not an app route -->
+		<a
+			class="wf-chip"
+			href={session.temporalWebUrl}
+			target="_blank"
+			rel="noreferrer"
+			aria-label={wfChipLabel}
+		>
+			<span class="wf-chip-key">{session.sessionKey}</span> ↗
 		</a>
+		<!-- eslint-enable svelte/no-navigation-without-resolve -->
 	{/if}
 </div>
 
@@ -150,6 +158,7 @@
 	.wf-chip {
 		display: inline-flex;
 		align-items: center;
+		flex-shrink: 0;
 		gap: 5px;
 		margin: 0 16px 0 12px;
 		padding: 4px 9px;
@@ -162,6 +171,26 @@
 		color: var(--cinder-text-subtle);
 		text-decoration: none;
 		white-space: nowrap;
+	}
+
+	/*
+	 * `.open` has `min-width: 0` so it absorbs a flex shrink deficit, but
+	 * `.wf-chip` doesn't — its `white-space: nowrap` content sets a
+	 * non-negotiable minimum width, so the row title (the thing worth
+	 * reading) was the only thing giving way, down to a couple of letters.
+	 * Below phone width, drop the session key text and keep just the arrow so
+	 * the chip stays a small, constant-width tap target instead of forcing
+	 * the title to disappear.
+	 */
+	@media (max-width: 640px) {
+		.wf-chip-key {
+			display: none;
+		}
+
+		.wf-chip {
+			margin-inline: 8px;
+			padding: 4px 7px;
+		}
 	}
 
 	.wf-chip:hover {
