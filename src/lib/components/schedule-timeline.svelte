@@ -64,8 +64,8 @@
 		<span class="legend"><span class="legend-dot upcoming"></span>upcoming</span>
 	</div>
 	<div class="track-area">
-		<div class="track"></div>
 		{#if fires.length > 0}
+			<div class="track"></div>
 			<div class="now-marker" style="left: {NOW_POSITION_PERCENT}%" title="now"></div>
 			{#each fires as fire (fire.id)}
 				<div class="fire" style="left: {fire.positionPercent}%">

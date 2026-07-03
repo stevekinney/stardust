@@ -33,16 +33,20 @@ describe('ScheduleTimeline', () => {
 		document.body.innerHTML = '';
 	});
 
-	// Regression: the "now" marker rendered unconditionally and overlapped the
-	// "No fires in the next 24 hours" empty-state text — both are absolutely
-	// positioned in the same vertical band with nothing to keep them apart
-	// when there's nothing else on the track.
-	it('hides the now marker and shows the empty message when there are no fires', () => {
+	// Regression: the "now" marker and the persistent `.track` baseline both
+	// rendered unconditionally and overlapped the "No fires in the next 24
+	// hours" empty-state text — all three are absolutely positioned in the
+	// same vertical band with nothing to keep them apart when there's
+	// nothing else on the track. (The `.track` line was missed in the first
+	// pass at this fix — it kept cutting through the empty-state text even
+	// after the now-marker was gated.)
+	it('hides the track and now marker, showing only the empty message, when there are no fires', () => {
 		const component = mount(ScheduleTimeline, {
 			target: document.body,
 			props: { schedules: [makeSchedule()] }
 		});
 
+		expect(document.querySelector('.track')).toBeNull();
 		expect(document.querySelector('.now-marker')).toBeNull();
 		expect(document.querySelector('.track-empty')?.textContent).toBe(
 			'No fires in the next 24 hours.'
@@ -51,7 +55,7 @@ describe('ScheduleTimeline', () => {
 		unmount(component);
 	});
 
-	it('shows the now marker alongside upcoming and fired events', () => {
+	it('shows the track and now marker alongside upcoming and fired events', () => {
 		const component = mount(ScheduleTimeline, {
 			target: document.body,
 			props: {
@@ -79,6 +83,7 @@ describe('ScheduleTimeline', () => {
 			}
 		});
 
+		expect(document.querySelector('.track')).not.toBeNull();
 		expect(document.querySelector('.now-marker')).not.toBeNull();
 		expect(document.querySelector('.track-empty')).toBeNull();
 		expect(document.querySelectorAll('.fire')).toHaveLength(2);
