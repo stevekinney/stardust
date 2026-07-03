@@ -261,6 +261,28 @@
 		overflow: hidden;
 	}
 
+	/*
+	 * Cinder's chat surface declares `display:flex; flex-direction:column; height:100%`
+	 * on `.chat-container` (with the timeline as a `flex:1` scroll region), but that
+	 * layout is not taking effect in our build — the container renders as `display:block`
+	 * so the message timeline sizes to its content and the whole surface overflows instead
+	 * of scrolling, pushing the composer off-screen. Re-assert the intended layout here so
+	 * the timeline scrolls internally and the composer stays pinned to the bottom.
+	 * Tracked upstream: https://github.com/stevekinney/cinder/issues/591
+	 */
+	.conversation-chat :global(.chat-container) {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		min-height: 0;
+	}
+
+	.conversation-chat :global(.chat-timeline) {
+		flex: 1;
+		min-height: 0;
+		overflow-y: auto;
+	}
+
 	/* Stardust-specific row styles */
 
 	.row-shell {

@@ -38,13 +38,27 @@ afterAll(() => {
 });
 
 describe('run inspector projection', () => {
-	it('builds Temporal Web deep links for local workflow history', () => {
+	it('links to the workflow (latest-run redirect) when no run id is known', () => {
 		expect(
 			buildTemporalWebWorkflowUrl({
 				workflowId: 'agent-run:run-001',
 				namespace: 'default'
 			})
-		).toBe('http://localhost:8233/namespaces/default/workflows/agent-run%3Arun-001/history');
+		).toBe('http://localhost:8233/namespaces/default/workflows/agent-run%3Arun-001');
+	});
+
+	it('links to the run-specific history page when the run id is known', () => {
+		// Temporal history lives at /workflows/{workflowId}/{runId}/history — the run id
+		// segment is required. Omitting it lands "history" in the run-id slot on a broken page.
+		expect(
+			buildTemporalWebWorkflowUrl({
+				workflowId: 'agent-run:run-001',
+				temporalRunId: 'b3f1c2d4-5566-7788-99aa-bbccddeeff00',
+				namespace: 'default'
+			})
+		).toBe(
+			'http://localhost:8233/namespaces/default/workflows/agent-run%3Arun-001/b3f1c2d4-5566-7788-99aa-bbccddeeff00/history'
+		);
 	});
 
 	it('returns undefined timelineLanes when no subagent events exist', async () => {

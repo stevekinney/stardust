@@ -22,6 +22,22 @@
 
 	const sessionKey = $derived(data.sessionKey);
 
+	/**
+	 * Extract a human-readable message from a failed response. SvelteKit's
+	 * `error(status, message)` returns a JSON body `{ "message": ... }`; fall back
+	 * to the raw text for non-JSON error bodies.
+	 */
+	async function readErrorMessage(response: Response): Promise<string> {
+		const text = await response.text();
+		try {
+			const parsed = JSON.parse(text) as { message?: unknown };
+			if (typeof parsed.message === 'string' && parsed.message) return parsed.message;
+		} catch {
+			// Not JSON — fall through to the raw text.
+		}
+		return text || `Request failed (${response.status})`;
+	}
+
 	let running = $state(false);
 	let liveEvents = $state<StreamEvent[]>([]);
 	let canonicalEvents = $state<StreamEvent[]>([]);
@@ -99,6 +115,7 @@
 			}
 
 			const KIND_MAP: Record<string, string> = {
+				user_message: 'user.message',
 				assistant_message: 'assistant.message',
 				tool_result: 'tool.result',
 				approval_request: 'approval.request',
@@ -106,36 +123,36 @@
 				lifecycle: 'lifecycle'
 			};
 
+			// User messages stay in the event stream (mapped to `user.message`) so the
+			// transcript renders every turn in order, not just the latest one.
 			let seq = 0;
-			canonicalEvents = body.events
-				.filter((e) => e.kind !== 'user_message')
-				.flatMap((e) => {
-					if (e.kind === 'tool_call') {
-						try {
-							const parsed = JSON.parse(e.payload) as {
-								calls?: Array<{ id: string; name: string; input: unknown }>;
-							};
-							// Fanned-out calls share the parent event's durable sequence so
-							// replay dimming stays consistent per batch.
-							return (parsed.calls ?? []).map((call) => ({
-								id: seq++,
-								kind: 'tool.call',
-								payload: JSON.stringify({ id: call.id, name: call.name, input: call.input }),
-								sequence: e.sequence
-							}));
-						} catch {
-							return [];
-						}
-					}
-					return [
-						{
+			canonicalEvents = body.events.flatMap((e) => {
+				if (e.kind === 'tool_call') {
+					try {
+						const parsed = JSON.parse(e.payload) as {
+							calls?: Array<{ id: string; name: string; input: unknown }>;
+						};
+						// Fanned-out calls share the parent event's durable sequence so
+						// replay dimming stays consistent per batch.
+						return (parsed.calls ?? []).map((call) => ({
 							id: seq++,
-							kind: KIND_MAP[e.kind] ?? e.kind,
-							payload: e.payload,
+							kind: 'tool.call',
+							payload: JSON.stringify({ id: call.id, name: call.name, input: call.input }),
 							sequence: e.sequence
-						}
-					];
-				});
+						}));
+					} catch {
+						return [];
+					}
+				}
+				return [
+					{
+						id: seq++,
+						kind: KIND_MAP[e.kind] ?? e.kind,
+						payload: e.payload,
+						sequence: e.sequence
+					}
+				];
+			});
 			if (!running && liveEvents.length === 0) {
 				transcriptMode = 'canonical';
 			}
@@ -152,7 +169,17 @@
 		streamGapNotice = null;
 		currentUserMessage = message;
 		transcriptMode = 'live';
-		liveEvents = [];
+		// Seed the live view with the conversation so far, then append this turn's
+		// user message. The live stream only carries the current run's events, so
+		// without this seed the prior turns would vanish while the new one streams.
+		liveEvents = [
+			...canonicalEvents,
+			{
+				id: canonicalEvents.length,
+				kind: 'user.message',
+				payload: JSON.stringify({ text: message })
+			}
+		];
 		scrubCursor = null;
 
 		let model: string | undefined;
@@ -180,7 +207,7 @@
 			});
 
 			if (!response.ok) {
-				throw new Error(await response.text());
+				throw new Error(await readErrorMessage(response));
 			}
 
 			const body = (await response.json()) as {
@@ -194,6 +221,9 @@
 			}
 
 			await consumeStream(body.streamUrl);
+			// Refresh the durable transcript so the next turn seeds from complete history
+			// and the Canonical view reflects this turn. Live mode is preserved.
+			await loadTranscript();
 		} catch (caught) {
 			errorMessage = caught instanceof Error ? caught.message : 'Unknown error';
 		} finally {
@@ -203,12 +233,35 @@
 		}
 	}
 
+	// A freshly-submitted turn returns its runId before the workflow has created the
+	// run row, so the stream endpoint 404s for the first ~1–2s. We know the run is
+	// pending, so retry the connection with backoff instead of silently giving up
+	// (which would leave the turn looking hung with no reply). Capped, then surfaced.
+	const STREAM_CONNECT_BACKOFF_MS = [300, 700, 1200, 1800, 2500];
+
+	async function connectToStream(streamUrl: string, signal: AbortSignal): Promise<Response | null> {
+		for (let attempt = 0; ; attempt++) {
+			if (signal.aborted) return null;
+			const response = await fetch(streamUrl, { signal }).catch(() => null);
+			if (response?.ok && response.body) return response;
+			// Only a "run not started yet" 404 is worth retrying; anything else is a
+			// real failure we leave to the caller's normal (quiet) handling.
+			if (response && response.status !== 404) return response;
+			if (attempt >= STREAM_CONNECT_BACKOFF_MS.length) {
+				errorMessage =
+					'The run is taking longer than expected to start. Reload to reconnect to the live view.';
+				return null;
+			}
+			await new Promise((resolve) => setTimeout(resolve, STREAM_CONNECT_BACKOFF_MS[attempt]));
+		}
+	}
+
 	async function consumeStream(streamUrl: string): Promise<void> {
 		abortController = new AbortController();
 		const { signal } = abortController;
 
-		const response = await fetch(streamUrl, { signal });
-		if (!response.ok || !response.body) return;
+		const response = await connectToStream(streamUrl, signal);
+		if (!response || !response.ok || !response.body) return;
 
 		const reader = response.body.getReader();
 		const decoder = new TextDecoder();
@@ -498,7 +551,7 @@
 				<div class="chat-area">
 					<ConversationView
 						sessionId={sessionKey}
-						userMessage={currentUserMessage ? { text: currentUserMessage } : null}
+						userMessage={null}
 						{events}
 						{running}
 						onSubmit={handleSubmit}
@@ -554,6 +607,8 @@
 		border-bottom: 1px solid var(--cinder-color-danger-border);
 		color: var(--cinder-color-danger-fg);
 		font-size: var(--cinder-text-sm);
+		/* Preserve line breaks from multi-line remediation messages. */
+		white-space: pre-line;
 		flex: none;
 	}
 

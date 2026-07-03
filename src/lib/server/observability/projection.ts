@@ -585,7 +585,10 @@ function buildTemporalConcepts(input: {
 			summary: `${workflow.workflowType} is linked to the parent run.`,
 			evidence: `${workflow.workflowId} on ${workflow.taskQueue}; status ${workflow.status}.`,
 			source: 'sqlite',
-			href: buildTemporalWebWorkflowUrl({ workflowId: workflow.workflowId }),
+			href: buildTemporalWebWorkflowUrl({
+				workflowId: workflow.workflowId,
+				temporalRunId: workflow.temporalRunId
+			}),
 			status: workflow.status
 		});
 	}
@@ -712,15 +715,27 @@ function taskQueuesForProjection(
 	).filter(Boolean);
 }
 
+/**
+ * Build a Temporal Web deep link for a workflow.
+ *
+ * Temporal's history view lives at `/workflows/{workflowId}/{runId}/history` — the
+ * `{runId}` segment is required. When the run id is known we link straight to that
+ * history page. When it isn't, we link to `/workflows/{workflowId}`, which Temporal
+ * redirects to the workflow's latest run. Appending `/history` without a run id would
+ * put the literal string `history` in the `{runId}` slot and land on a broken page.
+ */
 export function buildTemporalWebWorkflowUrl(input: {
 	workflowId: string;
+	temporalRunId?: string | null;
 	namespace?: string;
 	baseUrl?: string;
 }): string {
 	const namespace = encodeURIComponent(input.namespace ?? TEMPORAL_NAMESPACE);
 	const workflowId = encodeURIComponent(input.workflowId);
 	const baseUrl = input.baseUrl ?? TEMPORAL_WEB_URL;
-	return `${baseUrl}/namespaces/${namespace}/workflows/${workflowId}/history`;
+	const workflowPath = `${baseUrl}/namespaces/${namespace}/workflows/${workflowId}`;
+	if (!input.temporalRunId) return workflowPath;
+	return `${workflowPath}/${encodeURIComponent(input.temporalRunId)}/history`;
 }
 
 export async function readRunInspectorProjection(
@@ -822,7 +837,10 @@ export async function readRunInspectorProjection(
 		workflowRows[0]?.temporalRunId ??
 		null;
 	const taskQueues = taskQueuesForProjection(workflowRows, toolRows);
-	const temporalWebUrl = buildTemporalWebWorkflowUrl({ workflowId: run.workflowId });
+	const temporalWebUrl = buildTemporalWebWorkflowUrl({
+		workflowId: run.workflowId,
+		temporalRunId
+	});
 	const fallbackHistorySummary = buildSqliteTemporalHistorySummary({
 		workflowId: run.workflowId,
 		temporalRunId,

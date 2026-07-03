@@ -92,6 +92,16 @@ export function buildConversation(
 		}
 
 		switch (event.kind) {
+			case 'user.message': {
+				// A user message opens a new turn. Reset the assistant accumulator so this
+				// turn's reply becomes its own message instead of overwriting the previous
+				// turn's — this is what makes the transcript render as a multi-turn chat.
+				assistantMessageId = null;
+				assistantTextAccumulator = '';
+				addMessage({ role: 'user', content: (payload.text as string) ?? '' }, event.sequence);
+				break;
+			}
+
 			case 'assistant.delta': {
 				assistantTextAccumulator += (payload.text as string) ?? '';
 				if (assistantMessageId && messages[assistantMessageId]) {
@@ -124,6 +134,12 @@ export function buildConversation(
 			}
 
 			case 'tool.call': {
+				// A tool call breaks the assistant's turn: any assistant text that
+				// follows the tool result is a distinct message that must render *below*
+				// the tool call/result rows, not fold back into the pre-tool bubble
+				// above them. Reset the accumulator so the post-tool reply starts fresh.
+				assistantMessageId = null;
+				assistantTextAccumulator = '';
 				const toolCall: ToolCall = {
 					id: payload.id as string,
 					name: payload.name as string,

@@ -90,6 +90,23 @@ describe('turn route', () => {
 		).rejects.toMatchObject({ status: 400 });
 	});
 
+	it('returns 503 with the underlying reason when Temporal is unreachable', async () => {
+		mocks.start.mockRejectedValueOnce(new Error('Temporal namespace "depict.bnfgy" not found'));
+
+		await expect(
+			POST({
+				params: { sessionKey: 'test-session' },
+				request: new Request('http://localhost/api/sessions/test-session/turn', {
+					method: 'POST',
+					body: JSON.stringify({ message: 'hello' })
+				})
+			} as Parameters<typeof POST>[0])
+		).rejects.toMatchObject({
+			status: 503,
+			body: { message: 'Temporal namespace "depict.bnfgy" not found' }
+		});
+	});
+
 	it('returns 400 when sessionKey is invalid', async () => {
 		await expect(
 			POST({

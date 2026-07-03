@@ -49,6 +49,79 @@ describe('buildConversation', () => {
 		expect(assistantMessages[0].content).toBe('The answer is 42.');
 	});
 
+	it('renders a user.message event as a user message', () => {
+		const result = buildConversation('s1', null, [
+			makeEvent(1, 'user.message', { text: 'What are your capabilities?' })
+		]);
+		expect(result.ids).toHaveLength(1);
+		expect(result.messages[result.ids[0]].role).toBe('user');
+		expect(result.messages[result.ids[0]].content).toBe('What are your capabilities?');
+	});
+
+	it('renders multiple turns without collapsing assistant replies into one', () => {
+		// Regression: a second user turn must reset the assistant accumulator so each
+		// turn keeps its own reply instead of the later one overwriting the earlier.
+		const events: StreamEvent[] = [
+			makeEvent(1, 'user.message', { text: 'Fact about the moon?' }),
+			makeEvent(2, 'assistant.message', { text: 'The moon is drifting away.' }),
+			makeEvent(3, 'user.message', { text: 'Fact about Mars?' }),
+			makeEvent(4, 'assistant.message', { text: 'Mars has the largest volcano.' })
+		];
+		const result = buildConversation('s1', null, events);
+		const roles = result.ids.map((id) => result.messages[id].role);
+		expect(roles).toEqual(['user', 'assistant', 'user', 'assistant']);
+		const contents = result.ids.map((id) => result.messages[id].content);
+		expect(contents).toEqual([
+			'Fact about the moon?',
+			'The moon is drifting away.',
+			'Fact about Mars?',
+			'Mars has the largest volcano.'
+		]);
+	});
+
+	it('resets streamed deltas at a new user turn', () => {
+		const events: StreamEvent[] = [
+			makeEvent(1, 'user.message', { text: 'First?' }),
+			makeEvent(2, 'assistant.delta', { text: 'First answer.' }),
+			makeEvent(3, 'user.message', { text: 'Second?' }),
+			makeEvent(4, 'assistant.delta', { text: 'Second answer.' })
+		];
+		const result = buildConversation('s1', null, events);
+		const assistants = result.ids
+			.map((id) => result.messages[id])
+			.filter((m) => m.role === 'assistant');
+		expect(assistants).toHaveLength(2);
+		expect(assistants[0].content).toBe('First answer.');
+		expect(assistants[1].content).toBe('Second answer.');
+	});
+
+	it('renders post-tool assistant text below the tool rows, keeping the pre-tool text', () => {
+		// Regression: a tool call must reset the assistant accumulator so the answer
+		// after the tool renders as its own message below the tool call/result — not
+		// overwriting or folding into the pre-tool narration above them.
+		const events: StreamEvent[] = [
+			makeEvent(1, 'user.message', { text: 'List files then count them' }),
+			makeEvent(2, 'assistant.delta', { text: 'Let me check the workspace.' }),
+			makeEvent(3, 'tool.call', { id: 'tc1', name: 'workspace.list', input: {} }),
+			makeEvent(4, 'tool.result', { callId: 'tc1', content: 'a.ts\nb.ts\nc.ts' }),
+			makeEvent(5, 'assistant.message', { text: 'There are 3 files.' })
+		];
+		const result = buildConversation('s1', null, events);
+		const rows = result.ids.map((id) => ({
+			role: result.messages[id].role,
+			content: result.messages[id].content
+		}));
+		expect(rows.map((r) => r.role)).toEqual([
+			'user',
+			'assistant',
+			'tool-call',
+			'tool-result',
+			'assistant'
+		]);
+		expect(rows[1].content).toBe('Let me check the workspace.');
+		expect(rows[4].content).toBe('There are 3 files.');
+	});
+
 	it('creates tool-call messages with the toolCall field', () => {
 		const events: StreamEvent[] = [
 			makeEvent(1, 'tool.call', {
