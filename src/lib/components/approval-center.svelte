@@ -52,9 +52,7 @@
 					? 'deny'
 					: resolution.decision === 'cancel'
 						? 'cancel'
-						: resolution.remember
-							? 'remember'
-							: 'approve';
+						: 'approve';
 
 		return {
 			approvalId,

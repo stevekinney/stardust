@@ -136,6 +136,47 @@ describe('ApprovalCenter', () => {
 		unmount(component);
 	});
 
+	it('keeps remembered approvals executable when approving', async () => {
+		const resolved: ApprovalResolutionInput[] = [];
+		const component = mount(ApprovalCenter, {
+			target: document.body,
+			props: {
+				approvals: [makeApproval('approval-001')],
+				onResolve: vi.fn((resolution) => {
+					resolved.push(resolution);
+				})
+			}
+		});
+		flushSync();
+
+		const rememberCheckbox = document.querySelector<HTMLInputElement>('input[type="checkbox"]');
+		expect(rememberCheckbox).toBeInstanceOf(HTMLInputElement);
+		rememberCheckbox!.click();
+		await Promise.resolve();
+		flushSync();
+		expect(rememberCheckbox!.checked).toBe(true);
+
+		const approveButton = Array.from(document.querySelectorAll('button')).find(
+			(button) => button.textContent?.trim() === 'Approve'
+		);
+		approveButton?.click();
+		await Promise.resolve();
+		flushSync();
+
+		expect(resolved).toEqual([
+			{
+				approvalId: 'approval-001',
+				action: 'approve',
+				editedArguments: undefined,
+				reason: undefined,
+				remember: true,
+				actor: 'user'
+			}
+		]);
+
+		unmount(component);
+	});
+
 	it('passes edited arguments, remember, and reason from Cinder ApprovalCard', async () => {
 		const resolved: ApprovalResolutionInput[] = [];
 		const component = mount(ApprovalCenter, {
