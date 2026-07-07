@@ -1,4 +1,5 @@
-import { TestWorkflowEnvironment } from '@temporalio/testing';
+import type { TestWorkflowEnvironment } from '@temporalio/testing';
+import { createTimeSkippingEnvironment } from './test-environment';
 import { Worker } from '@temporalio/worker';
 import { ApplicationFailure } from '@temporalio/common';
 import { fileURLToPath } from 'node:url';
@@ -249,7 +250,7 @@ describe('agentRunWorkflow approvals', () => {
 	};
 
 	beforeAll(async () => {
-		env = await TestWorkflowEnvironment.createTimeSkipping();
+		env = await createTimeSkippingEnvironment();
 	});
 
 	afterAll(async () => {
@@ -622,7 +623,7 @@ describe('agentRunWorkflow memory writeback', () => {
 	let env: TestWorkflowEnvironment;
 
 	beforeAll(async () => {
-		env = await TestWorkflowEnvironment.createTimeSkipping();
+		env = await createTimeSkippingEnvironment();
 	});
 
 	afterAll(async () => {
@@ -942,7 +943,7 @@ describe('agentRunWorkflow steering', () => {
 	};
 
 	beforeAll(async () => {
-		env = await TestWorkflowEnvironment.createTimeSkipping();
+		env = await createTimeSkippingEnvironment();
 	});
 
 	afterAll(async () => {
@@ -1245,7 +1246,7 @@ describe('agentRunWorkflow subagents', () => {
 	let env: TestWorkflowEnvironment;
 
 	beforeAll(async () => {
-		env = await TestWorkflowEnvironment.createTimeSkipping();
+		env = await createTimeSkippingEnvironment();
 	});
 
 	afterAll(async () => {
@@ -1439,7 +1440,7 @@ describe('agentRunWorkflow delegate tools', () => {
 	let env: TestWorkflowEnvironment;
 
 	beforeAll(async () => {
-		env = await TestWorkflowEnvironment.createTimeSkipping();
+		env = await createTimeSkippingEnvironment();
 	});
 
 	afterAll(async () => {
@@ -1815,7 +1816,7 @@ describe('agentRunWorkflow timer.wait', () => {
 	let env: TestWorkflowEnvironment;
 
 	beforeAll(async () => {
-		env = await TestWorkflowEnvironment.createTimeSkipping();
+		env = await createTimeSkippingEnvironment();
 	});
 
 	afterAll(async () => {
@@ -2101,7 +2102,7 @@ describe('agentRunWorkflow budget caps', () => {
 	let env: TestWorkflowEnvironment;
 
 	beforeAll(async () => {
-		env = await TestWorkflowEnvironment.createTimeSkipping();
+		env = await createTimeSkippingEnvironment();
 	});
 
 	afterAll(async () => {
@@ -2423,7 +2424,7 @@ describe('agentRunWorkflow cancel cleanup', () => {
 	const cancelledSessions: string[] = [];
 
 	beforeAll(async () => {
-		env = await TestWorkflowEnvironment.createTimeSkipping();
+		env = await createTimeSkippingEnvironment();
 	});
 
 	afterAll(async () => {
@@ -2695,7 +2696,7 @@ describe('agentRunWorkflow failure status', () => {
 	};
 
 	beforeAll(async () => {
-		env = await TestWorkflowEnvironment.createTimeSkipping();
+		env = await createTimeSkippingEnvironment();
 	});
 
 	afterAll(async () => {

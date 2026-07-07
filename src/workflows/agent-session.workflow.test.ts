@@ -1,4 +1,5 @@
-import { TestWorkflowEnvironment } from '@temporalio/testing';
+import type { TestWorkflowEnvironment } from '@temporalio/testing';
+import { createTimeSkippingEnvironment } from './test-environment';
 import { Worker } from '@temporalio/worker';
 import { ApplicationFailure } from '@temporalio/common';
 import { fileURLToPath } from 'node:url';
@@ -71,7 +72,7 @@ describe('agentSessionWorkflow', () => {
 	let env: TestWorkflowEnvironment;
 
 	beforeAll(async () => {
-		env = await TestWorkflowEnvironment.createTimeSkipping();
+		env = await createTimeSkippingEnvironment();
 	});
 
 	afterAll(async () => {
@@ -224,7 +225,7 @@ describe('agentSessionWorkflow — blocking fixture', () => {
 	let env: TestWorkflowEnvironment;
 
 	beforeAll(async () => {
-		env = await TestWorkflowEnvironment.createTimeSkipping();
+		env = await createTimeSkippingEnvironment();
 	});
 
 	afterAll(async () => {
@@ -1177,7 +1178,7 @@ describe('agentSessionWorkflow — approval routing', () => {
 	let env: TestWorkflowEnvironment;
 
 	beforeAll(async () => {
-		env = await TestWorkflowEnvironment.createTimeSkipping();
+		env = await createTimeSkippingEnvironment();
 	});
 
 	afterAll(async () => {
@@ -1309,7 +1310,7 @@ describe('agentSessionWorkflow — failing-run fixture', () => {
 	let env: TestWorkflowEnvironment;
 
 	beforeAll(async () => {
-		env = await TestWorkflowEnvironment.createTimeSkipping();
+		env = await createTimeSkippingEnvironment();
 	});
 
 	afterAll(async () => {

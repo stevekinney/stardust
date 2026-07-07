@@ -1,4 +1,5 @@
-import { TestWorkflowEnvironment } from '@temporalio/testing';
+import type { TestWorkflowEnvironment } from '@temporalio/testing';
+import { createTimeSkippingEnvironment } from './test-environment';
 import { Worker } from '@temporalio/worker';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -9,7 +10,7 @@ describe('scheduledAgentWorkflow', () => {
 	let env: TestWorkflowEnvironment;
 
 	beforeAll(async () => {
-		env = await TestWorkflowEnvironment.createTimeSkipping();
+		env = await createTimeSkippingEnvironment();
 	});
 
 	afterAll(async () => {

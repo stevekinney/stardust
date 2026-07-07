@@ -1,4 +1,5 @@
-import { TestWorkflowEnvironment } from '@temporalio/testing';
+import type { TestWorkflowEnvironment } from '@temporalio/testing';
+import { createTimeSkippingEnvironment } from '@src/workflows/test-environment';
 import { Worker } from '@temporalio/worker';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -11,7 +12,7 @@ const testActivities = {
 
 // Required export — temporal/replay-history-smoke-test-hook verifies this exists.
 export async function runReplayHistorySmokeTest(): Promise<void> {
-	const env = await TestWorkflowEnvironment.createTimeSkipping();
+	const env = await createTimeSkippingEnvironment();
 	const worker = await Worker.create({
 		connection: env.nativeConnection,
 		namespace: 'default',
@@ -58,7 +59,7 @@ describe('Workflow replay histories', () => {
 	let worker: Worker;
 
 	beforeAll(async () => {
-		env = await TestWorkflowEnvironment.createTimeSkipping();
+		env = await createTimeSkippingEnvironment();
 		worker = await Worker.create({
 			connection: env.nativeConnection,
 			namespace: 'default',
