@@ -283,3 +283,21 @@ Worked directly in the primary checkout (not a worktree), branch `integration` o
 ## 2026-07-07 — Orchestrator: pipeline complete
 
 Post-integration fixes: state_proxy_equality_mismatch warning root-caused and fixed (fold-cache prefix check now compares event ids, regression test reproduces the raw-spread-into-proxied-prop pattern; commit 748fb1e). Full-suite flake root-caused (Temporal SDK's hard-coded 5s ephemeral-server connect deadline under startup CPU contention) and fixed with the user-approved capped-retry helper src/workflows/test-environment.ts (commit fcabb07) plus a scoped eslint override (f51763b). Final gates on main: typecheck 0 errors, lint clean, test:unit 833/833, build, test:a11y clean with zero proxy warnings. Final acceptance checklist verified; main pushed to origin. Remaining owner action: SEC-001 (rotate the Temporal Cloud API key from .env).
+
+## 2026-07-07 — Orchestrator: upstream tickets filed
+
+Research pass over stardust/cinder/agent-bureau (three parallel read-only agents) found Cinder already uses conversationalist's types 1:1 (chat/conversation-model.ts type bridge, runtime dep ^0.2.1) — the user's directive "Cinder should use conversationalist's types" is the existing design; tickets target the residual gaps. Filed:
+
+- agent-bureau#152 [conversationalist] incremental event-log projection (fold cursor + equivalence contract)
+- agent-bureau#153 [conversationalist] DocumentContent attachment type in MultiModalContent
+- agent-bureau#154 [armorer] untrusted-output tagging + fencing middleware
+- agent-bureau#155 [armorer] tool availability gating
+- cinder#684 composer overlay support (element ref, composable keydown, ARIA combobox pass-through)
+- cinder#685 anchored slash-command/mention popover primitive
+- cinder#686 Chat announcer hook for custom-row action-required content (BUG-004 root fix)
+- cinder#687 ChatAttachment serialization helper (bridges to agent-bureau#153)
+- cinder#688 conversationalist as peerDependency (single-instance type contract)
+
+Deliberately NOT filed: SSE frame parsing (generic web utility, weak fit for any of the three packages); risk-tier→approval predicate (armorer's policy.beforeExecute + ToolRisk already cover it; Stardust's risk.ts is Temporal-specific); attachments-not-surviving-reload (Stardust durable-schema choice, unblocked by #153).
+
+Stardust follow-up work implied (local, not upstream): adopt conversationalist's streaming/fold helpers in stream-to-conversation.ts once #152 ships; replace DOM reach-ins once #684 ships; adopt announce() once #686 ships; move ApprovalCard announcement + fileToBase64 to upstream equivalents.
