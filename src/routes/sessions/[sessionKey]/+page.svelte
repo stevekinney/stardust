@@ -13,6 +13,7 @@
 	import SessionPhoneSurfaces from '$lib/components/session-phone-surfaces.svelte';
 	import { sessionBadgeVariant } from '$lib/components/session-row.svelte';
 	import { formatStatus } from '$lib/session-display';
+	import { parseSseFrame, readSseStream } from '$lib/sse-stream';
 	import type { StreamEvent } from '$lib/stream-to-conversation';
 	import type { RunInspectorProjection } from '$lib/server/observability/projection';
 	import type { PendingApprovalEntry } from '$lib/types';
@@ -263,50 +264,13 @@
 		const response = await connectToStream(streamUrl, signal);
 		if (!response || !response.ok || !response.body) return;
 
-		const reader = response.body.getReader();
-		const decoder = new TextDecoder();
-		let buffer = '';
-
-		try {
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-
-				buffer += decoder.decode(value, { stream: true });
-
-				const frames = buffer.split('\n\n');
-				buffer = frames.pop() ?? '';
-
-				for (const frame of frames) {
-					parseAndApplyFrame(frame);
-				}
-			}
-		} catch (caught) {
-			if (caught instanceof Error && caught.name !== 'AbortError') {
-				throw caught;
-			}
-		} finally {
-			reader.releaseLock();
-		}
+		await readSseStream(response.body, signal, (frame) => applyFrame(frame));
 	}
 
-	function parseAndApplyFrame(frame: string): void {
-		const lines = frame.split('\n');
-		let id: number | undefined;
-		let kind = '';
-		let data = '';
-
-		for (const line of lines) {
-			if (line.startsWith('id: ')) {
-				id = Number(line.slice(4));
-			} else if (line.startsWith('event: ')) {
-				kind = line.slice(7);
-			} else if (line.startsWith('data: ')) {
-				data = line.slice(6);
-			}
-		}
-
-		if (!kind || !data) return;
+	function applyFrame(frame: string): void {
+		const parsed = parseSseFrame(frame);
+		if (!parsed) return;
+		const { id, kind, payload } = parsed;
 
 		if (kind === 'stream.gap') {
 			streamGapNotice =
@@ -321,7 +285,7 @@
 			void loadPendingApproval();
 		}
 
-		liveEvents = [...liveEvents, { id: id ?? liveEvents.length, kind, payload: data }];
+		liveEvents = [...liveEvents, { id: id ?? liveEvents.length, kind, payload }];
 	}
 
 	async function loadLatestRunInspector() {
