@@ -1,14 +1,7 @@
 <script lang="ts" module>
 	import type { ApprovalOperation } from '@lostgradient/cinder/approval-card';
-	import type { ChatSubmitEvent } from '@lostgradient/cinder/chat';
+	import type { ChatAttachment } from '@lostgradient/cinder/chat';
 	import type { SessionAttachmentInput } from '$lib/types';
-
-	// Cinder's `@lostgradient/cinder/chat` public entry does not re-export the
-	// `ChatAttachment` type itself (only `AttachmentKind` and the
-	// `ChatAttachmentPreview` component), even though `ChatSubmitEvent.attachments`
-	// is typed as `ChatAttachment[]`. Derive the element type from the exported
-	// event type instead of reaching into Cinder's internal module path.
-	type ChatAttachment = ChatSubmitEvent['attachments'][number];
 
 	/** Build a Cinder ApprovalOperation from a pending approval's tool call. */
 	export function toApprovalOperation(toolCall: {
@@ -59,7 +52,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import Chat from '@lostgradient/cinder/chat';
-	import type { Message } from '@lostgradient/cinder/chat';
+	import type { ChatSubmitEvent, Message } from '@lostgradient/cinder/chat';
 	import ApprovalCard from '@lostgradient/cinder/approval-card';
 	import {
 		applyNewStreamEvents,
@@ -164,14 +157,18 @@
 	});
 
 	// ---- Slash commands (BUG-002) ----------------------------------------
-	// Cinder's Chat composer exposes no value binding, oninput hook, or clear()
-	// from its public API (only focusInput()/beginStreaming()/etc — see the
-	// CINDER-REQUEST logged in state/PROGRESS.md). Interception below reaches
-	// into the rendered `.chat-input-editor` DOM node instead of forking Cinder.
+	// Cinder 0.8.0 added `getComposerValue()`/`clearInput()`/`oncomposerinput`
+	// to the public `Chat` component (the CINDER-REQUEST filed by this track —
+	// see state/CINDER-RELEASE.md), so reading/clearing the composer's text
+	// value goes through that API now instead of the raw DOM node. Cinder still
+	// exposes no element-ref getter for the composer itself, so ARIA combobox
+	// wiring and arrow-key/Enter/Escape interception (Chat has no keydown hook
+	// either) still reach into the rendered `.chat-input-editor` node.
 
 	const slashListboxId = $derived(`session-${sessionId}-slash`);
 	const allSlashCommands = createDefaultSlashCommands();
 
+	let chatRef: ReturnType<typeof Chat> | undefined;
 	let slashOpen = $state(false);
 	let slashQuery = $state('');
 	let slashActiveIndex = $state(0);
@@ -212,35 +209,6 @@
 		return target instanceof HTMLElement && target.closest('.chat-input-editor') !== null;
 	}
 
-	function getComposerText(element: HTMLElement): string {
-		if (element instanceof HTMLTextAreaElement) return element.value;
-		return element.textContent ?? '';
-	}
-
-	/**
-	 * Best-effort clear of Cinder's composer via `execCommand`, which dispatches
-	 * real `beforeinput`/`input` events the underlying ProseMirror editor already
-	 * listens to — a direct `textContent = ''` write would desync its internal
-	 * document model. See the CINDER-REQUEST in state/PROGRESS.md for the proper
-	 * `clearInput()` API this should become.
-	 */
-	function clearComposerText(element: HTMLElement): void {
-		if (element instanceof HTMLTextAreaElement) {
-			element.value = '';
-			element.dispatchEvent(new Event('input', { bubbles: true }));
-			return;
-		}
-		element.focus();
-		const selection = window.getSelection();
-		if (selection) {
-			const range = document.createRange();
-			range.selectNodeContents(element);
-			selection.removeAllRanges();
-			selection.addRange(range);
-		}
-		document.execCommand('delete');
-	}
-
 	function openSlash(): void {
 		slashOpen = true;
 		slashQuery = '';
@@ -252,8 +220,8 @@
 		slashOpen = false;
 		slashQuery = '';
 		slashActiveIndex = 0;
-		if (options.clearText && composerEl) clearComposerText(composerEl);
-		if (options.refocus && composerEl) composerEl.focus();
+		if (options.clearText) chatRef?.clearInput();
+		if (options.refocus) chatRef?.focusInput();
 	}
 
 	async function executeSlashCommand(command: SlashCommand): Promise<void> {
@@ -273,10 +241,12 @@
 		return text.startsWith('/') && !text.includes('\n') && !text.includes(' ');
 	}
 
-	function handleComposerInputCapture(event: Event): void {
-		if (!isComposerElement(event.target)) return;
-		composerEl = event.target;
-		const text = getComposerText(composerEl);
+	/**
+	 * Fired on every composer text change via Cinder's `oncomposerinput` prop
+	 * (0.8.0+) — replaces the previous DOM-level manual `.value`/`.textContent`
+	 * read.
+	 */
+	function handleComposerInput(text: string): void {
 		if (slashOpen) {
 			if (isSlashTriggerText(text)) {
 				slashQuery = text.slice(1);
@@ -290,6 +260,18 @@
 		}
 	}
 
+	/**
+	 * Captures the composer DOM node for ARIA combobox wiring below — Cinder's
+	 * public API exposes imperative value/clear/focus methods but no
+	 * element-ref getter, so this capture-phase listener is still the only way
+	 * to reach it (kept minimal: it no longer reads the composer's text value,
+	 * that comes from `oncomposerinput` above).
+	 */
+	function handleComposerInputCapture(event: Event): void {
+		if (isComposerElement(event.target)) composerEl = event.target;
+	}
+
+	/** Arrow-key/Enter/Escape interception — Chat exposes no keydown hook, so this also reaches into the DOM. */
 	function handleComposerKeydownCapture(event: KeyboardEvent): void {
 		if (!isComposerElement(event.target)) return;
 		composerEl = event.target;
@@ -583,6 +565,7 @@
 		{/if}
 	</div>
 	<Chat
+		bind:this={chatRef}
 		id="session-{sessionId}"
 		{conversation}
 		streaming={running}
@@ -601,6 +584,7 @@
 		onretry={handleRetry}
 		onedit={handleEdit}
 		onstopgenerating={handleStopGenerating}
+		oncomposerinput={handleComposerInput}
 		row={stardustRow}
 	/>
 </div>
