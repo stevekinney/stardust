@@ -3,8 +3,11 @@ import {
 	applyNewStreamEvents,
 	buildConversation,
 	createConversationBuilder,
+	findLastUserMessageText,
+	mapTranscriptToStreamEvents,
 	snapshotConversation,
-	type StreamEvent
+	type StreamEvent,
+	type TranscriptEventRow
 } from './stream-to-conversation';
 
 function makeEvent(id: number, kind: string, payload: Record<string, unknown>): StreamEvent {
@@ -530,5 +533,195 @@ describe('applyNewStreamEvents (incremental) — equivalence with buildConversat
 
 		expect(count).toBe(0);
 		expect(after).toEqual(before);
+	});
+});
+
+/**
+ * Cinder's `tool-call-group` derives a tool call's UI state entirely from
+ * whether a paired `tool-result` message exists yet, and from that result's
+ * `outcome` once it arrives (see `tool-call-group.svelte`: no result →
+ * "Pending"; `outcome: 'success'` → "Complete"; `outcome: 'error'` →
+ * "Failed"; `outcome: 'action_required'` → "Action required"). Stardust's
+ * transcript event model only emits `tool.call` and `tool.result` — there is
+ * no separate "queued" vs. "running" server event — so both of those labels
+ * collapse into the same "no result yet" representation here. These tests
+ * cover each of the four states this mapping is responsible for producing.
+ */
+describe('buildConversation — tool-call states', () => {
+	it('queued/pending: a tool call with no result yet has no toolResult field', () => {
+		const events: StreamEvent[] = [
+			makeEvent(1, 'tool.call', { id: 'tc-pending', name: 'shell.exec', input: { command: 'ls' } })
+		];
+		const result = buildConversation('s1', null, events);
+		const toolCallMessage = result.ids
+			.map((id) => result.messages[id])
+			.find((m) => m.role === 'tool-call');
+		expect(toolCallMessage?.toolCall).toEqual({
+			id: 'tc-pending',
+			name: 'shell.exec',
+			arguments: { command: 'ls' }
+		});
+		expect(toolCallMessage?.toolResult).toBeUndefined();
+	});
+
+	it('running: a pending tool call survives intervening stream events unresolved', () => {
+		// The call stays paired to no result across further deltas/tool calls that
+		// arrive while it's still executing — it must not be prematurely marked
+		// resolved or clobbered by unrelated events landing in between.
+		const events: StreamEvent[] = [
+			makeEvent(1, 'tool.call', { id: 'tc-running', name: 'shell.exec', input: { command: 'ls' } }),
+			makeEvent(2, 'assistant.delta', { text: 'Still working on it…' }),
+			makeEvent(3, 'tool.call', { id: 'tc-other', name: 'workspace.list', input: {} }),
+			makeEvent(4, 'tool.result', { callId: 'tc-other', content: 'a.ts', isError: false })
+		];
+		const result = buildConversation('s1', null, events);
+		const toolCallMessages = result.ids
+			.map((id) => result.messages[id])
+			.filter((m) => m.role === 'tool-call');
+		const running = toolCallMessages.find((m) => m.toolCall?.id === 'tc-running');
+		const other = toolCallMessages.find((m) => m.toolCall?.id === 'tc-other');
+		expect(running?.toolResult).toBeUndefined();
+		expect(other?.toolResult).toBeUndefined();
+	});
+
+	it('succeeded: a tool result with isError false resolves the call to outcome success', () => {
+		const events: StreamEvent[] = [
+			makeEvent(1, 'tool.call', {
+				id: 'tc-success',
+				name: 'workspace.readFile',
+				input: { path: 'notes.md' }
+			}),
+			makeEvent(2, 'tool.result', {
+				callId: 'tc-success',
+				content: '# Notes\nall good',
+				isError: false
+			})
+		];
+		const result = buildConversation('s1', null, events);
+		const toolResultMessage = result.ids
+			.map((id) => result.messages[id])
+			.find((m) => m.role === 'tool-result');
+		expect(toolResultMessage?.toolResult).toEqual({
+			callId: 'tc-success',
+			outcome: 'success',
+			content: '# Notes\nall good'
+		});
+	});
+
+	it('failed: a tool result with isError true resolves to outcome error with detail visible', () => {
+		const events: StreamEvent[] = [
+			makeEvent(1, 'tool.call', {
+				id: 'tc-failed',
+				name: 'shell.exec',
+				input: { command: 'rm -rf' }
+			}),
+			makeEvent(2, 'tool.result', {
+				callId: 'tc-failed',
+				content: 'Permission denied: cannot execute command',
+				isError: true
+			})
+		];
+		const result = buildConversation('s1', null, events);
+		const toolResultMessage = result.ids
+			.map((id) => result.messages[id])
+			.find((m) => m.role === 'tool-result');
+		expect(toolResultMessage?.toolResult?.outcome).toBe('error');
+		// The error detail is carried through in `content` so it renders even
+		// though Stardust doesn't populate Cinder's optional structured `error`
+		// field — `tool-call-group.svelte` falls back to stringifying `content`
+		// when `error.message` is absent.
+		expect(toolResultMessage?.toolResult?.content).toBe(
+			'Permission denied: cannot execute command'
+		);
+	});
+});
+
+/**
+ * Simulates the load path the session page runs on mount
+ * (`+page.svelte`'s `loadTranscript`, now backed by `mapTranscriptToStreamEvents`
+ * / `findLastUserMessageText`) against durable transcript rows shaped exactly
+ * like `GET /api/sessions/{sessionKey}/transcript` returns them.
+ */
+describe('mapTranscriptToStreamEvents — refresh rehydration', () => {
+	function makeRow(
+		sequence: number,
+		kind: string,
+		payload: Record<string, unknown>
+	): TranscriptEventRow {
+		return { id: `evt-${sequence}`, kind, payload: JSON.stringify(payload), sequence };
+	}
+
+	it('recovers an in-flight tool call as pending, not failed or lost, after a refresh', () => {
+		// The workflow is mid-tool-call: the `tool_call` row is durable, but the
+		// matching `tool_result` row hasn't been written yet.
+		const rows: TranscriptEventRow[] = [
+			makeRow(0, 'user_message', { text: 'List the files' }),
+			makeRow(1, 'tool_call', { calls: [{ id: 'tc-live', name: 'workspace.list', input: {} }] })
+		];
+
+		const streamEvents = mapTranscriptToStreamEvents(rows);
+		const conversation = buildConversation('s1', null, streamEvents);
+		const toolCallMessage = conversation.ids
+			.map((id) => conversation.messages[id])
+			.find((m) => m.role === 'tool-call');
+
+		expect(toolCallMessage?.toolCall?.id).toBe('tc-live');
+		expect(toolCallMessage?.toolResult).toBeUndefined();
+
+		const toolResultMessages = conversation.ids
+			.map((id) => conversation.messages[id])
+			.filter((m) => m.role === 'tool-result');
+		expect(toolResultMessages).toHaveLength(0);
+	});
+
+	it('reconciles to success once the result row lands in a later transcript fetch', () => {
+		// The next poll (or the next page load) sees the completed transcript —
+		// the same `callId` now has a matching `tool_result` row.
+		const rows: TranscriptEventRow[] = [
+			makeRow(0, 'user_message', { text: 'List the files' }),
+			makeRow(1, 'tool_call', { calls: [{ id: 'tc-live', name: 'workspace.list', input: {} }] }),
+			makeRow(2, 'tool_result', { callId: 'tc-live', content: 'a.ts\nb.ts', isError: false })
+		];
+
+		const streamEvents = mapTranscriptToStreamEvents(rows);
+		const conversation = buildConversation('s1', null, streamEvents);
+		const toolResultMessage = conversation.ids
+			.map((id) => conversation.messages[id])
+			.find((m) => m.role === 'tool-result');
+
+		expect(toolResultMessage?.toolResult).toEqual({
+			callId: 'tc-live',
+			outcome: 'success',
+			content: 'a.ts\nb.ts'
+		});
+	});
+
+	it('fans a batched tool_call row into one StreamEvent per call, sharing its sequence', () => {
+		const rows: TranscriptEventRow[] = [
+			makeRow(3, 'tool_call', {
+				calls: [
+					{ id: 'tc-a', name: 'workspace.list', input: {} },
+					{ id: 'tc-b', name: 'workspace.readFile', input: { path: 'a.ts' } }
+				]
+			})
+		];
+
+		const streamEvents = mapTranscriptToStreamEvents(rows);
+		expect(streamEvents).toHaveLength(2);
+		expect(streamEvents.every((event) => event.kind === 'tool.call')).toBe(true);
+		expect(streamEvents.every((event) => event.sequence === 3)).toBe(true);
+	});
+
+	it('finds the most recent user message text across transcript rows', () => {
+		const rows: TranscriptEventRow[] = [
+			makeRow(0, 'user_message', { text: 'First question' }),
+			makeRow(1, 'assistant_message', { text: 'First answer' }),
+			makeRow(2, 'user_message', { text: 'Second question' })
+		];
+		expect(findLastUserMessageText(rows)).toBe('Second question');
+	});
+
+	it('returns null when there is no user message row', () => {
+		expect(findLastUserMessageText([])).toBeNull();
 	});
 });
