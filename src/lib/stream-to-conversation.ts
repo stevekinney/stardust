@@ -3,17 +3,33 @@
  *
  * This is the adapter between Stardust's real-time event model and the
  * immutable conversation snapshot that Cinder's Chat component renders.
+ *
+ * The conversation container is built with conversationalist's own primitives
+ * (`createConversationHistory` / `appendUnsafeMessage` — Cinder re-exports the
+ * conversation types 1:1 from that package), so message construction, ids,
+ * positions, and immutability are owned upstream. Appends deliberately use the
+ * unvalidated primitive: this render fold legitimately produces conversations
+ * the validated layer rejects as `integrity:orphan-tool-result` — approval
+ * placeholders carry synthetic `callId`s (the approval id), and a mid-flight
+ * transcript window can contain a `tool.result` whose call fell outside the
+ * window. For the same reason the `conversationalist/streaming` trio
+ * (`appendStreamingMessage` et al.) is unusable here — every variant re-runs
+ * full validation — so streamed-delta content replacement stays a local
+ * immutable update (upstream: stevekinney/agent-bureau#156). The incremental
+ * `processedCount` cursor also stays local until the upstream projection
+ * primitive ships (stevekinney/agent-bureau#152).
  */
 
 import type {
 	ConversationHistory,
 	JSONValue,
-	Message,
 	MessageInput,
 	MultiModalContent,
 	ToolCall,
 	ToolResult
 } from '@lostgradient/cinder/chat';
+import type { ConversationEnvironment } from 'conversationalist';
+import { appendUnsafeMessage, createConversationHistory } from 'conversationalist';
 import type { SessionAttachmentInput } from '$lib/types';
 
 /** A normalized stream event as produced by the SSE endpoint. */
@@ -144,16 +160,69 @@ export function findLastUserMessageText(rows: TranscriptEventRow[]): string | nu
  * `snapshotConversation`.
  */
 export type ConversationBuilderState = {
-	sessionId: string;
+	/** The conversationalist-built conversation the fold appends into. */
+	conversation: ConversationHistory;
+	/** Fixed fold timestamp injected as the conversationalist environment clock. */
 	now: string;
-	ids: string[];
-	messages: Record<string, Message>;
-	position: number;
 	assistantTextAccumulator: string;
 	assistantMessageId: string | null;
 	/** Count of events (from the cumulative stream) already folded into this state. */
 	processedCount: number;
 };
+
+/**
+ * Deterministic conversationalist environment for one append: a fixed clock
+ * (all messages in a fold share `state.now`, keeping the pure rebuild and the
+ * incremental path byte-identical) and position-derived message ids
+ * (`msg-<position>`), so ids are stable across rebuilds instead of random.
+ */
+function appendEnvironment(state: ConversationBuilderState): Partial<ConversationEnvironment> {
+	const id = `msg-${state.conversation.ids.length}`;
+	return { now: () => state.now, randomId: () => id };
+}
+
+/**
+ * Appends one message through conversationalist, attaching the durable
+ * transcript sequence as `stardust:sequence` metadata when present. Returns
+ * the new message's id.
+ */
+function appendMessage(
+	state: ConversationBuilderState,
+	input: MessageInput,
+	sequence?: number
+): string {
+	state.conversation = appendUnsafeMessage(
+		state.conversation,
+		{
+			...input,
+			metadata: {
+				...(input.metadata ?? {}),
+				...(sequence !== undefined ? { 'stardust:sequence': sequence } : {})
+			}
+		},
+		appendEnvironment(state)
+	);
+	return state.conversation.ids[state.conversation.ids.length - 1];
+}
+
+/**
+ * Replaces a message's content in place (immutably) — the streamed-delta
+ * update. conversationalist's `updateStreamingMessage` is the matching
+ * primitive but re-validates the whole conversation on every call, which
+ * throws once an approval placeholder (synthetic `callId`, so an orphan
+ * tool-result by design) is present; see stevekinney/agent-bureau#156.
+ */
+function replaceMessageContent(
+	state: ConversationBuilderState,
+	messageId: string,
+	content: string
+): void {
+	const original = state.conversation.messages[messageId];
+	state.conversation = {
+		...state.conversation,
+		messages: { ...state.conversation.messages, [messageId]: { ...original, content } }
+	};
+}
 
 /**
  * Creates a fresh conversation fold, seeded with the leading user message (if
@@ -163,12 +232,10 @@ export function createConversationBuilder(
 	sessionId: string,
 	userMessage: UserMessage | null
 ): ConversationBuilderState {
+	const now = new Date().toISOString();
 	const state: ConversationBuilderState = {
-		sessionId,
-		now: new Date().toISOString(),
-		ids: [],
-		messages: {},
-		position: 0,
+		conversation: createConversationHistory({ id: sessionId }, { now: () => now }),
+		now,
 		assistantTextAccumulator: '',
 		assistantMessageId: null,
 		processedCount: 0
@@ -179,37 +246,10 @@ export function createConversationBuilder(
 			userMessage.attachments && userMessage.attachments.length > 0
 				? buildAttachmentContent(userMessage.text, userMessage.attachments)
 				: userMessage.text;
-		addMessage(state, { role: 'user', content });
+		appendMessage(state, { role: 'user', content });
 	}
 
 	return state;
-}
-
-function addMessage(
-	state: ConversationBuilderState,
-	input: MessageInput,
-	sequence?: number
-): string {
-	const id = `msg-${state.position}`;
-	const content = typeof input.content === 'string' ? input.content : [...input.content];
-	const message: Message = {
-		id,
-		role: input.role,
-		content,
-		position: state.position,
-		createdAt: state.now,
-		metadata: {
-			...(input.metadata ?? {}),
-			...(sequence !== undefined ? { 'stardust:sequence': sequence } : {})
-		},
-		hidden: input.hidden ?? false,
-		...(input.toolCall !== undefined ? { toolCall: input.toolCall } : {}),
-		...(input.toolResult !== undefined ? { toolResult: input.toolResult } : {})
-	};
-	state.ids.push(id);
-	state.messages[id] = message;
-	state.position++;
-	return id;
 }
 
 /**
@@ -257,19 +297,16 @@ export function applyNewStreamEvents(
 					: undefined;
 				const content =
 					attachments && attachments.length > 0 ? buildAttachmentContent(text, attachments) : text;
-				addMessage(state, { role: 'user', content }, event.sequence);
+				appendMessage(state, { role: 'user', content }, event.sequence);
 				break;
 			}
 
 			case 'assistant.delta': {
 				state.assistantTextAccumulator += (payload.text as string) ?? '';
-				if (state.assistantMessageId && state.messages[state.assistantMessageId]) {
-					state.messages[state.assistantMessageId] = {
-						...state.messages[state.assistantMessageId],
-						content: state.assistantTextAccumulator
-					};
+				if (state.assistantMessageId && state.conversation.messages[state.assistantMessageId]) {
+					replaceMessageContent(state, state.assistantMessageId, state.assistantTextAccumulator);
 				} else {
-					state.assistantMessageId = addMessage(
+					state.assistantMessageId = appendMessage(
 						state,
 						{ role: 'assistant', content: state.assistantTextAccumulator },
 						event.sequence
@@ -280,15 +317,11 @@ export function applyNewStreamEvents(
 
 			case 'assistant.message': {
 				const text = (payload.text as string) ?? '';
-				if (state.assistantMessageId && state.messages[state.assistantMessageId]) {
-					state.assistantTextAccumulator = text;
-					state.messages[state.assistantMessageId] = {
-						...state.messages[state.assistantMessageId],
-						content: text
-					};
+				state.assistantTextAccumulator = text;
+				if (state.assistantMessageId && state.conversation.messages[state.assistantMessageId]) {
+					replaceMessageContent(state, state.assistantMessageId, text);
 				} else {
-					state.assistantTextAccumulator = text;
-					state.assistantMessageId = addMessage(
+					state.assistantMessageId = appendMessage(
 						state,
 						{ role: 'assistant', content: text },
 						event.sequence
@@ -309,7 +342,7 @@ export function applyNewStreamEvents(
 					name: payload.name as string,
 					arguments: (payload.input as JSONValue) ?? {}
 				};
-				addMessage(
+				appendMessage(
 					state,
 					{
 						role: 'tool-call',
@@ -328,7 +361,7 @@ export function applyNewStreamEvents(
 					outcome,
 					content: (payload.content as JSONValue) ?? ''
 				};
-				addMessage(
+				appendMessage(
 					state,
 					{
 						role: 'tool-result',
@@ -356,7 +389,7 @@ export function applyNewStreamEvents(
 						message: `Approve tool call: ${toolName}`
 					}
 				};
-				addMessage(
+				appendMessage(
 					state,
 					{
 						role: 'tool-result',
@@ -378,23 +411,32 @@ export function applyNewStreamEvents(
 				// renders a resolved banner instead of a stale waiting notice.
 				const approvalId = (payload.approvalId as string) ?? '';
 				const action = (payload.action as string) ?? 'approve';
-				for (const id of state.ids) {
-					const candidate = state.messages[id];
+				let messages = state.conversation.messages;
+				let changed = false;
+				for (const id of state.conversation.ids) {
+					const candidate = messages[id];
 					if (
 						candidate.metadata['stardust:type'] === 'approval-request' &&
 						candidate.metadata['stardust:approvalId'] === approvalId
 					) {
-						state.messages[id] = {
-							...candidate,
-							metadata: { ...candidate.metadata, 'stardust:resolution': action }
+						messages = {
+							...messages,
+							[id]: {
+								...candidate,
+								metadata: { ...candidate.metadata, 'stardust:resolution': action }
+							}
 						};
+						changed = true;
 					}
+				}
+				if (changed) {
+					state.conversation = { ...state.conversation, messages };
 				}
 				break;
 			}
 
 			case 'subagent.start': {
-				addMessage(
+				appendMessage(
 					state,
 					{
 						role: 'system',
@@ -413,7 +455,7 @@ export function applyNewStreamEvents(
 			}
 
 			case 'subagent.complete': {
-				addMessage(
+				appendMessage(
 					state,
 					{
 						role: 'system',
@@ -431,7 +473,7 @@ export function applyNewStreamEvents(
 
 			case 'lifecycle': {
 				const status = (payload.status as string) ?? '';
-				addMessage(
+				appendMessage(
 					state,
 					{
 						role: 'system',
@@ -448,7 +490,7 @@ export function applyNewStreamEvents(
 			}
 
 			case 'memory.candidate': {
-				addMessage(
+				appendMessage(
 					state,
 					{
 						role: 'system',
@@ -467,19 +509,14 @@ export function applyNewStreamEvents(
 	state.processedCount = events.length;
 }
 
-/** Reads an immutable `ConversationHistory` snapshot off the builder state. */
+/**
+ * Reads an immutable `ConversationHistory` snapshot off the builder state.
+ * The conversation is already the immutable structure conversationalist
+ * maintains — every fold step replaced it wholesale — so this is a direct
+ * read, not a copy.
+ */
 export function snapshotConversation(state: ConversationBuilderState): ConversationHistory {
-	return {
-		schemaVersion: 4,
-		id: state.sessionId,
-		title: undefined,
-		status: 'active',
-		metadata: {},
-		ids: state.ids,
-		messages: state.messages,
-		createdAt: state.now,
-		updatedAt: state.now
-	};
+	return state.conversation;
 }
 
 /**

@@ -1,4 +1,6 @@
+import { execFile as execFileCallback } from 'node:child_process';
 import { mkdtemp, readFile as readFileRaw, rm, stat } from 'node:fs/promises';
+import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -56,6 +58,49 @@ describe('LocalSubprocessSandboxProvider', () => {
 		await expect(
 			secondProvider.readFile({ sessionKey: 'session-a', path: 'notes/example.txt' })
 		).resolves.toBe('persisted');
+	});
+
+	it('shields workspace git setup from an inherited GIT_DIR (git hook environments)', async () => {
+		expect.assertions(4);
+
+		// Git exports GIT_DIR (but not GIT_WORK_TREE) to hook subprocesses. If the
+		// provider's utility git commands inherit it — e.g. the unit suite running
+		// under a lefthook pre-push hook — `git init` / `git config` re-target the
+		// HOST repository: they reinitialize its .git (setting core.bare=true) and
+		// write the sandbox identity into its config, bricking every worktree.
+		const victimRoot = await mkdtemp(join(tmpdir(), 'stardust-victim-'));
+		try {
+			const execFile = promisify(execFileCallback);
+			// The suite itself may be running under a git hook (that is the very
+			// scenario this test guards), so scrub GIT_* from the victim repo's
+			// setup command — otherwise this `git init` reinitializes the host
+			// repository instead of creating the victim.
+			const cleanEnvironment = Object.fromEntries(
+				Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))
+			) as NodeJS.ProcessEnv;
+			await execFile('git', ['init', victimRoot], { env: cleanEnvironment });
+			const victimConfigPath = join(victimRoot, '.git', 'config');
+			const victimConfigBefore = await readFileRaw(victimConfigPath, 'utf8');
+
+			vi.stubEnv('GIT_DIR', join(victimRoot, '.git'));
+			const provider = new LocalSubprocessSandboxProvider({ workspaceRoot: temporaryRoot });
+			const workspacePath = await provider.ensureWorkspace('session-hook');
+
+			// The host repository's config is byte-identical — no reinit, no
+			// sandbox identity, no core.bare flip.
+			await expect(readFileRaw(victimConfigPath, 'utf8')).resolves.toBe(victimConfigBefore);
+			expect(victimConfigBefore).not.toContain('Stardust Sandbox');
+
+			// The workspace got its own repository with the sandbox identity.
+			await expect(stat(join(workspacePath, '.git'))).resolves.toMatchObject({
+				isDirectory: expect.any(Function)
+			});
+			await expect(readFileRaw(join(workspacePath, '.git', 'config'), 'utf8')).resolves.toContain(
+				'Stardust Sandbox'
+			);
+		} finally {
+			await rm(victimRoot, { recursive: true, force: true });
+		}
 	});
 
 	it('confines file operations to the workspace', async () => {

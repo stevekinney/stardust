@@ -500,7 +500,7 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 			let stderr = '';
 			const child = spawn(command, args, {
 				cwd,
-				env: { ...process.env, HOME: this.workspaceRoot },
+				env: utilityCommandEnvironment(this.workspaceRoot),
 				stdio: ['ignore', 'pipe', 'pipe']
 			});
 
@@ -629,6 +629,23 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 				}
 			});
 	}
+}
+
+/**
+ * Environment for workspace utility commands (git init/config/snapshot/restore).
+ * Inherits the parent environment but drops every `GIT_*` variable: when the
+ * parent process runs inside a git hook, git exports `GIT_DIR` (and friends)
+ * pointing at the host repository, and an inherited `GIT_DIR` redirects the
+ * sandbox's git commands at that repository instead of the workspace —
+ * reinitializing and reconfiguring the host repo's `.git/config`.
+ */
+function utilityCommandEnvironment(homePath: string): Record<string, string> {
+	const environment: Record<string, string> = {};
+	for (const [name, value] of Object.entries(process.env)) {
+		if (value !== undefined && !name.startsWith('GIT_')) environment[name] = value;
+	}
+	environment.HOME = homePath;
+	return environment;
 }
 
 async function pathExists(path: string): Promise<boolean> {
