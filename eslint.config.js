@@ -99,6 +99,18 @@ export default defineConfig(
 		}
 	},
 	{
+		// Shared vitest helper (ephemeral test-server boot retry), not workflow
+		// code — it lives under src/workflows/ only so the workflow test files
+		// can import it relatively, and it runs in plain Node like the *.test.ts
+		// files whose override above documents the same false-positive class.
+		files: ['src/workflows/test-environment.ts'],
+		rules: {
+			'temporal/workflow-no-nonserializable-types-in-payloads': 'off',
+			'temporal/test-teardown-required': 'off',
+			'temporal/workflow-prefer-sleep': 'off'
+		}
+	},
+	{
 		// Override or add rule settings here, such as:
 		// 'svelte/button-has-type': 'error'
 		rules: {}
