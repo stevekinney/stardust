@@ -1,4 +1,4 @@
-import { mount, unmount } from 'svelte';
+import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { StreamEvent } from '$lib/stream-to-conversation';
 import ConversationView, { chatAttachmentsToSessionAttachments } from './conversation-view.svelte';
@@ -74,6 +74,35 @@ describe('ConversationView', () => {
 		expect(marker).toBeInstanceOf(HTMLElement);
 
 		unmount(component);
+	});
+
+	it('extends proxied event arrays through the fold cache without proxy-equality warnings', () => {
+		const warnings: string[] = [];
+		const warnSpy = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
+			warnings.push(args.map(String).join(' '));
+		});
+
+		try {
+			// Keep a RAW reference to the initial events: reassigning props.events by
+			// spreading this raw array (as the session page does) puts raw objects in
+			// the new array while the fold cache holds their $state-proxied twins from
+			// the prop read — the exact identity mismatch this test guards against.
+			const initialEvents = [makeEvent(1, 'lifecycle', { status: 'started' })];
+			const props = $state({ ...defaultProps, events: initialEvents });
+			const component = mount(ConversationView, { target: document.body, props });
+			flushSync();
+
+			props.events = [...initialEvents, makeEvent(2, 'lifecycle', { status: 'complete' })];
+			flushSync();
+
+			expect(document.querySelector('[aria-label="Run started"]')).toBeInstanceOf(HTMLElement);
+			expect(document.querySelector('[aria-label="Run complete"]')).toBeInstanceOf(HTMLElement);
+			expect(warnings.filter((w) => w.includes('state_proxy_equality_mismatch'))).toEqual([]);
+
+			unmount(component);
+		} finally {
+			warnSpy.mockRestore();
+		}
 	});
 
 	it('renders lifecycle complete marker', () => {

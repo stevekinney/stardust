@@ -126,10 +126,15 @@
 	let cachedSessionId: string | null = null;
 	let cachedUserMessage: UserMessage | null = null;
 
+	// Compares event ids, not object identity: `events` arrives $state-proxied
+	// while the cache holds earlier snapshots, so `!==` across that boundary is
+	// unreliable (and triggers Svelte's state_proxy_equality_mismatch warning).
+	// Event rows are immutable once emitted, so a matching id at every prior
+	// position means `next` is `previous` plus appended events.
 	function isPrefixExtension(previous: StreamEvent[], next: StreamEvent[]): boolean {
 		if (next.length < previous.length) return false;
 		for (let i = 0; i < previous.length; i++) {
-			if (previous[i] !== next[i]) return false;
+			if (previous[i].id !== next[i].id) return false;
 		}
 		return true;
 	}
