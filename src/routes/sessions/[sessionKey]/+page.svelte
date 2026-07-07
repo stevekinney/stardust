@@ -13,7 +13,12 @@
 	import SessionPhoneSurfaces from '$lib/components/session-phone-surfaces.svelte';
 	import { sessionBadgeVariant } from '$lib/components/session-row.svelte';
 	import { formatStatus } from '$lib/session-display';
-	import type { StreamEvent } from '$lib/stream-to-conversation';
+	import {
+		findLastUserMessageText,
+		mapTranscriptToStreamEvents,
+		type StreamEvent,
+		type TranscriptEventRow
+	} from '$lib/stream-to-conversation';
 	import type { RunInspectorProjection } from '$lib/server/observability/projection';
 	import type { PendingApprovalEntry } from '$lib/types';
 	import type { PageData } from './$types';
@@ -99,60 +104,13 @@
 			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/transcript`);
 			if (!response.ok) return;
 
-			const body = (await response.json()) as {
-				events: Array<{ id: string; kind: string; payload: string; sequence: number }>;
-			};
+			const body = (await response.json()) as { events: TranscriptEventRow[] };
 
-			const userMsgEvents = body.events.filter((e) => e.kind === 'user_message');
-			if (userMsgEvents.length > 0) {
-				const lastUserMsg = userMsgEvents[userMsgEvents.length - 1];
-				try {
-					const parsed = JSON.parse(lastUserMsg.payload) as { text?: string };
-					currentUserMessage = parsed.text ?? null;
-				} catch {
-					// ignore malformed payload
-				}
-			}
-
-			const KIND_MAP: Record<string, string> = {
-				user_message: 'user.message',
-				assistant_message: 'assistant.message',
-				tool_result: 'tool.result',
-				approval_request: 'approval.request',
-				approval_resolution: 'approval.resolution',
-				lifecycle: 'lifecycle'
-			};
+			currentUserMessage = findLastUserMessageText(body.events);
 
 			// User messages stay in the event stream (mapped to `user.message`) so the
 			// transcript renders every turn in order, not just the latest one.
-			let seq = 0;
-			canonicalEvents = body.events.flatMap((e) => {
-				if (e.kind === 'tool_call') {
-					try {
-						const parsed = JSON.parse(e.payload) as {
-							calls?: Array<{ id: string; name: string; input: unknown }>;
-						};
-						// Fanned-out calls share the parent event's durable sequence so
-						// replay dimming stays consistent per batch.
-						return (parsed.calls ?? []).map((call) => ({
-							id: seq++,
-							kind: 'tool.call',
-							payload: JSON.stringify({ id: call.id, name: call.name, input: call.input }),
-							sequence: e.sequence
-						}));
-					} catch {
-						return [];
-					}
-				}
-				return [
-					{
-						id: seq++,
-						kind: KIND_MAP[e.kind] ?? e.kind,
-						payload: e.payload,
-						sequence: e.sequence
-					}
-				];
-			});
+			canonicalEvents = mapTranscriptToStreamEvents(body.events);
 			if (!running && liveEvents.length === 0) {
 				transcriptMode = 'canonical';
 			}

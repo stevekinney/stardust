@@ -32,6 +32,74 @@ export type UserMessage = {
 	text: string;
 };
 
+/** A raw row as returned by `GET /api/sessions/{sessionKey}/transcript`. */
+export type TranscriptEventRow = {
+	id: string;
+	kind: string;
+	payload: string;
+	sequence: number;
+};
+
+/** Maps durable transcript event kinds to the live-stream `StreamEvent['kind']` vocabulary. */
+const TRANSCRIPT_KIND_MAP: Record<string, string> = {
+	user_message: 'user.message',
+	assistant_message: 'assistant.message',
+	tool_result: 'tool.result',
+	approval_request: 'approval.request',
+	approval_resolution: 'approval.resolution',
+	lifecycle: 'lifecycle'
+};
+
+/**
+ * Rebuilds `StreamEvent[]` from the canonical transcript returned by the
+ * transcript endpoint. This is the single mapping used both on initial mount
+ * (rehydration after a refresh) and whenever the transcript is refetched —
+ * `tool_call` rows are fanned out into one `tool.call` StreamEvent per call,
+ * sharing the parent row's durable sequence so replay dimming stays
+ * consistent per batch. All other kinds pass through `TRANSCRIPT_KIND_MAP`.
+ */
+export function mapTranscriptToStreamEvents(rows: TranscriptEventRow[]): StreamEvent[] {
+	let sequenceCounter = 0;
+	return rows.flatMap((row): StreamEvent[] => {
+		if (row.kind === 'tool_call') {
+			try {
+				const parsed = JSON.parse(row.payload) as {
+					calls?: Array<{ id: string; name: string; input: unknown }>;
+				};
+				return (parsed.calls ?? []).map((call) => ({
+					id: sequenceCounter++,
+					kind: 'tool.call',
+					payload: JSON.stringify({ id: call.id, name: call.name, input: call.input }),
+					sequence: row.sequence
+				}));
+			} catch {
+				return [];
+			}
+		}
+		return [
+			{
+				id: sequenceCounter++,
+				kind: TRANSCRIPT_KIND_MAP[row.kind] ?? row.kind,
+				payload: row.payload,
+				sequence: row.sequence
+			}
+		];
+	});
+}
+
+/** Finds the text of the most recent `user_message` transcript row, if any. */
+export function findLastUserMessageText(rows: TranscriptEventRow[]): string | null {
+	const userMessageRows = rows.filter((row) => row.kind === 'user_message');
+	if (userMessageRows.length === 0) return null;
+	const last = userMessageRows[userMessageRows.length - 1];
+	try {
+		const parsed = JSON.parse(last.payload) as { text?: string };
+		return parsed.text ?? null;
+	} catch {
+		return null;
+	}
+}
+
 /**
  * Builds a ConversationHistory from a user message and a stream of events.
  *
