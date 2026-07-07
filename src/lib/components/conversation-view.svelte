@@ -40,6 +40,13 @@
 		onRetry?: (() => void) | null;
 		onSteer?: (message: string) => void;
 		onInterrupt?: () => void;
+		/**
+		 * Called when the user edits a past user message and saves it. The durable
+		 * transcript is append-only — there is no rewind primitive — so an edit is
+		 * submitted as a brand-new turn with the corrected text rather than
+		 * rewriting history. When omitted, editing is disabled entirely.
+		 */
+		onEdit?: (content: string) => void;
 		/** Replay cursor — rows with a durable sequence above this dim out. Null means live. */
 		dimAfterSequence?: number | null;
 		/** The session's pending approval, rendered as an inline ApprovalCard. */
@@ -62,6 +69,7 @@
 		onRetry = null,
 		onSteer,
 		onInterrupt,
+		onEdit,
 		dimAfterSequence = null,
 		pendingApproval = null,
 		approvalResolution = null,
@@ -88,6 +96,10 @@
 
 	function handleStopGenerating() {
 		onInterrupt?.();
+	}
+
+	function handleEdit(event: { messageId: string; content: string }) {
+		onEdit?.(event.content);
 	}
 
 	/**
@@ -245,11 +257,12 @@
 			attachments: false,
 			search: false,
 			copy: true,
-			editing: false,
+			editing: !!onEdit,
 			retry: !!onRetry
 		}}
 		onsubmit={handleSubmit}
 		onretry={handleRetry}
+		onedit={handleEdit}
 		onstopgenerating={handleStopGenerating}
 		row={stardustRow}
 	/>

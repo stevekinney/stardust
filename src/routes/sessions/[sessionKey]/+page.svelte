@@ -564,6 +564,7 @@
 						onRetry={currentUserMessage ? () => handleSubmit(currentUserMessage!) : null}
 						onSteer={handleSteer}
 						onInterrupt={handleInterrupt}
+						onEdit={handleSubmit}
 						dimAfterSequence={transcriptMode === 'canonical' ? scrubCursor : null}
 						{pendingApproval}
 						{approvalResolution}

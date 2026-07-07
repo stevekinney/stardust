@@ -304,6 +304,60 @@ describe('ConversationView', () => {
 		unmount(component);
 	});
 
+	it('does not render an edit affordance on user messages when onEdit is not provided', () => {
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: { ...defaultProps, events: [], userMessage: { text: 'Fix the login bug' } }
+		});
+
+		expect(document.querySelector('.chat-message-edit-button')).toBeNull();
+
+		unmount(component);
+	});
+
+	it('renders an edit affordance on user messages when onEdit is provided, and submits the edited text as a new turn', async () => {
+		const onEdit = vi.fn();
+		const onSubmit = vi.fn();
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: {
+				...defaultProps,
+				onSubmit,
+				events: [],
+				userMessage: { text: 'Fix the login bug' },
+				onEdit
+			}
+		});
+
+		const editButton = document.querySelector('.chat-message-edit-button') as HTMLButtonElement;
+		expect(editButton).toBeInstanceOf(HTMLElement);
+		editButton.click();
+		await Promise.resolve();
+
+		const textarea = document.querySelector(
+			'.chat-message-edit-textarea'
+		) as HTMLTextAreaElement | null;
+		expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
+		textarea!.value = 'Fix the login bug — also check the session cookie';
+		textarea!.dispatchEvent(new Event('input', { bubbles: true }));
+
+		const saveButton = Array.from(document.querySelectorAll('button')).find(
+			(button) => button.textContent?.trim() === 'Save & Resend'
+		);
+		expect(saveButton).toBeDefined();
+		saveButton!.click();
+		await Promise.resolve();
+
+		expect(onEdit).toHaveBeenCalledWith('Fix the login bug — also check the session cookie');
+		// The original message is durable/append-only — editing does not call onSubmit,
+		// it's the session page's job to resubmit onEdit's content as a new turn.
+		expect(onSubmit).not.toHaveBeenCalled();
+		// Cinder's own edit-mode state closes after save — no dangling textarea.
+		expect(document.querySelector('.chat-message-edit-textarea')).toBeNull();
+
+		unmount(component);
+	});
+
 	it('dims rows whose durable sequence is past the replay cursor', () => {
 		const events: StreamEvent[] = [
 			{ ...makeEvent(1, 'lifecycle', { status: 'started' }), sequence: 2 },
