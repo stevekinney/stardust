@@ -20,6 +20,24 @@ export type SubmitTurnResult = {
 	runId: string;
 };
 
+/** Discriminant mirroring Cinder's `AttachmentKind` — how a composer attachment is rendered/handled. */
+export type SessionAttachmentKind = 'image' | 'code' | 'document';
+
+/**
+ * A file attached to a turn submission. Sent to `POST /api/sessions/[sessionKey]/turn`
+ * and written into the session's sandbox workspace so the agent can read it via
+ * `workspace.readFile`. Image attachments also render inline in the transcript
+ * for the current turn (see `stream-to-conversation.ts`); code/document
+ * attachments render as a filename reference only — no client-side preview.
+ */
+export type SessionAttachmentInput = {
+	name: string;
+	mimeType: string;
+	kind: SessionAttachmentKind;
+	/** Base64-encoded file contents. */
+	content: string;
+};
+
 /** A session as returned by GET /api/sessions. */
 export type SessionRow = {
 	id: string;

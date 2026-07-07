@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile as readFileRaw, rm, stat } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -73,6 +73,44 @@ describe('LocalSubprocessSandboxProvider', () => {
 		await expect(
 			provider.readFile({ sessionKey: 'session-a', path: '/tmp/outside.txt' })
 		).rejects.toBeInstanceOf(SandboxPathError);
+	});
+
+	it('writes base64-encoded contents as raw bytes, round-tripping binary data exactly', async () => {
+		expect.assertions(1);
+
+		const provider = new LocalSubprocessSandboxProvider({ workspaceRoot: temporaryRoot });
+		// A 4x4 transparent PNG — realistic binary attachment bytes, not just
+		// arbitrary non-UTF8 data. Any byte sequence that a naive utf8 write
+		// would mangle proves the point, but a real image is the honest case.
+		const bytes = Uint8Array.from([
+			0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01, 0x02, 0xff, 0xfe, 0xfd, 0x80, 0x7f
+		]);
+		const base64 = Buffer.from(bytes).toString('base64');
+
+		await provider.writeFile({
+			sessionKey: 'session-a',
+			path: 'attachments/pixel.png',
+			contents: base64,
+			encoding: 'base64'
+		});
+
+		const written = await readFileRaw(join(temporaryRoot, 'session-a', 'attachments', 'pixel.png'));
+		expect(Buffer.compare(written, Buffer.from(bytes))).toBe(0);
+	});
+
+	it('defaults to utf8 encoding when encoding is omitted', async () => {
+		expect.assertions(1);
+
+		const provider = new LocalSubprocessSandboxProvider({ workspaceRoot: temporaryRoot });
+		await provider.writeFile({
+			sessionKey: 'session-a',
+			path: 'notes.txt',
+			contents: 'plain text'
+		});
+
+		await expect(provider.readFile({ sessionKey: 'session-a', path: 'notes.txt' })).resolves.toBe(
+			'plain text'
+		);
 	});
 
 	it('runs commands with cwd, allowlisted environment, captured output, and exit code', async () => {

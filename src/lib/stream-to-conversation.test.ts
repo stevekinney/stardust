@@ -23,6 +23,61 @@ describe('buildConversation', () => {
 		expect(msg.content).toBe('Hello!');
 	});
 
+	it('renders an image attachment as an inline image content part', () => {
+		const result = buildConversation(
+			's1',
+			{
+				text: 'Check this out',
+				attachments: [
+					{ name: 'screenshot.png', mimeType: 'image/png', kind: 'image', content: 'QUJD' }
+				]
+			},
+			[]
+		);
+		const msg = result.messages[result.ids[0]];
+		expect(Array.isArray(msg.content)).toBe(true);
+		const parts = msg.content as unknown as { type: string }[];
+		expect(parts[0]).toMatchObject({ type: 'text', text: 'Check this out' });
+		expect(parts[1]).toMatchObject({
+			type: 'image',
+			url: 'data:image/png;base64,QUJD',
+			mimeType: 'image/png',
+			text: 'screenshot.png'
+		});
+	});
+
+	it('renders a non-image attachment as a text reference', () => {
+		const result = buildConversation(
+			's1',
+			{
+				text: 'See attached',
+				attachments: [
+					{ name: 'notes.txt', mimeType: 'text/plain', kind: 'document', content: 'aGVsbG8=' }
+				]
+			},
+			[]
+		);
+		const msg = result.messages[result.ids[0]];
+		const parts = msg.content as unknown as { type: string; text?: string }[];
+		expect(parts).toHaveLength(2);
+		expect(parts[1]).toMatchObject({ type: 'text', text: '📎 Attached: notes.txt' });
+	});
+
+	it('renders attachments from a live user.message stream event', () => {
+		const events: StreamEvent[] = [
+			makeEvent(1, 'user.message', {
+				text: 'Fix this bug',
+				attachments: [{ name: 'error.png', mimeType: 'image/png', kind: 'image', content: 'WFla' }]
+			})
+		];
+		const result = buildConversation('s1', null, events);
+		const msg = result.messages[result.ids[0]];
+		const parts = msg.content as unknown as { type: string; url?: string }[];
+		expect(
+			parts.some((part) => part.type === 'image' && part.url === 'data:image/png;base64,WFla')
+		).toBe(true);
+	});
+
 	it('accumulates assistant.delta events into a single assistant message', () => {
 		const events: StreamEvent[] = [
 			makeEvent(1, 'assistant.delta', { text: 'Hello' }),

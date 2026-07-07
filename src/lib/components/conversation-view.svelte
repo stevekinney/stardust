@@ -1,5 +1,14 @@
 <script lang="ts" module>
 	import type { ApprovalOperation } from '@lostgradient/cinder/approval-card';
+	import type { ChatSubmitEvent } from '@lostgradient/cinder/chat';
+	import type { SessionAttachmentInput } from '$lib/types';
+
+	// Cinder's `@lostgradient/cinder/chat` public entry does not re-export the
+	// `ChatAttachment` type itself (only `AttachmentKind` and the
+	// `ChatAttachmentPreview` component), even though `ChatSubmitEvent.attachments`
+	// is typed as `ChatAttachment[]`. Derive the element type from the exported
+	// event type instead of reaching into Cinder's internal module path.
+	type ChatAttachment = ChatSubmitEvent['attachments'][number];
 
 	/** Build a Cinder ApprovalOperation from a pending approval's tool call. */
 	export function toApprovalOperation(toolCall: {
@@ -18,11 +27,37 @@
 		}
 		return { kind: 'other', argsPreview: args };
 	}
+
+	/** Base64-encode a File's raw bytes without blowing the call stack on large files. */
+	async function fileToBase64(file: File): Promise<string> {
+		const buffer = await file.arrayBuffer();
+		const bytes = new Uint8Array(buffer);
+		let binary = '';
+		const CHUNK_SIZE = 0x8000;
+		for (let offset = 0; offset < bytes.length; offset += CHUNK_SIZE) {
+			binary += String.fromCharCode(...bytes.subarray(offset, offset + CHUNK_SIZE));
+		}
+		return btoa(binary);
+	}
+
+	/** Convert Cinder's composer attachments into Stardust's turn-submission payload. */
+	export async function chatAttachmentsToSessionAttachments(
+		attachments: ChatAttachment[]
+	): Promise<SessionAttachmentInput[]> {
+		return Promise.all(
+			attachments.map(async (attachment) => ({
+				name: attachment.file.name,
+				mimeType: attachment.file.type || 'application/octet-stream',
+				kind: attachment.kind,
+				content: await fileToBase64(attachment.file)
+			}))
+		);
+	}
 </script>
 
 <script lang="ts">
 	import Chat from '@lostgradient/cinder/chat';
-	import type { ChatSubmitEvent, Message } from '@lostgradient/cinder/chat';
+	import type { Message } from '@lostgradient/cinder/chat';
 	import ApprovalCard from '@lostgradient/cinder/approval-card';
 	import {
 		buildConversation,
@@ -36,7 +71,7 @@
 		userMessage?: UserMessage | null;
 		events?: StreamEvent[];
 		running?: boolean;
-		onSubmit: (message: string) => void;
+		onSubmit: (message: string, attachments?: SessionAttachmentInput[]) => void;
 		onRetry?: (() => void) | null;
 		onSteer?: (message: string) => void;
 		onInterrupt?: () => void;
@@ -78,16 +113,24 @@
 
 	const conversation = $derived(buildConversation(sessionId, userMessage, events));
 
-	function handleSubmit(event: ChatSubmitEvent) {
+	async function handleSubmit(event: ChatSubmitEvent) {
 		const content = event.message.content;
 		const text = typeof content === 'string' ? content : '';
-		if (text.trim()) {
-			if (running && onSteer) {
-				onSteer(text.trim());
-			} else {
-				onSubmit(text.trim());
-			}
+		const trimmed = text.trim();
+		if (!trimmed && event.attachments.length === 0) return;
+
+		if (running && onSteer) {
+			// Steering an in-flight run has no attachment path — the sandbox tool
+			// call that would consume a file is already mid-run.
+			if (trimmed) onSteer(trimmed);
+			return;
 		}
+
+		const attachments =
+			event.attachments.length > 0
+				? await chatAttachmentsToSessionAttachments(event.attachments)
+				: undefined;
+		onSubmit(trimmed, attachments);
 	}
 
 	function handleRetry() {
@@ -254,7 +297,7 @@
 		density="comfortable"
 		surfaceMode="transparent"
 		capabilities={{
-			attachments: false,
+			attachments: true,
 			search: false,
 			copy: true,
 			editing: !!onEdit,

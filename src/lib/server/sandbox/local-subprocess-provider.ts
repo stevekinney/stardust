@@ -117,7 +117,11 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 		const workspacePath = await this.ensureWorkspace(input.sessionKey);
 		const filePath = resolveWorkspacePath(workspacePath, input.path);
 		await mkdir(dirname(filePath), { recursive: true });
-		await writeFile(filePath, input.contents, 'utf8');
+		if (input.encoding === 'base64') {
+			await writeFile(filePath, Buffer.from(input.contents, 'base64'));
+		} else {
+			await writeFile(filePath, input.contents, 'utf8');
+		}
 	}
 
 	async runCommand(

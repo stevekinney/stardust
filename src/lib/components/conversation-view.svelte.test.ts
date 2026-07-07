@@ -1,7 +1,7 @@
 import { mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { StreamEvent } from '$lib/stream-to-conversation';
-import ConversationView from './conversation-view.svelte';
+import ConversationView, { chatAttachmentsToSessionAttachments } from './conversation-view.svelte';
 
 function makeEvent(id: number, kind: string, payload: Record<string, unknown>): StreamEvent {
 	return { id, kind, payload: JSON.stringify(payload) };
@@ -356,6 +356,68 @@ describe('ConversationView', () => {
 		expect(document.querySelector('.chat-message-edit-textarea')).toBeNull();
 
 		unmount(component);
+	});
+
+	it('renders the attachment picker (attachments capability is enabled)', () => {
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: { ...defaultProps, events: [] }
+		});
+
+		expect(document.querySelector('input[type="file"]')).toBeInstanceOf(HTMLInputElement);
+
+		unmount(component);
+	});
+
+	it('renders an inline image preview for the current turn when userMessage carries an image attachment', () => {
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: {
+				...defaultProps,
+				events: [],
+				userMessage: {
+					text: 'Check this screenshot',
+					attachments: [
+						{ name: 'bug.png', mimeType: 'image/png', kind: 'image' as const, content: 'QUJD' }
+					]
+				}
+			}
+		});
+
+		const image = document.querySelector('img[src^="data:image/png;base64,QUJD"]');
+		expect(image).toBeInstanceOf(HTMLImageElement);
+
+		unmount(component);
+	});
+
+	describe('chatAttachmentsToSessionAttachments', () => {
+		it('base64-encodes each attachment file and preserves name/mimeType/kind', async () => {
+			const file = new File(['hello world'], 'notes.txt', { type: 'text/plain' });
+			const result = await chatAttachmentsToSessionAttachments([
+				{
+					id: 'att-1',
+					file,
+					previewUrl: 'blob:fake',
+					kind: 'document',
+					status: 'ready'
+				}
+			]);
+
+			expect(result).toHaveLength(1);
+			expect(result[0].name).toBe('notes.txt');
+			expect(result[0].mimeType).toBe('text/plain');
+			expect(result[0].kind).toBe('document');
+			expect(atob(result[0].content)).toBe('hello world');
+		});
+
+		it('falls back to application/octet-stream when the file has no MIME type', async () => {
+			const file = new File(['data'], 'blob', { type: '' });
+			const result = await chatAttachmentsToSessionAttachments([
+				{ id: 'att-2', file, previewUrl: 'blob:fake', kind: 'document', status: 'ready' }
+			]);
+
+			expect(result[0].mimeType).toBe('application/octet-stream');
+		});
 	});
 
 	it('dims rows whose durable sequence is past the replay cursor', () => {

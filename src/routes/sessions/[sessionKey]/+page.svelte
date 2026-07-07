@@ -15,7 +15,7 @@
 	import { formatStatus } from '$lib/session-display';
 	import type { StreamEvent } from '$lib/stream-to-conversation';
 	import type { RunInspectorProjection } from '$lib/server/observability/projection';
-	import type { PendingApprovalEntry } from '$lib/types';
+	import type { PendingApprovalEntry, SessionAttachmentInput } from '$lib/types';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -161,7 +161,7 @@
 		}
 	}
 
-	async function handleSubmit(message: string) {
+	async function handleSubmit(message: string, attachments?: SessionAttachmentInput[]) {
 		if (running) return;
 
 		running = true;
@@ -172,12 +172,15 @@
 		// Seed the live view with the conversation so far, then append this turn's
 		// user message. The live stream only carries the current run's events, so
 		// without this seed the prior turns would vanish while the new one streams.
+		// Attachments ride along on this synthetic event only — the durable
+		// transcript's user_message payload is text-only, so this preview does
+		// not survive a reload (see stream-to-conversation.ts's UserMessage doc).
 		liveEvents = [
 			...canonicalEvents,
 			{
 				id: canonicalEvents.length,
 				kind: 'user.message',
-				payload: JSON.stringify({ text: message })
+				payload: JSON.stringify({ text: message, attachments })
 			}
 		];
 		scrubCursor = null;
@@ -203,7 +206,7 @@
 			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/turn`, {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ message, model, maxBudgetUsd })
+				body: JSON.stringify({ message, model, maxBudgetUsd, attachments })
 			});
 
 			if (!response.ok) {
