@@ -57,7 +57,7 @@
 		const response = await fetch('/api/sessions', { method: 'POST' });
 		if (!response.ok) return;
 		const body = (await response.json()) as { sessionKey: string };
-		void goto(resolve(`/sessions/${encodeURIComponent(body.sessionKey)}`));
+		void goto(resolve(`/sessions/${encodeURIComponent(body.sessionKey)}?fresh=1`));
 	}
 
 	async function triggerSchedule(schedule: ScheduleProjection) {

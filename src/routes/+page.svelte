@@ -122,7 +122,7 @@
 
 	async function handleNewSession() {
 		const sessionKey = await mintSessionKey();
-		void goto(resolve(`/sessions/${encodeURIComponent(sessionKey)}`));
+		void goto(resolve(`/sessions/${encodeURIComponent(sessionKey)}?fresh=1`));
 	}
 
 	function handleSubmit() {

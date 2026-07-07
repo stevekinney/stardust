@@ -33,57 +33,98 @@ export type UserMessage = {
 };
 
 /**
- * Builds a ConversationHistory from a user message and a stream of events.
- *
- * Tool calls and results are modeled as separate messages with `toolCall` /
- * `toolResult` fields — Cinder's Chat component pairs them automatically via
- * the shared `id`/`callId`.
- *
- * Stardust-specific event types (subagents, approvals, memory candidates,
- * lifecycle markers) are modeled as system messages with metadata so a `row`
- * override can render them.
+ * Mutable fold state behind the incremental conversation builder. Treat this
+ * as an opaque handle: construct it with `createConversationBuilder`, feed it
+ * new events with `applyNewStreamEvents`, and read a snapshot with
+ * `snapshotConversation`.
  */
-export function buildConversation(
-	sessionId: string,
-	userMessage: UserMessage | null,
-	events: StreamEvent[]
-): ConversationHistory {
-	const now = new Date().toISOString();
-	const ids: string[] = [];
-	const messages: Record<string, Message> = {};
-	let position = 0;
+export type ConversationBuilderState = {
+	sessionId: string;
+	now: string;
+	ids: string[];
+	messages: Record<string, Message>;
+	position: number;
+	assistantTextAccumulator: string;
+	assistantMessageId: string | null;
+	/** Count of events (from the cumulative stream) already folded into this state. */
+	processedCount: number;
+};
 
-	function addMessage(input: MessageInput, sequence?: number): string {
-		const id = `msg-${position}`;
-		const content = typeof input.content === 'string' ? input.content : [...input.content];
-		const message: Message = {
-			id,
-			role: input.role,
-			content,
-			position,
-			createdAt: now,
-			metadata: {
-				...(input.metadata ?? {}),
-				...(sequence !== undefined ? { 'stardust:sequence': sequence } : {})
-			},
-			hidden: input.hidden ?? false,
-			...(input.toolCall !== undefined ? { toolCall: input.toolCall } : {}),
-			...(input.toolResult !== undefined ? { toolResult: input.toolResult } : {})
-		};
-		ids.push(id);
-		messages[id] = message;
-		position++;
-		return id;
-	}
+/**
+ * Creates a fresh conversation fold, seeded with the leading user message (if
+ * any). Pass the returned state to `applyNewStreamEvents` as events arrive.
+ */
+export function createConversationBuilder(
+	sessionId: string,
+	userMessage: UserMessage | null
+): ConversationBuilderState {
+	const state: ConversationBuilderState = {
+		sessionId,
+		now: new Date().toISOString(),
+		ids: [],
+		messages: {},
+		position: 0,
+		assistantTextAccumulator: '',
+		assistantMessageId: null,
+		processedCount: 0
+	};
 
 	if (userMessage) {
-		addMessage({ role: 'user', content: userMessage.text });
+		addMessage(state, { role: 'user', content: userMessage.text });
 	}
 
-	let assistantTextAccumulator = '';
-	let assistantMessageId: string | null = null;
+	return state;
+}
 
-	for (const event of events) {
+function addMessage(
+	state: ConversationBuilderState,
+	input: MessageInput,
+	sequence?: number
+): string {
+	const id = `msg-${state.position}`;
+	const content = typeof input.content === 'string' ? input.content : [...input.content];
+	const message: Message = {
+		id,
+		role: input.role,
+		content,
+		position: state.position,
+		createdAt: state.now,
+		metadata: {
+			...(input.metadata ?? {}),
+			...(sequence !== undefined ? { 'stardust:sequence': sequence } : {})
+		},
+		hidden: input.hidden ?? false,
+		...(input.toolCall !== undefined ? { toolCall: input.toolCall } : {}),
+		...(input.toolResult !== undefined ? { toolResult: input.toolResult } : {})
+	};
+	state.ids.push(id);
+	state.messages[id] = message;
+	state.position++;
+	return id;
+}
+
+/**
+ * Folds only the events past `state.processedCount` into the builder state.
+ *
+ * `events` is always the *cumulative* stream — Stardust appends to it rather
+ * than emitting deltas-of-deltas — so this is safe to call repeatedly with
+ * the growing array. Each call does O(new events) work instead of re-folding
+ * the whole history, which is what makes it safe to invoke on every streamed
+ * token without O(n²) blowup over the life of a run.
+ *
+ * `onEventProcessed`, if given, fires once per event actually folded — tests
+ * use it to prove the incremental path only touches new events instead of
+ * re-walking history.
+ */
+export function applyNewStreamEvents(
+	state: ConversationBuilderState,
+	events: StreamEvent[],
+	onEventProcessed?: (event: StreamEvent) => void
+): void {
+	for (let i = state.processedCount; i < events.length; i++) {
+		const event = events[i];
+		onEventProcessed?.(event);
+
 		let payload: Record<string, unknown>;
 		try {
 			payload = JSON.parse(event.payload) as Record<string, unknown>;
@@ -96,22 +137,27 @@ export function buildConversation(
 				// A user message opens a new turn. Reset the assistant accumulator so this
 				// turn's reply becomes its own message instead of overwriting the previous
 				// turn's — this is what makes the transcript render as a multi-turn chat.
-				assistantMessageId = null;
-				assistantTextAccumulator = '';
-				addMessage({ role: 'user', content: (payload.text as string) ?? '' }, event.sequence);
+				state.assistantMessageId = null;
+				state.assistantTextAccumulator = '';
+				addMessage(
+					state,
+					{ role: 'user', content: (payload.text as string) ?? '' },
+					event.sequence
+				);
 				break;
 			}
 
 			case 'assistant.delta': {
-				assistantTextAccumulator += (payload.text as string) ?? '';
-				if (assistantMessageId && messages[assistantMessageId]) {
-					messages[assistantMessageId] = {
-						...messages[assistantMessageId],
-						content: assistantTextAccumulator
+				state.assistantTextAccumulator += (payload.text as string) ?? '';
+				if (state.assistantMessageId && state.messages[state.assistantMessageId]) {
+					state.messages[state.assistantMessageId] = {
+						...state.messages[state.assistantMessageId],
+						content: state.assistantTextAccumulator
 					};
 				} else {
-					assistantMessageId = addMessage(
-						{ role: 'assistant', content: assistantTextAccumulator },
+					state.assistantMessageId = addMessage(
+						state,
+						{ role: 'assistant', content: state.assistantTextAccumulator },
 						event.sequence
 					);
 				}
@@ -120,15 +166,19 @@ export function buildConversation(
 
 			case 'assistant.message': {
 				const text = (payload.text as string) ?? '';
-				if (assistantMessageId && messages[assistantMessageId]) {
-					assistantTextAccumulator = text;
-					messages[assistantMessageId] = {
-						...messages[assistantMessageId],
+				if (state.assistantMessageId && state.messages[state.assistantMessageId]) {
+					state.assistantTextAccumulator = text;
+					state.messages[state.assistantMessageId] = {
+						...state.messages[state.assistantMessageId],
 						content: text
 					};
 				} else {
-					assistantTextAccumulator = text;
-					assistantMessageId = addMessage({ role: 'assistant', content: text }, event.sequence);
+					state.assistantTextAccumulator = text;
+					state.assistantMessageId = addMessage(
+						state,
+						{ role: 'assistant', content: text },
+						event.sequence
+					);
 				}
 				break;
 			}
@@ -138,14 +188,15 @@ export function buildConversation(
 				// follows the tool result is a distinct message that must render *below*
 				// the tool call/result rows, not fold back into the pre-tool bubble
 				// above them. Reset the accumulator so the post-tool reply starts fresh.
-				assistantMessageId = null;
-				assistantTextAccumulator = '';
+				state.assistantMessageId = null;
+				state.assistantTextAccumulator = '';
 				const toolCall: ToolCall = {
 					id: payload.id as string,
 					name: payload.name as string,
 					arguments: (payload.input as JSONValue) ?? {}
 				};
 				addMessage(
+					state,
 					{
 						role: 'tool-call',
 						content: `Tool call: ${toolCall.name}`,
@@ -164,6 +215,7 @@ export function buildConversation(
 					content: (payload.content as JSONValue) ?? ''
 				};
 				addMessage(
+					state,
 					{
 						role: 'tool-result',
 						content: `Tool result: ${outcome}`,
@@ -191,6 +243,7 @@ export function buildConversation(
 					}
 				};
 				addMessage(
+					state,
 					{
 						role: 'tool-result',
 						content: `Approval required: ${toolName}`,
@@ -211,13 +264,13 @@ export function buildConversation(
 				// renders a resolved banner instead of a stale waiting notice.
 				const approvalId = (payload.approvalId as string) ?? '';
 				const action = (payload.action as string) ?? 'approve';
-				for (const id of ids) {
-					const candidate = messages[id];
+				for (const id of state.ids) {
+					const candidate = state.messages[id];
 					if (
 						candidate.metadata['stardust:type'] === 'approval-request' &&
 						candidate.metadata['stardust:approvalId'] === approvalId
 					) {
-						messages[id] = {
+						state.messages[id] = {
 							...candidate,
 							metadata: { ...candidate.metadata, 'stardust:resolution': action }
 						};
@@ -228,6 +281,7 @@ export function buildConversation(
 
 			case 'subagent.start': {
 				addMessage(
+					state,
 					{
 						role: 'system',
 						content: `Subagent started: ${(payload.label as string) ?? ''}`,
@@ -246,6 +300,7 @@ export function buildConversation(
 
 			case 'subagent.complete': {
 				addMessage(
+					state,
 					{
 						role: 'system',
 						content: `Subagent complete: ${(payload.subagentRunId as string) ?? ''}`,
@@ -263,6 +318,7 @@ export function buildConversation(
 			case 'lifecycle': {
 				const status = (payload.status as string) ?? '';
 				addMessage(
+					state,
 					{
 						role: 'system',
 						content: `Run ${status}`,
@@ -279,6 +335,7 @@ export function buildConversation(
 
 			case 'memory.candidate': {
 				addMessage(
+					state,
 					{
 						role: 'system',
 						content: (payload.content as string) ?? '',
@@ -293,15 +350,46 @@ export function buildConversation(
 		}
 	}
 
+	state.processedCount = events.length;
+}
+
+/** Reads an immutable `ConversationHistory` snapshot off the builder state. */
+export function snapshotConversation(state: ConversationBuilderState): ConversationHistory {
 	return {
 		schemaVersion: 4,
-		id: sessionId,
+		id: state.sessionId,
 		title: undefined,
 		status: 'active',
 		metadata: {},
-		ids,
-		messages,
-		createdAt: now,
-		updatedAt: now
+		ids: state.ids,
+		messages: state.messages,
+		createdAt: state.now,
+		updatedAt: state.now
 	};
+}
+
+/**
+ * Builds a ConversationHistory from a user message and a stream of events.
+ *
+ * Tool calls and results are modeled as separate messages with `toolCall` /
+ * `toolResult` fields — Cinder's Chat component pairs them automatically via
+ * the shared `id`/`callId`.
+ *
+ * Stardust-specific event types (subagents, approvals, memory candidates,
+ * lifecycle markers) are modeled as system messages with metadata so a `row`
+ * override can render them.
+ *
+ * This is a thin wrapper around the incremental builder — "apply all events
+ * from empty state" — kept as the pure, provably-correct reference: the
+ * incremental path (`createConversationBuilder` + `applyNewStreamEvents`) is
+ * tested for deep-equality against this on every chunk boundary.
+ */
+export function buildConversation(
+	sessionId: string,
+	userMessage: UserMessage | null,
+	events: StreamEvent[]
+): ConversationHistory {
+	const state = createConversationBuilder(sessionId, userMessage);
+	applyNewStreamEvents(state, events);
+	return snapshotConversation(state);
 }
