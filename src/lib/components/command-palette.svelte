@@ -12,9 +12,10 @@
 	type Props = {
 		open: boolean;
 		health?: HealthSnapshot | null;
+		onOpenShortcuts?: () => void;
 	};
 
-	let { open = $bindable(false), health = null }: Props = $props();
+	let { open = $bindable(false), health = null, onOpenShortcuts }: Props = $props();
 
 	let schedules = $state.raw<ScheduleProjection[]>([]);
 
@@ -141,6 +142,14 @@
 				Open task queue agent-orchestrator
 				{#snippet trailing()}
 					<span class="hint">↗</span>
+				{/snippet}
+			</CommandItem>
+		{/if}
+		{#if onOpenShortcuts && matches(query, 'Keyboard shortcuts help')}
+			<CommandItem value="keyboard-shortcuts" onselect={() => run(() => onOpenShortcuts())}>
+				Keyboard shortcuts
+				{#snippet trailing()}
+					<Kbd label="?" size="sm" />
 				{/snippet}
 			</CommandItem>
 		{/if}

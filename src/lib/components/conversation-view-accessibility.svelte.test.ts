@@ -245,7 +245,7 @@ describe('ConversationView accessibility', () => {
 			);
 			flushSync();
 
-			expect(onSubmit).toHaveBeenCalledWith('Run the smoke tests');
+			expect(onSubmit).toHaveBeenCalledWith('Run the smoke tests', undefined);
 			expect(document.activeElement).toBe(composer);
 
 			unmount(component);

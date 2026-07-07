@@ -1,5 +1,5 @@
 import { mount, unmount } from 'svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import SessionRow from './session-row.svelte';
 import type { SessionRow as SessionRowData } from '$lib/types';
 
@@ -52,6 +52,102 @@ describe('SessionRow', () => {
 		});
 
 		expect(document.querySelector('a.wf-chip')).toBeNull();
+
+		unmount(component);
+	});
+
+	it('omits the rename trigger when onRename is not provided', () => {
+		const component = mount(SessionRow, {
+			target: document.body,
+			props: { session: makeSession(), onOpen: () => {} }
+		});
+
+		expect(document.querySelector('.rename-trigger')).toBeNull();
+
+		unmount(component);
+	});
+
+	it('swaps the title for an editable input when the rename trigger is clicked', async () => {
+		const component = mount(SessionRow, {
+			target: document.body,
+			props: { session: makeSession(), onOpen: () => {}, onRename: () => {} }
+		});
+
+		const trigger = document.querySelector('.rename-trigger') as HTMLButtonElement;
+		expect(trigger).toBeInstanceOf(HTMLElement);
+		trigger.click();
+		await Promise.resolve();
+
+		const input = document.querySelector('.title-input') as HTMLInputElement | null;
+		expect(input).toBeInstanceOf(HTMLInputElement);
+		expect(input!.value).toBe('Demonstrate Temporal durability');
+
+		unmount(component);
+	});
+
+	it('commits a rename on Enter and calls onRename with the trimmed value', async () => {
+		const onRename = vi.fn();
+		const component = mount(SessionRow, {
+			target: document.body,
+			props: { session: makeSession(), onOpen: () => {}, onRename }
+		});
+
+		(document.querySelector('.rename-trigger') as HTMLButtonElement).click();
+		await Promise.resolve();
+
+		const input = document.querySelector('.title-input') as HTMLInputElement;
+		input.value = '  Renamed session  ';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		input.dispatchEvent(new Event('blur', { bubbles: true }));
+		await Promise.resolve();
+
+		expect(onRename).toHaveBeenCalledWith(makeSession(), 'Renamed session');
+		expect(document.querySelector('.title-input')).toBeNull();
+		expect(document.querySelector('.title')?.textContent).toBe('Demonstrate Temporal durability');
+
+		unmount(component);
+	});
+
+	it('cancels a rename on Escape without calling onRename', async () => {
+		const onRename = vi.fn();
+		const component = mount(SessionRow, {
+			target: document.body,
+			props: { session: makeSession(), onOpen: () => {}, onRename }
+		});
+
+		(document.querySelector('.rename-trigger') as HTMLButtonElement).click();
+		await Promise.resolve();
+
+		const input = document.querySelector('.title-input') as HTMLInputElement;
+		input.value = 'Ignored edit';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		await Promise.resolve();
+
+		expect(onRename).not.toHaveBeenCalled();
+		expect(document.querySelector('.title-input')).toBeNull();
+
+		unmount(component);
+	});
+
+	it('does not commit an empty rename', async () => {
+		const onRename = vi.fn();
+		const component = mount(SessionRow, {
+			target: document.body,
+			props: { session: makeSession(), onOpen: () => {}, onRename }
+		});
+
+		(document.querySelector('.rename-trigger') as HTMLButtonElement).click();
+		await Promise.resolve();
+
+		const input = document.querySelector('.title-input') as HTMLInputElement;
+		input.value = '   ';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		input.dispatchEvent(new Event('blur', { bubbles: true }));
+		await Promise.resolve();
+
+		expect(onRename).not.toHaveBeenCalled();
 
 		unmount(component);
 	});

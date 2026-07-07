@@ -10,9 +10,11 @@ import type {
 	JSONValue,
 	Message,
 	MessageInput,
+	MultiModalContent,
 	ToolCall,
 	ToolResult
 } from '@lostgradient/cinder/chat';
+import type { SessionAttachmentInput } from '$lib/types';
 
 /** A normalized stream event as produced by the SSE endpoint. */
 export type StreamEvent = {
@@ -30,6 +32,14 @@ export type StreamEvent = {
 /** A user message rendered before the stream (the turn that started the run). */
 export type UserMessage = {
 	text: string;
+	/**
+	 * Files attached to this turn. Rendering-only — this is NOT persisted to the
+	 * durable transcript, so attachments only render for the live/current turn.
+	 * After a reload, `loadTranscript()` rebuilds `UserMessage` from the durable
+	 * `user_message` event, which carries text only, so the attachment preview
+	 * does not survive a reload (documented, deliberate scope boundary).
+	 */
+	attachments?: SessionAttachmentInput[];
 };
 
 /** A raw row as returned by `GET /api/sessions/{sessionKey}/transcript`. */
@@ -39,6 +49,33 @@ export type TranscriptEventRow = {
 	payload: string;
 	sequence: number;
 };
+
+/**
+ * Builds Cinder `MultiModalContent[]` for a user message with attachments.
+ * Images render as real inline previews via Cinder's native image content
+ * part. Code/document attachments have no equivalent inline-preview content
+ * type in Cinder's model, so they render as a plain text reference instead.
+ */
+function buildAttachmentContent(
+	text: string,
+	attachments: SessionAttachmentInput[]
+): MultiModalContent[] {
+	const parts: MultiModalContent[] = [];
+	if (text) parts.push({ type: 'text', text });
+	for (const attachment of attachments) {
+		if (attachment.kind === 'image') {
+			parts.push({
+				type: 'image',
+				url: `data:${attachment.mimeType};base64,${attachment.content}`,
+				mimeType: attachment.mimeType,
+				text: attachment.name
+			});
+		} else {
+			parts.push({ type: 'text', text: `📎 Attached: ${attachment.name}` });
+		}
+	}
+	return parts;
+}
 
 /** Maps durable transcript event kinds to the live-stream `StreamEvent['kind']` vocabulary. */
 const TRANSCRIPT_KIND_MAP: Record<string, string> = {
@@ -138,7 +175,11 @@ export function createConversationBuilder(
 	};
 
 	if (userMessage) {
-		addMessage(state, { role: 'user', content: userMessage.text });
+		const content =
+			userMessage.attachments && userMessage.attachments.length > 0
+				? buildAttachmentContent(userMessage.text, userMessage.attachments)
+				: userMessage.text;
+		addMessage(state, { role: 'user', content });
 	}
 
 	return state;
@@ -207,11 +248,16 @@ export function applyNewStreamEvents(
 				// turn's — this is what makes the transcript render as a multi-turn chat.
 				state.assistantMessageId = null;
 				state.assistantTextAccumulator = '';
-				addMessage(
-					state,
-					{ role: 'user', content: (payload.text as string) ?? '' },
-					event.sequence
-				);
+				const text = (payload.text as string) ?? '';
+				// Attachments only ever appear on the live-seeded event the session page
+				// synthesizes for the turn just submitted (see handleSubmit) — never on
+				// events rebuilt from the durable transcript, which stores text only.
+				const attachments = Array.isArray(payload.attachments)
+					? (payload.attachments as SessionAttachmentInput[])
+					: undefined;
+				const content =
+					attachments && attachments.length > 0 ? buildAttachmentContent(text, attachments) : text;
+				addMessage(state, { role: 'user', content }, event.sequence);
 				break;
 			}
 

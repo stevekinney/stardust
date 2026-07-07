@@ -113,6 +113,14 @@
 		void goto(resolve(`/sessions/${encodeURIComponent(session.sessionKey)}`));
 	}
 
+	async function renameSession(session: SessionRow, name: string) {
+		try {
+			await sessionsStore.rename(session.sessionKey, name);
+		} catch {
+			// Non-fatal — the row keeps its previous name and the user can retry.
+		}
+	}
+
 	async function mintSessionKey(): Promise<string> {
 		const response = await fetch('/api/sessions', { method: 'POST' });
 		if (!response.ok) throw new Error('Failed to create session');
@@ -191,7 +199,7 @@
 
 		<div class="session-rows">
 			{#each filteredSessions as session (session.id)}
-				<SessionRowCard {session} onOpen={openSession} />
+				<SessionRowCard {session} onOpen={openSession} onRename={renameSession} />
 			{/each}
 			{#if filteredSessions.length === 0}
 				<p class="no-results">No sessions match this filter.</p>

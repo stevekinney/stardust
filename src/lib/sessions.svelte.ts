@@ -37,6 +37,24 @@ export class SessionsStore {
 		if (this.#loadedOnce || this.loading) return;
 		await this.load();
 	}
+
+	/**
+	 * Rename a session via `PATCH /api/sessions/[sessionKey]` and update the
+	 * cached row in place so callers don't need to reload the whole list.
+	 */
+	async rename(sessionKey: string, name: string): Promise<void> {
+		const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}`, {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ name })
+		});
+		if (!response.ok) throw new Error(await response.text());
+		const body = (await response.json()) as { name?: string };
+		const resolvedName = body.name ?? name;
+		this.sessions = this.sessions.map((session) =>
+			session.sessionKey === sessionKey ? { ...session, name: resolvedName } : session
+		);
+	}
 }
 
 function parseErrorMessage(caught: unknown): string {

@@ -50,4 +50,36 @@ describe('CommandPalette host', () => {
 
 		unmount(component);
 	});
+
+	it('surfaces a "Keyboard shortcuts" item that calls onOpenShortcuts when provided', async () => {
+		const onOpenShortcuts = vi.fn();
+		const component = mount(CommandPaletteHost, {
+			target: document.body,
+			props: { open: true, onOpenShortcuts }
+		});
+
+		await vi.waitFor(() => expect(document.body.textContent).toContain('Keyboard shortcuts'));
+
+		const item = Array.from(document.querySelectorAll('li[role="option"]')).find((element) =>
+			element.textContent?.includes('Keyboard shortcuts')
+		) as HTMLElement | undefined;
+		expect(item).toBeDefined();
+		item!.click();
+
+		expect(onOpenShortcuts).toHaveBeenCalledOnce();
+
+		unmount(component);
+	});
+
+	it('omits the "Keyboard shortcuts" item when onOpenShortcuts is not provided', async () => {
+		const component = mount(CommandPaletteHost, {
+			target: document.body,
+			props: { open: true }
+		});
+
+		await vi.waitFor(() => expect(document.body.textContent).toContain('New session'));
+		expect(document.body.textContent).not.toContain('Keyboard shortcuts');
+
+		unmount(component);
+	});
 });
