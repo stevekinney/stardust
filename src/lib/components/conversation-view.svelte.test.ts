@@ -7,6 +7,28 @@ function makeEvent(id: number, kind: string, payload: Record<string, unknown>): 
 	return { id, kind, payload: JSON.stringify(payload) };
 }
 
+/**
+ * Cinder's markdown rendering is deliberately async — it defers past a
+ * requestAnimationFrame, then dynamically imports the rendering pipeline
+ * (see `markdown-preview.svelte`). Poll until the predicate is true instead
+ * of assuming a fixed number of ticks is enough.
+ *
+ * 20s default: under normal load the real work here is ~1s (one rAF frame
+ * plus a cached dynamic import), but this suite runs alongside CPU-heavy
+ * sibling test files (subprocess timeout tests, in-memory Temporal servers)
+ * in the same run, and a tight timeout here flakes under that contention
+ * rather than reflecting an actual hang.
+ */
+async function waitFor(predicate: () => boolean, timeoutMs = 20_000): Promise<void> {
+	const start = Date.now();
+	while (!predicate()) {
+		if (Date.now() - start > timeoutMs) {
+			throw new Error('waitFor: timed out waiting for predicate');
+		}
+		await new Promise((resolve) => setTimeout(resolve, 25));
+	}
+}
+
 const defaultProps = {
 	sessionId: 'test-session',
 	onSubmit: vi.fn()
@@ -319,5 +341,165 @@ describe('ConversationView', () => {
 		expect(dimmed[0].textContent).toContain('Run complete');
 
 		unmount(component);
+	});
+
+	// ── XSS: hostile text in tool output / model text must never execute or
+	// produce a live dangerous element. Cinder's markdown pipeline sanitizes
+	// via rehype-sanitize + URL allowlisting (see
+	// /Users/stevekinney/Developer/cinder/packages/markdown/src/rendering/render.ts);
+	// these tests exercise that pipeline end-to-end through Stardust's own
+	// stream -> ConversationView path rather than trusting it by inspection alone.
+
+	describe('XSS in tool output and assistant text', () => {
+		/**
+		 * Mounts into a fresh, isolated container per test (rather than
+		 * `document.body` directly) so assertions can't accidentally match
+		 * unrelated markup the Vitest browser harness injects into the page
+		 * (e.g. its own bootstrap `<script>` tags).
+		 */
+		function mountInIsolatedContainer(events: StreamEvent[]) {
+			const container = document.createElement('div');
+			document.body.appendChild(container);
+			const component = mount(ConversationView, {
+				target: container,
+				props: { ...defaultProps, events }
+			});
+			return {
+				container,
+				cleanup: () => {
+					unmount(component);
+					container.remove();
+				}
+			};
+		}
+
+		it('neutralizes a raw <img onerror> payload in assistant markdown', async () => {
+			const { container, cleanup } = mountInIsolatedContainer([
+				makeEvent(1, 'assistant.message', {
+					text: 'before <img src=x onerror=alert(1)> after'
+				})
+			]);
+
+			// Before the async markdown pipeline resolves, MarkdownPreview shows a
+			// plain-text fallback (`<p>{content}</p>`) that still contains the
+			// escaped raw source. Wait for that raw source to be gone — i.e. for
+			// the sanitized render (which strips the whole raw-HTML node) to land
+			// — so the assertions below exercise the real sanitizer, not the
+			// merely-coincidentally-safe fallback.
+			await waitFor(() => !container.innerHTML.includes('onerror'));
+
+			expect(container.querySelector('img')).toBeNull();
+			expect(container.querySelector('[onerror]')).toBeNull();
+
+			cleanup();
+		});
+
+		it('neutralizes a raw <script> payload in assistant markdown', async () => {
+			const { container, cleanup } = mountInIsolatedContainer([
+				makeEvent(1, 'assistant.message', {
+					text: 'before <script>window.__xss = true;</script> after'
+				})
+			]);
+
+			// The fallback shows the raw source with its angle brackets HTML-escaped
+			// (`&lt;script&gt;...&lt;/script&gt;`). The sanitized render strips the
+			// whole raw-HTML tag nodes, leaving only the inert inner text — so
+			// waiting for the escaped opening tag to disappear reliably detects
+			// that the real (not fallback) render has landed. The inner text
+			// itself ("window.__xss = true;") is expected to remain, as inert
+			// prose — it was never inside a live <script> element.
+			await waitFor(() => !container.innerHTML.includes('&lt;script&gt;'));
+
+			expect(container.querySelector('script')).toBeNull();
+			expect((globalThis as { __xss?: boolean }).__xss).toBeUndefined();
+
+			cleanup();
+		});
+
+		it('neutralizes a javascript: URL in a markdown link', async () => {
+			const { container, cleanup } = mountInIsolatedContainer([
+				makeEvent(1, 'assistant.message', {
+					text: '[click me](javascript:alert(document.cookie))'
+				})
+			]);
+
+			// The fallback shows the raw, un-rendered markdown source
+			// (`[click me](javascript:...)`) until the async pipeline resolves.
+			// Wait for that literal bracket syntax to be replaced by a real
+			// element before asserting on the link's href.
+			await waitFor(() => !container.innerHTML.includes('(javascript:'));
+
+			const link = Array.from(container.querySelectorAll('a')).find((anchor) =>
+				anchor.textContent?.includes('click me')
+			);
+			expect(link).toBeDefined();
+			expect(link!.getAttribute('href')).not.toMatch(/^javascript:/i);
+
+			cleanup();
+		});
+
+		it('neutralizes a javascript: URL in a markdown image', async () => {
+			const { container, cleanup } = mountInIsolatedContainer([
+				makeEvent(1, 'assistant.message', {
+					text: '![alt text](javascript:alert(document.cookie))'
+				})
+			]);
+
+			await waitFor(() => !container.innerHTML.includes('(javascript:'));
+
+			// An unsafe image src is sanitized to an empty string upstream
+			// (see Cinder's transformUrls), which rehype-sanitize/stringify may
+			// then drop the <img> entirely rather than emit `src=""`. Either
+			// outcome is safe; a live javascript: src is the only failure mode.
+			const image = container.querySelector('img');
+			expect(image === null || !/^javascript:/i.test(image.getAttribute('src') ?? '')).toBe(true);
+
+			cleanup();
+		});
+
+		it('renders HTML markup inside a fenced code block as inert text, not live elements', async () => {
+			const { container, cleanup } = mountInIsolatedContainer([
+				makeEvent(1, 'assistant.message', {
+					text: 'Here is an example:\n\n```html\n<script>alert(1)</script>\n```'
+				})
+			]);
+
+			// Wait for the raw triple-backtick fence to be replaced by a real
+			// <pre><code> block before asserting.
+			await waitFor(() => !container.innerHTML.includes('```html'));
+
+			expect(container.querySelector('script')).toBeNull();
+			// The literal text must still be visible (escaped), proving it rendered
+			// as code content rather than being silently dropped.
+			expect(container.textContent).toContain('alert(1)');
+
+			cleanup();
+		});
+
+		it('neutralizes a hostile tool.result payload containing raw HTML', async () => {
+			const { container, cleanup } = mountInIsolatedContainer([
+				makeEvent(1, 'tool.call', {
+					id: 'tc-1',
+					name: 'web.fetch',
+					input: { url: 'https://example.test' }
+				}),
+				makeEvent(2, 'tool.result', {
+					callId: 'tc-1',
+					content: '<img src=x onerror=alert(document.cookie)>',
+					isError: false
+				})
+			]);
+
+			await waitFor(() => (container.textContent?.length ?? 0) > 0);
+
+			// Tool-result content renders through ToolPayloadCode (JSON-stringified,
+			// syntax-highlighted text) — never through the markdown/HTML pipeline —
+			// so there must be no live <img> element and no onerror attribute
+			// anywhere in the rendered tree.
+			expect(container.querySelector('img')).toBeNull();
+			expect(container.querySelector('[onerror]')).toBeNull();
+
+			cleanup();
+		});
 	});
 });
