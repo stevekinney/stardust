@@ -13,6 +13,7 @@
 	import SessionPhoneSurfaces from '$lib/components/session-phone-surfaces.svelte';
 	import { sessionBadgeVariant } from '$lib/components/session-row.svelte';
 	import { formatStatus } from '$lib/session-display';
+	import { bootstrapSessionPage } from '$lib/session-page-bootstrap';
 	import { parseSseFrame, readSseStream } from '$lib/sse-stream';
 	import type { StreamEvent } from '$lib/stream-to-conversation';
 	import type { RunInspectorProjection } from '$lib/server/observability/projection';
@@ -86,13 +87,18 @@
 		approvalResolution = null;
 		scrubCursor = null;
 
-		void loadPendingApproval();
 		if (data.startMessage) {
 			void goto(resolve(`/sessions/${encodeURIComponent(sessionKey)}`), { replaceState: true });
-			void handleSubmit(data.startMessage);
-		} else {
-			void loadTranscript().then(() => loadLatestRunInspector());
 		}
+
+		void bootstrapSessionPage({
+			fresh: data.fresh,
+			startMessage: data.startMessage,
+			loadPendingApproval,
+			loadTranscript,
+			loadLatestRunInspector,
+			submitFirstTurn: handleSubmit
+		});
 	});
 
 	async function loadTranscript() {
