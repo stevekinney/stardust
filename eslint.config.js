@@ -84,7 +84,18 @@ export default defineConfig(
 			// Activity test files must import activity implementations directly to call them.
 			// The rule is designed for workflow code; test files are not workflows.
 			'temporal/workflow-no-activity-definitions-import': 'off',
-			'temporal/test-import-type-for-activities': 'off'
+			'temporal/test-import-type-for-activities': 'off',
+			// Determinism rules assume the file executes inside a Temporal workflow
+			// sandbox (where control flow must be deterministic and errors must be
+			// ApplicationFailure for retry semantics). Test files — including
+			// browser/component tests that poll `document`/`setTimeout` while
+			// waiting for async rendering to settle — run in plain Node/browser
+			// test runners, not the workflow sandbox, so these rules produce false
+			// positives there (e.g. a `waitFor` helper's while-loop + setTimeout +
+			// throw is a normal test-utility pattern, not workflow code).
+			'temporal/workflow-no-nondeterministic-control-flow': 'off',
+			'temporal/workflow-no-throw-raw-error': 'off',
+			'temporal/workflow-prefer-sleep': 'off'
 		}
 	},
 	{

@@ -53,7 +53,13 @@ const UNTRUSTED_OUTPUT_TOOL_NAMES = new Set([
 	'hackernews.read',
 	'wikipedia.lookup',
 	'docs.lookup',
-	'browser.mcp.call'
+	'browser.mcp.call',
+	// browser.inspect / browser.act capture console messages, page errors, and an
+	// accessibility-tree snapshot from arbitrary third-party pages via Playwright
+	// (see browser-agent.ts) — exactly the "browser DOM state" ARCHITECTURE.md:354
+	// calls out as untrusted. SEC-004: these were missing from the fenced set.
+	'browser.inspect',
+	'browser.act'
 ]);
 
 function isUntrustedOutputTool(toolName: string): boolean {
