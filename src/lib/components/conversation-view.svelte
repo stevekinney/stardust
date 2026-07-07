@@ -1,5 +1,7 @@
 <script lang="ts" module>
 	import type { ApprovalOperation } from '@lostgradient/cinder/approval-card';
+	import type { ChatAttachment } from '@lostgradient/cinder/chat';
+	import type { SessionAttachmentInput } from '$lib/types';
 
 	/** Build a Cinder ApprovalOperation from a pending approval's tool call. */
 	export function toApprovalOperation(toolCall: {
@@ -18,28 +20,73 @@
 		}
 		return { kind: 'other', argsPreview: args };
 	}
+
+	/** Base64-encode a File's raw bytes without blowing the call stack on large files. */
+	async function fileToBase64(file: File): Promise<string> {
+		const buffer = await file.arrayBuffer();
+		const bytes = new Uint8Array(buffer);
+		let binary = '';
+		const CHUNK_SIZE = 0x8000;
+		for (let offset = 0; offset < bytes.length; offset += CHUNK_SIZE) {
+			binary += String.fromCharCode(...bytes.subarray(offset, offset + CHUNK_SIZE));
+		}
+		return btoa(binary);
+	}
+
+	/** Convert Cinder's composer attachments into Stardust's turn-submission payload. */
+	export async function chatAttachmentsToSessionAttachments(
+		attachments: ChatAttachment[]
+	): Promise<SessionAttachmentInput[]> {
+		return Promise.all(
+			attachments.map(async (attachment) => ({
+				name: attachment.file.name,
+				mimeType: attachment.file.type || 'application/octet-stream',
+				kind: attachment.kind,
+				content: await fileToBase64(attachment.file)
+			}))
+		);
+	}
 </script>
 
 <script lang="ts">
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import Chat from '@lostgradient/cinder/chat';
 	import type { ChatSubmitEvent, Message } from '@lostgradient/cinder/chat';
 	import ApprovalCard from '@lostgradient/cinder/approval-card';
 	import {
-		buildConversation,
+		applyNewStreamEvents,
+		createConversationBuilder,
+		snapshotConversation,
+		type ConversationBuilderState,
 		type StreamEvent,
 		type UserMessage
 	} from '$lib/stream-to-conversation';
 	import type { PendingApprovalEntry } from '$lib/types';
+	import {
+		createDefaultSlashCommands,
+		filterSlashCommands,
+		type SlashCommand,
+		type SlashCommandContext
+	} from '$lib/slash-commands';
+	import SlashCommandPalette from './slash-command-palette.svelte';
 
 	type Props = {
 		sessionId: string;
 		userMessage?: UserMessage | null;
 		events?: StreamEvent[];
 		running?: boolean;
-		onSubmit: (message: string) => void;
+		onSubmit: (message: string, attachments?: SessionAttachmentInput[]) => void;
 		onRetry?: (() => void) | null;
 		onSteer?: (message: string) => void;
 		onInterrupt?: () => void;
+		/**
+		 * Called when the user edits a past user message and saves it. The durable
+		 * transcript is append-only — there is no rewind primitive — so an edit is
+		 * submitted as a brand-new turn with the corrected text rather than
+		 * rewriting history. When omitted, editing is disabled entirely.
+		 */
+		onEdit?: (content: string) => void;
 		/** Replay cursor — rows with a durable sequence above this dim out. Null means live. */
 		dimAfterSequence?: number | null;
 		/** The session's pending approval, rendered as an inline ApprovalCard. */
@@ -62,24 +109,254 @@
 		onRetry = null,
 		onSteer,
 		onInterrupt,
+		onEdit,
 		dimAfterSequence = null,
 		pendingApproval = null,
 		approvalResolution = null,
 		onResolveApproval
 	}: Props = $props();
 
-	const conversation = $derived(buildConversation(sessionId, userMessage, events));
+	// Non-reactive fold cache: `buildConversation` re-walking the entire event
+	// history on every streamed token is O(n²) over the life of a run. Instead,
+	// hold a plain (not `$state`) builder that carries the fold cursor across
+	// derivations, and only re-fold from scratch when the events array isn't a
+	// prefix-extension of what we last saw (session switch, transcript reload).
+	let builderState: ConversationBuilderState | null = null;
+	let cachedEvents: StreamEvent[] = [];
+	let cachedSessionId: string | null = null;
+	let cachedUserMessage: UserMessage | null = null;
 
-	function handleSubmit(event: ChatSubmitEvent) {
-		const content = event.message.content;
-		const text = typeof content === 'string' ? content : '';
-		if (text.trim()) {
-			if (running && onSteer) {
-				onSteer(text.trim());
+	function isPrefixExtension(previous: StreamEvent[], next: StreamEvent[]): boolean {
+		if (next.length < previous.length) return false;
+		for (let i = 0; i < previous.length; i++) {
+			if (previous[i] !== next[i]) return false;
+		}
+		return true;
+	}
+
+	const conversation = $derived.by(() => {
+		const needsReset =
+			builderState === null ||
+			cachedSessionId !== sessionId ||
+			cachedUserMessage !== userMessage ||
+			!isPrefixExtension(cachedEvents, events);
+
+		if (needsReset) {
+			builderState = createConversationBuilder(sessionId, userMessage);
+			cachedSessionId = sessionId;
+			cachedUserMessage = userMessage;
+		}
+
+		// `needsReset` guarantees `builderState` was just (re)created if it was ever
+		// null — the non-null assertion just tells TypeScript what the runtime
+		// control flow already established.
+		const state: ConversationBuilderState = builderState!;
+		applyNewStreamEvents(state, events);
+		cachedEvents = events;
+		return snapshotConversation(state);
+	});
+
+	// ---- Slash commands (BUG-002) ----------------------------------------
+	// Cinder 0.8.0 added `getComposerValue()`/`clearInput()`/`oncomposerinput`
+	// to the public `Chat` component (the CINDER-REQUEST filed by this track —
+	// see state/CINDER-RELEASE.md), so reading/clearing the composer's text
+	// value goes through that API now instead of the raw DOM node. Cinder still
+	// exposes no element-ref getter for the composer itself, so ARIA combobox
+	// wiring and arrow-key/Enter/Escape interception (Chat has no keydown hook
+	// either) still reach into the rendered `.chat-input-editor` node.
+
+	const slashListboxId = $derived(`session-${sessionId}-slash`);
+	const allSlashCommands = createDefaultSlashCommands();
+
+	let chatRef: ReturnType<typeof Chat> | undefined;
+	let slashOpen = $state(false);
+	let slashQuery = $state('');
+	let slashActiveIndex = $state(0);
+	let slashInfo = $state<{ title: string; lines: string[] } | null>(null);
+	let composerEl = $state<HTMLElement | null>(null);
+
+	const filteredSlashCommands = $derived(filterSlashCommands(allSlashCommands, slashQuery));
+
+	const slashContext = $derived<SlashCommandContext>({
+		running,
+		hasRetry: !!onRetry,
+		hasPendingApproval: pendingApproval !== null,
+		onInterrupt: () => onInterrupt?.(),
+		onRetry: () => onRetry?.(),
+		createSession: async () => {
+			const response = await fetch('/api/sessions', { method: 'POST' });
+			if (!response.ok) throw new Error('Failed to create session');
+			const body = (await response.json()) as { sessionKey: string };
+			await goto(resolve(`/sessions/${encodeURIComponent(body.sessionKey)}`));
+			return body.sessionKey;
+		},
+		openApprovals: () => {
+			void goto(resolve('/inbox'));
+		},
+		listTools: async () => {
+			const response = await fetch('/api/tools');
+			if (!response.ok) return [];
+			const body = (await response.json()) as {
+				tools: Array<{ name: string; description: string; risk: string }>;
+			};
+			return body.tools;
+		},
+		listCommands: () =>
+			allSlashCommands.map((command) => ({ name: command.name, description: command.description }))
+	});
+
+	function isComposerElement(target: EventTarget | null): target is HTMLElement {
+		return target instanceof HTMLElement && target.closest('.chat-input-editor') !== null;
+	}
+
+	function openSlash(): void {
+		slashOpen = true;
+		slashQuery = '';
+		slashActiveIndex = 0;
+		slashInfo = null;
+	}
+
+	function closeSlash(options: { clearText?: boolean; refocus?: boolean } = {}): void {
+		slashOpen = false;
+		slashQuery = '';
+		slashActiveIndex = 0;
+		if (options.clearText) chatRef?.clearInput();
+		if (options.refocus) chatRef?.focusInput();
+	}
+
+	async function executeSlashCommand(command: SlashCommand): Promise<void> {
+		const reason = command.unavailable(slashContext);
+		if (reason) {
+			slashInfo = { title: command.name, lines: [reason] };
+			closeSlash({ clearText: true });
+			return;
+		}
+		const outcome = await command.run(slashContext);
+		slashInfo = outcome.kind === 'info' ? { title: outcome.title, lines: outcome.lines } : null;
+		closeSlash({ clearText: true, refocus: true });
+	}
+
+	/** A single-line message that starts with `/` and has no space yet is a slash-command prefix. */
+	function isSlashTriggerText(text: string): boolean {
+		return text.startsWith('/') && !text.includes('\n') && !text.includes(' ');
+	}
+
+	/**
+	 * Fired on every composer text change via Cinder's `oncomposerinput` prop
+	 * (0.8.0+) — replaces the previous DOM-level manual `.value`/`.textContent`
+	 * read.
+	 */
+	function handleComposerInput(text: string): void {
+		if (slashOpen) {
+			if (isSlashTriggerText(text)) {
+				slashQuery = text.slice(1);
+				slashActiveIndex = 0;
 			} else {
-				onSubmit(text.trim());
+				closeSlash();
+			}
+		} else if (isSlashTriggerText(text)) {
+			openSlash();
+			slashQuery = text.slice(1);
+		}
+	}
+
+	/**
+	 * Captures the composer DOM node for ARIA combobox wiring below — Cinder's
+	 * public API exposes imperative value/clear/focus methods but no
+	 * element-ref getter, so this capture-phase listener is still the only way
+	 * to reach it (kept minimal: it no longer reads the composer's text value,
+	 * that comes from `oncomposerinput` above).
+	 */
+	function handleComposerInputCapture(event: Event): void {
+		if (isComposerElement(event.target)) composerEl = event.target;
+	}
+
+	/** Arrow-key/Enter/Escape interception — Chat exposes no keydown hook, so this also reaches into the DOM. */
+	function handleComposerKeydownCapture(event: KeyboardEvent): void {
+		if (!isComposerElement(event.target)) return;
+		composerEl = event.target;
+		if (!slashOpen) return;
+		switch (event.key) {
+			case 'ArrowDown':
+				event.preventDefault();
+				event.stopPropagation();
+				slashActiveIndex = Math.min(
+					slashActiveIndex + 1,
+					Math.max(filteredSlashCommands.length - 1, 0)
+				);
+				break;
+			case 'ArrowUp':
+				event.preventDefault();
+				event.stopPropagation();
+				slashActiveIndex = Math.max(slashActiveIndex - 1, 0);
+				break;
+			case 'Enter': {
+				event.preventDefault();
+				event.stopPropagation();
+				const command = filteredSlashCommands[slashActiveIndex];
+				if (command) void executeSlashCommand(command);
+				break;
+			}
+			case 'Escape':
+				event.preventDefault();
+				event.stopPropagation();
+				closeSlash({ clearText: true, refocus: true });
+				break;
+			default:
+				break;
+		}
+	}
+
+	/** Keeps ARIA combobox semantics on Cinder's rendered composer node in sync with palette state. */
+	$effect(() => {
+		const element = composerEl;
+		if (!element) return;
+		if (slashOpen) {
+			if (element.dataset.slashOriginalRole === undefined) {
+				element.dataset.slashOriginalRole = element.getAttribute('role') ?? '';
+			}
+			element.setAttribute('role', 'combobox');
+			element.setAttribute('aria-expanded', 'true');
+			element.setAttribute('aria-autocomplete', 'list');
+			element.setAttribute('aria-controls', `${slashListboxId}-listbox`);
+			const active = filteredSlashCommands[slashActiveIndex];
+			if (active) {
+				element.setAttribute('aria-activedescendant', `${slashListboxId}-option-${active.id}`);
+			} else {
+				element.removeAttribute('aria-activedescendant');
+			}
+		} else {
+			element.setAttribute('aria-expanded', 'false');
+			element.removeAttribute('aria-controls');
+			element.removeAttribute('aria-activedescendant');
+			element.removeAttribute('aria-autocomplete');
+			const originalRole = element.dataset.slashOriginalRole;
+			if (originalRole) {
+				element.setAttribute('role', originalRole);
+			} else {
+				element.removeAttribute('role');
 			}
 		}
+	});
+
+	async function handleSubmit(event: ChatSubmitEvent) {
+		const content = event.message.content;
+		const text = typeof content === 'string' ? content : '';
+		const trimmed = text.trim();
+		if (!trimmed && event.attachments.length === 0) return;
+
+		if (running && onSteer) {
+			// Steering an in-flight run has no attachment path — the sandbox tool
+			// call that would consume a file is already mid-run.
+			if (trimmed) onSteer(trimmed);
+			return;
+		}
+
+		const attachments =
+			event.attachments.length > 0
+				? await chatAttachmentsToSessionAttachments(event.attachments)
+				: undefined;
+		onSubmit(trimmed, attachments);
 	}
 
 	function handleRetry() {
@@ -88,6 +365,10 @@
 
 	function handleStopGenerating() {
 		onInterrupt?.();
+	}
+
+	function handleEdit(event: { messageId: string; content: string }) {
+		onEdit?.(event.content);
 	}
 
 	/**
@@ -108,6 +389,17 @@
 		const sequence = message.metadata['stardust:sequence'];
 		return typeof sequence === 'number' && sequence > dimAfterSequence;
 	}
+
+	/**
+	 * BUG-004: the inline ApprovalCard has no dedicated announcement distinct
+	 * from the transcript's own generic `aria-live="polite"` growth cue. This
+	 * derives a polite, higher-signal announcement text keyed to the pending
+	 * approval so screen-reader users learn an action is required as soon as
+	 * one appears, without stealing focus from wherever they were reading.
+	 */
+	const approvalAnnouncement = $derived(
+		pendingApproval ? `Approval required: ${pendingApproval.toolCall.name}` : ''
+	);
 </script>
 
 {#snippet stardustRow(message: Message, renderDefault: import('svelte').Snippet)}
@@ -232,8 +524,48 @@
 	</div>
 {/snippet}
 
-<div class="conversation-chat" aria-label="Conversation">
+<div
+	class="conversation-chat"
+	aria-label="Conversation"
+	onkeydowncapture={handleComposerKeydownCapture}
+	oninputcapture={handleComposerInputCapture}
+>
+	<div class="visually-hidden" aria-live="polite" aria-atomic="true">
+		{approvalAnnouncement}
+	</div>
+	<div class="slash-anchor">
+		{#if slashOpen}
+			<SlashCommandPalette
+				id={slashListboxId}
+				commands={filteredSlashCommands}
+				activeIndex={slashActiveIndex}
+				context={slashContext}
+				onselect={(command) => void executeSlashCommand(command)}
+			/>
+		{/if}
+		{#if slashInfo}
+			<div class="slash-info" role="status">
+				<div class="slash-info-header">
+					<strong>{slashInfo.title}</strong>
+					<button
+						type="button"
+						class="slash-info-dismiss"
+						aria-label="Dismiss"
+						onclick={() => (slashInfo = null)}
+					>
+						×
+					</button>
+				</div>
+				<ul>
+					{#each slashInfo.lines as line, index (index)}
+						<li>{line}</li>
+					{/each}
+				</ul>
+			</div>
+		{/if}
+	</div>
 	<Chat
+		bind:this={chatRef}
 		id="session-{sessionId}"
 		{conversation}
 		streaming={running}
@@ -242,21 +574,24 @@
 		density="comfortable"
 		surfaceMode="transparent"
 		capabilities={{
-			attachments: false,
+			attachments: true,
 			search: false,
 			copy: true,
-			editing: false,
+			editing: !!onEdit,
 			retry: !!onRetry
 		}}
 		onsubmit={handleSubmit}
 		onretry={handleRetry}
+		onedit={handleEdit}
 		onstopgenerating={handleStopGenerating}
+		oncomposerinput={handleComposerInput}
 		row={stardustRow}
 	/>
 </div>
 
 <style>
 	.conversation-chat {
+		position: relative;
 		display: flex;
 		flex-direction: column;
 		height: 100%;
@@ -264,6 +599,78 @@
 		max-width: 760px;
 		margin: 0 auto;
 		overflow: hidden;
+	}
+
+	.visually-hidden {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
+
+	/*
+	 * Anchors the slash palette/info panel above the composer. Cinder's Chat
+	 * doesn't expose the composer's own bounding box, so this is an approximate
+	 * offset rather than a precise anchor — see the CINDER-REQUEST in
+	 * state/PROGRESS.md for a proper composer-anchor API.
+	 */
+	.slash-anchor {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 84px;
+		z-index: 20;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		pointer-events: none;
+	}
+
+	.slash-anchor > :global(*) {
+		pointer-events: auto;
+	}
+
+	.slash-info {
+		border: 1px solid var(--cinder-border);
+		border-radius: var(--cinder-radius-md);
+		background: var(--cinder-surface-elevated, var(--cinder-surface));
+		box-shadow: var(--cinder-shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.24));
+		padding: 10px 12px;
+		font-size: var(--cinder-text-sm);
+	}
+
+	.slash-info-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.slash-info-dismiss {
+		border: none;
+		background: none;
+		color: var(--cinder-text-subtle);
+		font-size: var(--cinder-text-md, 16px);
+		line-height: 1;
+		cursor: pointer;
+		padding: 2px 6px;
+	}
+
+	.slash-info ul {
+		margin: 8px 0 0;
+		padding-left: 18px;
+		color: var(--cinder-text-subtle);
+	}
+
+	.slash-info li {
+		font-family: var(--cinder-font-mono);
+		font-size: var(--cinder-text-xs);
+		margin-bottom: 4px;
 	}
 
 	/* Stardust-specific row styles */

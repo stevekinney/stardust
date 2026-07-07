@@ -33,22 +33,124 @@
 	import type { SessionRow } from '$lib/types';
 	import { displayLabel, formatStatus, relativeTime, statusDotClass } from '$lib/session-display';
 
-	let { session, onOpen }: { session: SessionRow; onOpen: (session: SessionRow) => void } =
-		$props();
+	let {
+		session,
+		onOpen,
+		onRename
+	}: {
+		session: SessionRow;
+		onOpen: (session: SessionRow) => void;
+		/** When provided, a rename affordance renders next to the title. */
+		onRename?: (session: SessionRow, name: string) => void;
+	} = $props();
 
 	const needsYou = $derived(session.status === 'waiting_approval');
 	const meta = $derived(
 		`${session.sessionKey} · ${formatStatus(session.status)} · ${relativeTime(session.updatedAt)}`
 	);
 	const wfChipLabel = $derived(`Open ${session.sessionKey} in Temporal Web`);
+
+	let renaming = $state(false);
+	let draftName = $state('');
+	// Removing the focused <input> from the DOM (Escape) fires a native blur
+	// event synchronously, which would otherwise re-trigger commitRename with
+	// stale draft text. This flag lets cancelRename opt the next blur out.
+	let ignoreNextBlur = false;
+
+	function startRename(event: MouseEvent) {
+		event.stopPropagation();
+		draftName = displayLabel(session);
+		renaming = true;
+	}
+
+	function commitRename() {
+		if (ignoreNextBlur) {
+			ignoreNextBlur = false;
+			return;
+		}
+		const trimmed = draftName.trim();
+		renaming = false;
+		if (trimmed && trimmed !== displayLabel(session)) {
+			onRename?.(session, trimmed);
+		}
+	}
+
+	function cancelRename() {
+		ignoreNextBlur = true;
+		renaming = false;
+	}
+
+	function handleRenameKeydown(event: KeyboardEvent) {
+		if (event.key === 'Enter') {
+			event.preventDefault();
+			(event.currentTarget as HTMLInputElement).blur();
+		} else if (event.key === 'Escape') {
+			event.preventDefault();
+			cancelRename();
+		}
+	}
+
+	function focusOnMount(node: HTMLInputElement) {
+		node.focus();
+	}
+
+	/** Row body is a div (not a button) so the rename control can nest a real <button>. */
+	function handleOpenKeydown(event: KeyboardEvent) {
+		if (event.key === 'Enter' || event.key === ' ') {
+			event.preventDefault();
+			onOpen(session);
+		}
+	}
 </script>
 
 <div class="row" class:needs-you={needsYou}>
-	<button type="button" class="open" onclick={() => onOpen(session)}>
+	<div
+		class="open"
+		role="button"
+		tabindex="0"
+		onclick={() => onOpen(session)}
+		onkeydown={handleOpenKeydown}
+	>
 		<span class="dot {statusDotClass(session.status)}" aria-hidden="true"></span>
 		<span class="body">
 			<span class="title-line">
-				<span class="title">{displayLabel(session)}</span>
+				{#if renaming}
+					<input
+						class="title-input"
+						type="text"
+						bind:value={draftName}
+						aria-label="Rename session"
+						{@attach focusOnMount}
+						onclick={(event) => event.stopPropagation()}
+						onblur={commitRename}
+						onkeydown={handleRenameKeydown}
+					/>
+				{:else}
+					<span class="title">{displayLabel(session)}</span>
+					{#if onRename}
+						<button
+							type="button"
+							class="rename-trigger"
+							aria-label="Rename session {displayLabel(session)}"
+							onclick={startRename}
+						>
+							<!-- lucide pencil -->
+							<svg
+								width="12"
+								height="12"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								aria-hidden="true"
+							>
+								<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+							</svg>
+						</button>
+					{/if}
+				{/if}
 				<Badge variant={sessionBadgeVariant(session.status)} size="sm">
 					{formatStatus(session.status)}
 				</Badge>
@@ -58,7 +160,7 @@
 			</span>
 			<span class="meta">{meta}</span>
 		</span>
-	</button>
+	</div>
 	{#if session.temporalWebUrl}
 		<!-- eslint-disable svelte/no-navigation-without-resolve -- external Temporal Web URL, not an app route -->
 		<a
@@ -136,6 +238,39 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+
+	.title-input {
+		flex: 1;
+		min-width: 0;
+		font: inherit;
+		font-size: var(--cinder-text-sm);
+		font-weight: 600;
+		color: var(--cinder-text);
+		background: var(--cinder-surface-inset);
+		border: 1px solid var(--cinder-border-strong);
+		border-radius: var(--cinder-radius-sm);
+		padding: 2px 6px;
+	}
+
+	.rename-trigger {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+		width: 20px;
+		height: 20px;
+		padding: 0;
+		border: none;
+		border-radius: var(--cinder-radius-sm);
+		background: transparent;
+		color: var(--cinder-text-subtle);
+		cursor: pointer;
+	}
+
+	.rename-trigger:hover {
+		background: var(--cinder-surface-hover);
+		color: var(--cinder-text);
 	}
 
 	.needs-you-hint {

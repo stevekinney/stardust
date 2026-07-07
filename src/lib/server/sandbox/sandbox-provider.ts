@@ -62,6 +62,13 @@ export interface SandboxFileInput {
 
 export interface SandboxWriteFileInput extends SandboxFileInput {
 	contents: string;
+	/**
+	 * How `contents` is encoded. `'utf8'` (default) writes the string as text.
+	 * `'base64'` decodes `contents` first and writes the raw bytes — required
+	 * for binary attachments (e.g. images) so they round-trip byte-for-byte
+	 * instead of being corrupted by a text encoding pass.
+	 */
+	encoding?: 'utf8' | 'base64';
 }
 
 export interface SandboxSnapshotInput {

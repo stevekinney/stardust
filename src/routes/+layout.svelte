@@ -14,6 +14,7 @@
 	import '@lostgradient/cinder/faceted-filter-bar/styles';
 	import '@lostgradient/cinder/input/styles';
 	import '@lostgradient/cinder/kbd/styles';
+	import '@lostgradient/cinder/modal/styles';
 	import '@lostgradient/cinder/navigation-bar/styles';
 	import '@lostgradient/cinder/navigation-item/styles';
 	import '@lostgradient/cinder/number-input/styles';
@@ -35,6 +36,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import CommandPaletteHost from '$lib/components/command-palette.svelte';
+	import KeyboardShortcutsDialog from '$lib/components/keyboard-shortcuts-dialog.svelte';
 	import TopNav from '$lib/components/top-nav.svelte';
 	import favicon from '$lib/assets/favicon.svg';
 	import type { HealthSnapshot } from '$lib/types';
@@ -45,6 +47,7 @@
 
 	let health = $state.raw<HealthSnapshot | null>(null);
 	let paletteOpen = $state(false);
+	let shortcutsOpen = $state(false);
 
 	onMount(() => {
 		document.documentElement.setAttribute('data-theme', 'dark');
@@ -76,7 +79,12 @@
 	</main>
 </div>
 
-<CommandPaletteHost bind:open={paletteOpen} {health} />
+<CommandPaletteHost
+	bind:open={paletteOpen}
+	{health}
+	onOpenShortcuts={() => (shortcutsOpen = true)}
+/>
+<KeyboardShortcutsDialog bind:open={shortcutsOpen} />
 
 <style>
 	:global(html) {

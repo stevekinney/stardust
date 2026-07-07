@@ -13,9 +13,16 @@
 	import SessionPhoneSurfaces from '$lib/components/session-phone-surfaces.svelte';
 	import { sessionBadgeVariant } from '$lib/components/session-row.svelte';
 	import { formatStatus } from '$lib/session-display';
-	import type { StreamEvent } from '$lib/stream-to-conversation';
+	import { bootstrapSessionPage } from '$lib/session-page-bootstrap';
+	import { parseSseFrame, readSseStream } from '$lib/sse-stream';
+	import {
+		findLastUserMessageText,
+		mapTranscriptToStreamEvents,
+		type StreamEvent,
+		type TranscriptEventRow
+	} from '$lib/stream-to-conversation';
 	import type { RunInspectorProjection } from '$lib/server/observability/projection';
-	import type { PendingApprovalEntry } from '$lib/types';
+	import type { PendingApprovalEntry, SessionAttachmentInput } from '$lib/types';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -85,13 +92,18 @@
 		approvalResolution = null;
 		scrubCursor = null;
 
-		void loadPendingApproval();
 		if (data.startMessage) {
 			void goto(resolve(`/sessions/${encodeURIComponent(sessionKey)}`), { replaceState: true });
-			void handleSubmit(data.startMessage);
-		} else {
-			void loadTranscript().then(() => loadLatestRunInspector());
 		}
+
+		void bootstrapSessionPage({
+			fresh: data.fresh,
+			startMessage: data.startMessage,
+			loadPendingApproval,
+			loadTranscript,
+			loadLatestRunInspector,
+			submitFirstTurn: handleSubmit
+		});
 	});
 
 	async function loadTranscript() {
@@ -99,60 +111,13 @@
 			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/transcript`);
 			if (!response.ok) return;
 
-			const body = (await response.json()) as {
-				events: Array<{ id: string; kind: string; payload: string; sequence: number }>;
-			};
+			const body = (await response.json()) as { events: TranscriptEventRow[] };
 
-			const userMsgEvents = body.events.filter((e) => e.kind === 'user_message');
-			if (userMsgEvents.length > 0) {
-				const lastUserMsg = userMsgEvents[userMsgEvents.length - 1];
-				try {
-					const parsed = JSON.parse(lastUserMsg.payload) as { text?: string };
-					currentUserMessage = parsed.text ?? null;
-				} catch {
-					// ignore malformed payload
-				}
-			}
-
-			const KIND_MAP: Record<string, string> = {
-				user_message: 'user.message',
-				assistant_message: 'assistant.message',
-				tool_result: 'tool.result',
-				approval_request: 'approval.request',
-				approval_resolution: 'approval.resolution',
-				lifecycle: 'lifecycle'
-			};
+			currentUserMessage = findLastUserMessageText(body.events);
 
 			// User messages stay in the event stream (mapped to `user.message`) so the
 			// transcript renders every turn in order, not just the latest one.
-			let seq = 0;
-			canonicalEvents = body.events.flatMap((e) => {
-				if (e.kind === 'tool_call') {
-					try {
-						const parsed = JSON.parse(e.payload) as {
-							calls?: Array<{ id: string; name: string; input: unknown }>;
-						};
-						// Fanned-out calls share the parent event's durable sequence so
-						// replay dimming stays consistent per batch.
-						return (parsed.calls ?? []).map((call) => ({
-							id: seq++,
-							kind: 'tool.call',
-							payload: JSON.stringify({ id: call.id, name: call.name, input: call.input }),
-							sequence: e.sequence
-						}));
-					} catch {
-						return [];
-					}
-				}
-				return [
-					{
-						id: seq++,
-						kind: KIND_MAP[e.kind] ?? e.kind,
-						payload: e.payload,
-						sequence: e.sequence
-					}
-				];
-			});
+			canonicalEvents = mapTranscriptToStreamEvents(body.events);
 			if (!running && liveEvents.length === 0) {
 				transcriptMode = 'canonical';
 			}
@@ -161,7 +126,7 @@
 		}
 	}
 
-	async function handleSubmit(message: string) {
+	async function handleSubmit(message: string, attachments?: SessionAttachmentInput[]) {
 		if (running) return;
 
 		running = true;
@@ -172,12 +137,15 @@
 		// Seed the live view with the conversation so far, then append this turn's
 		// user message. The live stream only carries the current run's events, so
 		// without this seed the prior turns would vanish while the new one streams.
+		// Attachments ride along on this synthetic event only — the durable
+		// transcript's user_message payload is text-only, so this preview does
+		// not survive a reload (see stream-to-conversation.ts's UserMessage doc).
 		liveEvents = [
 			...canonicalEvents,
 			{
 				id: canonicalEvents.length,
 				kind: 'user.message',
-				payload: JSON.stringify({ text: message })
+				payload: JSON.stringify({ text: message, attachments })
 			}
 		];
 		scrubCursor = null;
@@ -203,7 +171,7 @@
 			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/turn`, {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ message, model, maxBudgetUsd })
+				body: JSON.stringify({ message, model, maxBudgetUsd, attachments })
 			});
 
 			if (!response.ok) {
@@ -263,50 +231,13 @@
 		const response = await connectToStream(streamUrl, signal);
 		if (!response || !response.ok || !response.body) return;
 
-		const reader = response.body.getReader();
-		const decoder = new TextDecoder();
-		let buffer = '';
-
-		try {
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-
-				buffer += decoder.decode(value, { stream: true });
-
-				const frames = buffer.split('\n\n');
-				buffer = frames.pop() ?? '';
-
-				for (const frame of frames) {
-					parseAndApplyFrame(frame);
-				}
-			}
-		} catch (caught) {
-			if (caught instanceof Error && caught.name !== 'AbortError') {
-				throw caught;
-			}
-		} finally {
-			reader.releaseLock();
-		}
+		await readSseStream(response.body, signal, (frame) => applyFrame(frame));
 	}
 
-	function parseAndApplyFrame(frame: string): void {
-		const lines = frame.split('\n');
-		let id: number | undefined;
-		let kind = '';
-		let data = '';
-
-		for (const line of lines) {
-			if (line.startsWith('id: ')) {
-				id = Number(line.slice(4));
-			} else if (line.startsWith('event: ')) {
-				kind = line.slice(7);
-			} else if (line.startsWith('data: ')) {
-				data = line.slice(6);
-			}
-		}
-
-		if (!kind || !data) return;
+	function applyFrame(frame: string): void {
+		const parsed = parseSseFrame(frame);
+		if (!parsed) return;
+		const { id, kind, payload } = parsed;
 
 		if (kind === 'stream.gap') {
 			streamGapNotice =
@@ -321,7 +252,7 @@
 			void loadPendingApproval();
 		}
 
-		liveEvents = [...liveEvents, { id: id ?? liveEvents.length, kind, payload: data }];
+		liveEvents = [...liveEvents, { id: id ?? liveEvents.length, kind, payload }];
 	}
 
 	async function loadLatestRunInspector() {
@@ -564,6 +495,7 @@
 						onRetry={currentUserMessage ? () => handleSubmit(currentUserMessage!) : null}
 						onSteer={handleSteer}
 						onInterrupt={handleInterrupt}
+						onEdit={handleSubmit}
 						dimAfterSequence={transcriptMode === 'canonical' ? scrubCursor : null}
 						{pendingApproval}
 						{approvalResolution}
