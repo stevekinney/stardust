@@ -149,6 +149,17 @@
 		const sequence = message.metadata['stardust:sequence'];
 		return typeof sequence === 'number' && sequence > dimAfterSequence;
 	}
+
+	/**
+	 * BUG-004: the inline ApprovalCard has no dedicated announcement distinct
+	 * from the transcript's own generic `aria-live="polite"` growth cue. This
+	 * derives a polite, higher-signal announcement text keyed to the pending
+	 * approval so screen-reader users learn an action is required as soon as
+	 * one appears, without stealing focus from wherever they were reading.
+	 */
+	const approvalAnnouncement = $derived(
+		pendingApproval ? `Approval required: ${pendingApproval.toolCall.name}` : ''
+	);
 </script>
 
 {#snippet stardustRow(message: Message, renderDefault: import('svelte').Snippet)}
@@ -274,6 +285,9 @@
 {/snippet}
 
 <div class="conversation-chat" aria-label="Conversation">
+	<div class="visually-hidden" aria-live="polite" aria-atomic="true">
+		{approvalAnnouncement}
+	</div>
 	<Chat
 		id="session-{sessionId}"
 		{conversation}
@@ -305,6 +319,18 @@
 		max-width: 760px;
 		margin: 0 auto;
 		overflow: hidden;
+	}
+
+	.visually-hidden {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	/* Stardust-specific row styles */

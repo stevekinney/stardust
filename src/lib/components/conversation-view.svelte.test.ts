@@ -227,6 +227,40 @@ describe('ConversationView', () => {
 		unmount(component);
 	});
 
+	it('BUG-004: announces a pending inline approval in a dedicated polite live region', () => {
+		const events: StreamEvent[] = [
+			makeEvent(1, 'approval.request', { approvalId: 'apr-001', toolName: 'run_command' })
+		];
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: {
+				...defaultProps,
+				events,
+				pendingApproval: {
+					approvalId: 'apr-001',
+					sessionId: 'sess-001',
+					toolCall: {
+						id: 'call-001',
+						name: 'run_command',
+						arguments: { command: 'git push origin main' }
+					},
+					status: 'pending' as const,
+					createdAt: new Date().toISOString(),
+					expiresAt: new Date(Date.now() + 60_000).toISOString()
+				},
+				onResolveApproval: vi.fn()
+			}
+		});
+
+		const announcer = Array.from(
+			document.querySelectorAll('[aria-live="polite"][aria-atomic="true"]')
+		).find((region) => region.textContent?.includes('Approval required'));
+		expect(announcer).toBeInstanceOf(HTMLElement);
+		expect(announcer!.textContent).toContain('Approval required: run_command');
+
+		unmount(component);
+	});
+
 	it('preserves edited arguments from the inline ApprovalCard', async () => {
 		const onResolveApproval = vi.fn();
 		const events: StreamEvent[] = [
