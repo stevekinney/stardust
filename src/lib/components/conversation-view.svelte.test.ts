@@ -205,6 +205,58 @@ describe('ConversationView', () => {
 		unmount(component);
 	});
 
+	it('preserves edited arguments from the inline ApprovalCard', async () => {
+		const onResolveApproval = vi.fn();
+		const events: StreamEvent[] = [
+			makeEvent(1, 'approval.request', { approvalId: 'apr-001', toolName: 'run_command' })
+		];
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: {
+				...defaultProps,
+				events,
+				pendingApproval: {
+					approvalId: 'apr-001',
+					sessionId: 'sess-001',
+					toolCall: {
+						id: 'call-001',
+						name: 'run_command',
+						arguments: { command: 'git status' }
+					},
+					status: 'pending' as const,
+					createdAt: new Date().toISOString(),
+					expiresAt: new Date(Date.now() + 60_000).toISOString()
+				},
+				onResolveApproval
+			}
+		});
+
+		const editButton = Array.from(document.querySelectorAll('button')).find(
+			(button) => button.textContent?.trim() === 'Approve with edits'
+		);
+		expect(editButton).toBeDefined();
+		editButton!.click();
+		await Promise.resolve();
+
+		const textarea = document.querySelector('textarea') as HTMLTextAreaElement | null;
+		expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
+		textarea!.value = JSON.stringify({ command: 'git status --short' });
+		textarea!.dispatchEvent(new Event('input', { bubbles: true }));
+
+		const confirmButton = Array.from(document.querySelectorAll('button')).find(
+			(button) => button.textContent?.trim() === 'Confirm edited approval'
+		);
+		expect(confirmButton).toBeDefined();
+		confirmButton!.click();
+		await Promise.resolve();
+
+		expect(onResolveApproval).toHaveBeenCalledWith('apr-001', 'approve_with_edits', {
+			command: 'git status --short'
+		});
+
+		unmount(component);
+	});
+
 	it('renders canonical approval requests with the nested toolCall name and settles on resolution', () => {
 		const events: StreamEvent[] = [
 			{

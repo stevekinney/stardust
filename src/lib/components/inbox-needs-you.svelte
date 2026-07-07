@@ -4,13 +4,21 @@
 	import { toApprovalOperation } from './conversation-view.svelte';
 	import type { ApprovalEntry } from '$lib/types';
 
-	type ResolvedNotice = { approvalId: string; action: 'approve' | 'deny'; toolName: string };
+	type ResolvedNotice = {
+		approvalId: string;
+		action: 'approve' | 'approve_with_edits' | 'deny';
+		toolName: string;
+	};
 
 	type Props = {
 		approvals: ApprovalEntry[];
 		/** Approvals resolved during this visit, shown as settled banners. */
 		resolvedNow: ResolvedNotice[];
-		onResolve: (approvalId: string, action: 'approve' | 'deny') => void;
+		onResolve: (
+			approvalId: string,
+			action: 'approve' | 'approve_with_edits' | 'deny',
+			editedArguments?: unknown
+		) => void;
 	};
 
 	let { approvals, resolvedNow, onResolve }: Props = $props();
@@ -22,7 +30,7 @@
 	{#each resolvedNow as notice (notice.approvalId)}
 		<div class="settled" class:denied={notice.action === 'deny'} role="status">
 			<span class="settled-text">
-				{notice.action === 'approve'
+				{notice.action !== 'deny'
 					? `Approved — the signal woke the workflow and ${notice.toolName} is running`
 					: 'Denied — the run was told no and is wrapping up safely'}
 			</span>
@@ -54,7 +62,8 @@
 				editableArgs={true}
 				onapprove={() => onResolve(approval.approvalId, 'approve')}
 				ondeny={() => onResolve(approval.approvalId, 'deny')}
-				onapprovewithedits={() => onResolve(approval.approvalId, 'approve')}
+				onapprovewithedits={(editedArguments) =>
+					onResolve(approval.approvalId, 'approve_with_edits', editedArguments)}
 			/>
 		</div>
 	{/each}

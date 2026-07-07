@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Button from '@lostgradient/cinder/button';
 	import type { InboxMemoryCandidate } from '$lib/types';
 
 	type Decision = 'saved' | 'discarded';
@@ -55,8 +56,8 @@
 				{/if}
 			</div>
 			{#if !decision}
-				<button type="button" class="save" onclick={() => onSave(candidate)}>Save</button>
-				<button type="button" class="discard" onclick={() => onDiscard(candidate)}>Discard</button>
+				<Button size="xs" variant="secondary" label="Save" onclick={() => onSave(candidate)} />
+				<Button size="xs" variant="ghost" label="Discard" onclick={() => onDiscard(candidate)} />
 			{/if}
 		</div>
 	{/each}
@@ -119,38 +120,6 @@
 		font-size: 10.5px;
 		font-weight: 500;
 		color: var(--cinder-text-subtle);
-	}
-
-	.save {
-		flex: none;
-		border: 1px solid var(--cinder-border);
-		border-radius: var(--cinder-radius-sm);
-		background: var(--cinder-surface-inset);
-		color: var(--cinder-text);
-		font-size: 11.5px;
-		font-weight: 600;
-		padding: 4px 11px;
-		cursor: pointer;
-	}
-
-	.save:hover {
-		border-color: var(--cinder-accent);
-		color: var(--cinder-accent-text);
-	}
-
-	.discard {
-		flex: none;
-		border: none;
-		background: transparent;
-		color: var(--cinder-text-subtle);
-		font-size: 11.5px;
-		font-weight: 600;
-		padding: 4px 6px;
-		cursor: pointer;
-	}
-
-	.discard:hover {
-		color: var(--cinder-text);
 	}
 
 	.empty {

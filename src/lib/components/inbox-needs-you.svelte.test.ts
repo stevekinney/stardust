@@ -44,6 +44,39 @@ describe('InboxNeedsYou', () => {
 		unmount(component);
 	});
 
+	it('preserves edited arguments from Cinder ApprovalCard', async () => {
+		const onResolve = vi.fn();
+		const component = mount(InboxNeedsYou, {
+			target: document.body,
+			props: { approvals: [approval], resolvedNow: [], onResolve }
+		});
+
+		const editButton = Array.from(document.querySelectorAll('button')).find(
+			(button) => button.textContent?.trim() === 'Approve with edits'
+		);
+		expect(editButton).toBeDefined();
+		editButton!.click();
+		await Promise.resolve();
+
+		const textarea = document.querySelector('textarea') as HTMLTextAreaElement | null;
+		expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
+		textarea!.value = JSON.stringify({ command: 'git push origin feature' });
+		textarea!.dispatchEvent(new Event('input', { bubbles: true }));
+
+		const confirmButton = Array.from(document.querySelectorAll('button')).find(
+			(button) => button.textContent?.trim() === 'Confirm edited approval'
+		);
+		expect(confirmButton).toBeDefined();
+		confirmButton!.click();
+		await Promise.resolve();
+
+		expect(onResolve).toHaveBeenCalledWith('apr-001', 'approve_with_edits', {
+			command: 'git push origin feature'
+		});
+
+		unmount(component);
+	});
+
 	it('renders resolved banners and an empty state', () => {
 		const component = mount(InboxNeedsYou, {
 			target: document.body,

@@ -1,14 +1,17 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import Button from '@lostgradient/cinder/button';
-	import Input from '@lostgradient/cinder/input';
-	import Textarea from '@lostgradient/cinder/textarea';
-	import type { ScheduleProjection } from '$lib/types';
 	import type { RunInspectorProjection } from '$lib/server/observability/projection';
 	import type { MemoryNote, MemoryCandidate } from '$lib/server/memory/memory-store';
 	import type { ApprovalCardState, ApprovalResolutionInput } from '$lib/types';
 	import { viewMode } from '$lib/view-mode.svelte';
 	import RunTimeline from '$lib/components/run-timeline.svelte';
+	import OpsSessionBrowser, {
+		type OpsRunRow,
+		type OpsSessionRow
+	} from '$lib/components/ops-session-browser.svelte';
+	import OpsManualInspector from '$lib/components/ops-manual-inspector.svelte';
+	import OpsSchedulesPanel from '$lib/components/ops-schedules-panel.svelte';
 	import MemoryPanel from '$lib/components/memory-panel.svelte';
 	import WorkspacePanel from '$lib/components/workspace-panel.svelte';
 	import type {
@@ -26,42 +29,14 @@
 	} from '$lib/components/sandbox-inspector.svelte';
 	import ApprovalCenter from '$lib/components/approval-center.svelte';
 
-	type SessionRow = {
-		id: string;
-		sessionKey: string;
-		status: string;
-		workflowId: string;
-		createdAt: string;
-		updatedAt: string;
-	};
-
-	type RunRow = {
-		id: string;
-		sessionId: string;
-		workflowId: string;
-		status: string;
-		model: string | null;
-		finalAnswer: string | null;
-		startedAt: string | null;
-		completedAt: string | null;
-		createdAt: string;
-	};
-
-	type ScheduleForm = {
-		name: string;
-		description: string;
-		cronExpression: string;
-		prompt: string;
-	};
-
 	// — session/run navigation state —
-	let sessions = $state<SessionRow[]>([]);
+	let sessions = $state<OpsSessionRow[]>([]);
 	let sessionsLoading = $state(false);
 	let sessionsError = $state<string | null>(null);
-	let selectedSession = $state<SessionRow | null>(null);
-	let sessionRuns = $state<RunRow[]>([]);
+	let selectedSession = $state<OpsSessionRow | null>(null);
+	let sessionRuns = $state<OpsRunRow[]>([]);
 	let runsLoading = $state(false);
-	let selectedRun = $state<RunRow | null>(null);
+	let selectedRun = $state<OpsRunRow | null>(null);
 
 	// — inspector state —
 	let inspector = $state<RunInspectorProjection | null>(null);
@@ -91,31 +66,8 @@
 	let workspaceArtifacts = $state<WorkspaceArtifact[]>([]);
 	let workspaceDiffs = $state<WorkspaceDiff[]>([]);
 
-	// — manual inspector fallback —
-	let inspectorSessionKey = $state('');
-	let inspectorRunId = $state('');
-	let inspectorFormError = $state<string | null>(null);
-
-	// — schedules —
-	let schedules = $state<ScheduleProjection[]>([]);
-	let form = $state<ScheduleForm>({
-		name: '',
-		description: '',
-		cronExpression: '0 9 * * *',
-		prompt: ''
-	});
-	let schedulesLoading = $state(true);
-	let saving = $state(false);
-	let schedulesError = $state<string | null>(null);
-	let activeScheduleId = $state<string | null>(null);
-
-	const sortedSchedules = $derived(
-		[...schedules].sort((first, second) => first.name.localeCompare(second.name))
-	);
-
 	onMount(() => {
 		void loadSessions();
-		void loadSchedules();
 	});
 
 	// ── session navigation ──────────────────────────────────────────────────
@@ -126,7 +78,7 @@
 		try {
 			const response = await fetch('/api/sessions');
 			if (!response.ok) throw new Error(await response.text());
-			const body = (await response.json()) as { sessions: SessionRow[] };
+			const body = (await response.json()) as { sessions: OpsSessionRow[] };
 			sessions = body.sessions;
 		} catch (caught) {
 			sessionsError = messageFromCaught(caught, 'Failed to load sessions');
@@ -135,7 +87,7 @@
 		}
 	}
 
-	async function selectSession(session: SessionRow) {
+	async function selectSession(session: OpsSessionRow) {
 		selectedSession = session;
 		selectedRun = null;
 		inspector = null;
@@ -144,7 +96,7 @@
 		try {
 			const response = await fetch(`/api/sessions/${encodeURIComponent(session.sessionKey)}/runs`);
 			if (!response.ok) throw new Error(await response.text());
-			const body = (await response.json()) as { runs: RunRow[] };
+			const body = (await response.json()) as { runs: OpsRunRow[] };
 			sessionRuns = body.runs.sort(
 				(a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
 			);
@@ -153,7 +105,7 @@
 		}
 	}
 
-	async function selectRun(run: RunRow, sessionKey: string) {
+	async function selectRun(run: OpsRunRow, sessionKey: string) {
 		selectedRun = run;
 		inspector = null;
 		inspectorLoading = true;
@@ -292,14 +244,7 @@
 
 	// ── manual inspector fallback ────────────────────────────────────────────
 
-	async function loadRunInspectorManual() {
-		const sessionKey = inspectorSessionKey.trim();
-		const runId = inspectorRunId.trim();
-		if (!sessionKey || !runId) {
-			inspectorFormError = 'Session key and run id are required.';
-			return;
-		}
-		inspectorFormError = null;
+	async function loadRunInspectorManual(sessionKey: string, runId: string) {
 		await Promise.all([
 			loadInspector(sessionKey, runId),
 			loadMemory(sessionKey),
@@ -313,109 +258,6 @@
 		window.open(url, '_blank', 'noreferrer');
 	}
 
-	// ── schedules ───────────────────────────────────────────────────────────
-
-	async function loadSchedules() {
-		schedulesLoading = true;
-		schedulesError = null;
-		try {
-			const response = await fetch('/api/schedules');
-			if (!response.ok) throw new Error(await response.text());
-			const body = (await response.json()) as { schedules: ScheduleProjection[] };
-			schedules = body.schedules;
-		} catch (caught) {
-			schedulesError = messageFromCaught(caught, 'Failed to load schedules');
-		} finally {
-			schedulesLoading = false;
-		}
-	}
-
-	async function createSchedule() {
-		saving = true;
-		schedulesError = null;
-		try {
-			const response = await fetch('/api/schedules', {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({
-					name: form.name,
-					description: form.description,
-					cronExpression: form.cronExpression,
-					prompt: form.prompt
-				})
-			});
-			if (!response.ok) throw new Error(await response.text());
-			const body = (await response.json()) as { schedule: ScheduleProjection };
-			upsertSchedule(body.schedule);
-			form = { name: '', description: '', cronExpression: form.cronExpression, prompt: '' };
-		} catch (caught) {
-			schedulesError = messageFromCaught(caught, 'Failed to create schedule');
-		} finally {
-			saving = false;
-		}
-	}
-
-	async function triggerSchedule(scheduleId: string) {
-		const response = await runScheduleAction(scheduleId, 'trigger');
-		if (!response) return;
-		const body = (await response.json()) as { schedule: ScheduleProjection };
-		upsertSchedule(body.schedule);
-	}
-
-	async function pauseSchedule(scheduleId: string) {
-		const response = await runScheduleAction(scheduleId, 'pause');
-		if (!response) return;
-		const body = (await response.json()) as { schedule: ScheduleProjection };
-		upsertSchedule(body.schedule);
-	}
-
-	async function resumeSchedule(scheduleId: string) {
-		const response = await runScheduleAction(scheduleId, 'resume');
-		if (!response) return;
-		const body = (await response.json()) as { schedule: ScheduleProjection };
-		upsertSchedule(body.schedule);
-	}
-
-	async function deleteSchedule(scheduleId: string) {
-		activeScheduleId = scheduleId;
-		schedulesError = null;
-		try {
-			const response = await fetch(`/api/schedules/${scheduleId}`, { method: 'DELETE' });
-			if (!response.ok) throw new Error(await response.text());
-			schedules = schedules.filter((s) => s.temporalScheduleId !== scheduleId);
-		} catch (caught) {
-			schedulesError = messageFromCaught(caught, 'Failed to delete schedule');
-		} finally {
-			activeScheduleId = null;
-		}
-	}
-
-	async function runScheduleAction(scheduleId: string, action: 'trigger' | 'pause' | 'resume') {
-		activeScheduleId = scheduleId;
-		schedulesError = null;
-		try {
-			const response = await fetch(`/api/schedules/${scheduleId}/${action}`, { method: 'POST' });
-			if (!response.ok) throw new Error(await response.text());
-			return response;
-		} catch (caught) {
-			schedulesError = messageFromCaught(caught, `Failed to ${action} schedule`);
-			return null;
-		} finally {
-			activeScheduleId = null;
-		}
-	}
-
-	function upsertSchedule(nextSchedule: ScheduleProjection) {
-		const index = schedules.findIndex(
-			(s) => s.temporalScheduleId === nextSchedule.temporalScheduleId
-		);
-		if (index === -1) {
-			schedules = [...schedules, nextSchedule];
-			return;
-		}
-		schedules = schedules.map((s, i) => (i === index ? nextSchedule : s));
-	}
-
 	function messageFromCaught(caught: unknown, fallback: string) {
 		if (caught instanceof Error && caught.message) {
 			try {
@@ -426,14 +268,6 @@
 			}
 		}
 		return fallback;
-	}
-
-	function formatDate(value: string | null) {
-		return value ? new Date(value).toLocaleString() : 'None';
-	}
-
-	function formatStatus(status: string) {
-		return status.replace(/_/g, ' ');
 	}
 </script>
 
@@ -455,89 +289,20 @@
 				onclick={loadSessions}
 				disabled={sessionsLoading}
 			/>
-			<Button
-				variant="ghost"
-				size="sm"
-				label="Refresh Schedules"
-				onclick={loadSchedules}
-				disabled={schedulesLoading}
-			/>
 		</div>
 	</header>
 
-	<!-- ── Sessions and Run Navigation ─────────────────────────────────────── -->
-	<section class="panel" aria-labelledby="sessions-heading">
-		<div class="section-heading">
-			<div>
-				<h2 id="sessions-heading">Sessions</h2>
-				<p class="muted">Select a session then a run to inspect it.</p>
-			</div>
-		</div>
-
-		{#if sessionsError}
-			<p class="error">{sessionsError}</p>
-		{:else if sessionsLoading}
-			<p class="muted">Loading sessions...</p>
-		{:else if sessions.length === 0}
-			<p class="muted">No sessions found. Start a session using the turn endpoint.</p>
-		{:else}
-			<div class="session-list">
-				{#each sessions as session (session.id)}
-					<!-- Raw <button> preserved: full-width nav list item with class:selected
-					     and complex inner layout; Cinder Button can't accommodate this style. -->
-					<button
-						type="button"
-						class="session-row"
-						class:selected={selectedSession?.id === session.id}
-						onclick={() => void selectSession(session)}
-					>
-						<span class="session-key">{session.sessionKey}</span>
-						<span class="session-meta">
-							<span class="status-pill" data-status={session.status}>
-								{formatStatus(session.status)}
-							</span>
-							<span class="session-date">{formatDate(session.updatedAt)}</span>
-						</span>
-					</button>
-				{/each}
-			</div>
-		{/if}
-
-		{#if selectedSession}
-			<div class="runs-panel">
-				<h3>Runs for {selectedSession.sessionKey}</h3>
-				{#if runsLoading}
-					<p class="muted">Loading runs...</p>
-				{:else if sessionRuns.length === 0}
-					<p class="muted">No runs found for this session.</p>
-				{:else}
-					<ul class="run-list">
-						{#each sessionRuns as run (run.id)}
-							<li>
-								<!-- Raw <button> preserved: list-item layout with class:selected and
-								     complex inner content; Cinder Button can't accommodate this style. -->
-								<button
-									type="button"
-									class="run-row"
-									class:selected={selectedRun?.id === run.id}
-									onclick={() => void selectRun(run, selectedSession!.sessionKey)}
-								>
-									<code class="run-id">{run.id.slice(0, 16)}…</code>
-									<span class="status-pill" data-status={run.status}>
-										{formatStatus(run.status)}
-									</span>
-									{#if run.model}
-										<span class="run-model">{run.model}</span>
-									{/if}
-									<span class="run-date">{formatDate(run.startedAt)}</span>
-								</button>
-							</li>
-						{/each}
-					</ul>
-				{/if}
-			</div>
-		{/if}
-	</section>
+	<OpsSessionBrowser
+		{sessions}
+		{sessionsLoading}
+		{sessionsError}
+		{selectedSession}
+		{sessionRuns}
+		{runsLoading}
+		{selectedRun}
+		onSelectSession={(session) => void selectSession(session)}
+		onSelectRun={(run, sessionKey) => void selectRun(run, sessionKey)}
+	/>
 
 	<!-- ── Inspector Panels ───────────────────────────────────────────────── -->
 	{#if inspectorLoading}
@@ -603,183 +368,17 @@
 		</div>
 	{/if}
 
-	<!-- ── Manual Inspector Fallback ──────────────────────────────────────── -->
-	<section class="panel" aria-labelledby="manual-inspector-heading">
-		<div class="section-heading">
-			<div>
-				<h2 id="manual-inspector-heading">Manual Run Inspector</h2>
-				<p class="muted">Enter a session key and run ID to inspect directly.</p>
-			</div>
-			{#if inspector}
-				<Button
-					label="Temporal Web ↗"
-					variant="secondary"
-					size="sm"
-					onclick={() => openTemporalWeb(inspector!.temporalWebUrl)}
-				/>
-			{/if}
-		</div>
+	<OpsManualInspector
+		{inspector}
+		{inspectorLoading}
+		onInspect={(sessionKey, runId) => void loadRunInspectorManual(sessionKey, runId)}
+		onOpenTemporalWeb={openTemporalWeb}
+	/>
 
-		<form
-			class="inspector-form"
-			onsubmit={(event) => {
-				event.preventDefault();
-				void loadRunInspectorManual();
-			}}
-		>
-			<Input
-				id="inspector-session-key"
-				label="Session Key"
-				bind:value={inspectorSessionKey}
-				required
-				autocomplete="off"
-			/>
-			<Input
-				id="inspector-run-id"
-				label="Run Id"
-				bind:value={inspectorRunId}
-				required
-				autocomplete="off"
-			/>
-			<Button
-				label={inspectorLoading ? 'Loading…' : 'Inspect Run'}
-				variant="primary"
-				type="submit"
-				disabled={inspectorLoading}
-				class="form-submit"
-			/>
-		</form>
-
-		{#if inspectorFormError}
-			<p class="error">{inspectorFormError}</p>
-		{/if}
-	</section>
-
-	<!-- ── Create Schedule ────────────────────────────────────────────────── -->
-	<section class="panel" aria-labelledby="create-schedule-heading">
-		<h2 id="create-schedule-heading">Create Schedule</h2>
-		{#if schedulesError}
-			<p class="error">{schedulesError}</p>
-		{/if}
-		<form
-			onsubmit={(event) => {
-				event.preventDefault();
-				void createSchedule();
-			}}
-		>
-			<Input id="schedule-name" label="Name" bind:value={form.name} required autocomplete="off" />
-			<Input
-				id="schedule-description"
-				label="Description"
-				bind:value={form.description}
-				autocomplete="off"
-			/>
-			<Input
-				id="schedule-cron"
-				label="Cron Expression"
-				bind:value={form.cronExpression}
-				required
-				autocomplete="off"
-			/>
-			<Textarea
-				id="schedule-prompt"
-				label="Prompt"
-				bind:value={form.prompt}
-				required
-				rows={4}
-				class="prompt-field"
-			/>
-			<Button
-				label={saving ? 'Creating…' : 'Create Schedule'}
-				variant="primary"
-				type="submit"
-				disabled={saving}
-				class="form-submit"
-			/>
-		</form>
-	</section>
-
-	<!-- ── Schedules List ─────────────────────────────────────────────────── -->
-	<section aria-labelledby="schedule-list-heading">
-		<h2 id="schedule-list-heading">Schedules</h2>
-
-		{#if schedulesLoading}
-			<p class="muted">Loading schedules...</p>
-		{:else if sortedSchedules.length === 0}
-			<p class="muted">No schedules configured.</p>
-		{:else}
-			<div class="schedule-list">
-				{#each sortedSchedules as schedule (schedule.temporalScheduleId)}
-					<article class="schedule-row">
-						<div class="schedule-summary">
-							<div>
-								<h3>{schedule.name}</h3>
-								{#if schedule.description}
-									<p>{schedule.description}</p>
-								{/if}
-							</div>
-							<span class:paused={schedule.status === 'paused'}>{schedule.status}</span>
-						</div>
-						<dl>
-							<div>
-								<dt>Cron</dt>
-								<dd>{schedule.cronExpression}</dd>
-							</div>
-							<div>
-								<dt>Next Run</dt>
-								<dd>{formatDate(schedule.nextRunAt)}</dd>
-							</div>
-							<div>
-								<dt>Last Run</dt>
-								<dd>{formatDate(schedule.lastRunAt)}</dd>
-							</div>
-						</dl>
-						<p class="prompt">{schedule.prompt}</p>
-						<div class="actions">
-							<Button
-								label="Trigger Now"
-								variant="secondary"
-								size="sm"
-								onclick={() => void triggerSchedule(schedule.temporalScheduleId)}
-								disabled={activeScheduleId === schedule.temporalScheduleId}
-							/>
-							{#if schedule.status === 'paused'}
-								<Button
-									label="Resume"
-									variant="secondary"
-									size="sm"
-									onclick={() => void resumeSchedule(schedule.temporalScheduleId)}
-									disabled={activeScheduleId === schedule.temporalScheduleId}
-								/>
-							{:else}
-								<Button
-									label="Pause"
-									variant="secondary"
-									size="sm"
-									onclick={() => void pauseSchedule(schedule.temporalScheduleId)}
-									disabled={activeScheduleId === schedule.temporalScheduleId}
-								/>
-							{/if}
-							<Button
-								label="Delete"
-								variant="danger"
-								size="sm"
-								onclick={() => void deleteSchedule(schedule.temporalScheduleId)}
-								disabled={activeScheduleId === schedule.temporalScheduleId}
-							/>
-						</div>
-					</article>
-				{/each}
-			</div>
-		{/if}
-	</section>
+	<OpsSchedulesPanel />
 </main>
 
 <style>
-	button {
-		font: inherit;
-	}
-
 	.console {
 		width: min(1120px, calc(100vw - 40px));
 		margin: 0 auto;
@@ -810,8 +409,6 @@
 	}
 
 	h1,
-	h2,
-	h3,
 	p {
 		margin-top: 0;
 	}
@@ -822,11 +419,6 @@
 		line-height: 1;
 	}
 
-	h2 {
-		margin-bottom: 12px;
-		font-size: 1.1rem;
-	}
-
 	.panel {
 		border: 1px solid var(--cinder-border);
 		border-radius: var(--cinder-radius-lg);
@@ -834,249 +426,9 @@
 		background: var(--cinder-surface);
 	}
 
-	.section-heading {
-		display: flex;
-		align-items: start;
-		justify-content: space-between;
-		gap: 16px;
-		margin-bottom: 16px;
-	}
-
-	.section-heading h2,
-	.section-heading p {
-		margin-bottom: 0;
-	}
-
-	.session-list {
-		display: grid;
-		gap: 6px;
-	}
-
-	.session-row {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-		width: 100%;
-		padding: 10px 14px;
-		border: 1px solid var(--cinder-border-muted);
-		border-radius: var(--cinder-radius-md);
-		background: var(--cinder-surface-inset);
-		color: inherit;
-		font: inherit;
-		font-size: var(--cinder-text-sm);
-		cursor: pointer;
-		text-align: left;
-	}
-
-	.session-row.selected,
-	.run-row.selected {
-		border-color: var(--cinder-accent);
-		background: var(--cinder-surface-raised);
-	}
-
-	.session-key {
-		font-family: var(--cinder-font-mono);
-		font-size: var(--cinder-text-sm);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.session-meta {
-		display: flex;
-		gap: 8px;
-		align-items: center;
-		flex-shrink: 0;
-	}
-
-	.session-date,
-	.run-date {
-		color: var(--cinder-text-subtle);
-		font-size: var(--cinder-text-xs);
-	}
-
-	.status-pill {
-		display: inline-block;
-		padding: 0.15rem 0.5rem;
-		border-radius: var(--cinder-radius-full);
-		font-size: var(--cinder-text-2xs);
-		font-weight: 700;
-		text-transform: capitalize;
-		background: var(--cinder-surface-inset);
-		color: var(--cinder-text-subtle);
-	}
-
-	.status-pill[data-status='active'],
-	.status-pill[data-status='complete'] {
-		background: var(--cinder-color-success-bg);
-		color: var(--cinder-color-success-fg);
-	}
-
-	.status-pill[data-status='failed'] {
-		background: var(--cinder-color-danger-bg);
-		color: var(--cinder-color-danger-fg);
-	}
-
-	.status-pill[data-status='running'],
-	.status-pill[data-status='waiting_approval'] {
-		background: var(--cinder-color-info-bg);
-		color: var(--cinder-color-info-fg);
-	}
-
-	.status-pill[data-status='idle'],
-	.status-pill[data-status='pending'] {
-		background: var(--cinder-surface-inset);
-		color: var(--cinder-text-subtle);
-	}
-
-	.runs-panel {
-		margin-top: 16px;
-		padding-top: 16px;
-		border-top: 1px solid var(--cinder-border-muted);
-	}
-
-	.runs-panel h3 {
-		font-size: var(--cinder-text-sm);
-		margin-bottom: 10px;
-		color: var(--cinder-text-muted);
-	}
-
-	.run-list {
-		display: grid;
-		gap: 4px;
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-
-	.run-row {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		width: 100%;
-		padding: 8px 12px;
-		border: 1px solid var(--cinder-border-muted);
-		border-radius: var(--cinder-radius-sm);
-		background: var(--cinder-surface-inset);
-		color: inherit;
-		font: inherit;
-		font-size: var(--cinder-text-sm);
-		cursor: pointer;
-		text-align: left;
-	}
-
-	.run-id {
-		font-family: var(--cinder-font-mono);
-		font-size: var(--cinder-text-xs);
-	}
-
-	.run-model {
-		font-family: var(--cinder-font-mono);
-		font-size: var(--cinder-text-xs);
-		color: var(--cinder-text-subtle);
-	}
-
 	.inspector-layout {
 		display: grid;
 		gap: 16px;
-	}
-
-	.schedule-list {
-		display: grid;
-		gap: 12px;
-	}
-
-	.schedule-row {
-		display: grid;
-		gap: 14px;
-		padding: 18px;
-		border: 1px solid var(--cinder-border);
-		border-radius: var(--cinder-radius-lg);
-		background: var(--cinder-surface);
-	}
-
-	.schedule-summary {
-		display: flex;
-		align-items: start;
-		justify-content: space-between;
-		gap: 16px;
-	}
-
-	.schedule-summary h3 {
-		margin-bottom: 4px;
-		font-size: 1rem;
-	}
-
-	.schedule-summary p,
-	.prompt {
-		margin-bottom: 0;
-		color: var(--cinder-text-muted);
-	}
-
-	.schedule-summary span {
-		border-radius: var(--cinder-radius-full);
-		padding: 4px 10px;
-		background: var(--cinder-color-success-bg);
-		color: var(--cinder-color-success-fg);
-		font-size: var(--cinder-text-xs);
-		font-weight: 800;
-		text-transform: capitalize;
-		flex-shrink: 0;
-	}
-
-	.schedule-summary span.paused {
-		background: var(--cinder-color-warning-bg);
-		color: var(--cinder-color-warning-fg);
-	}
-
-	dl {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 12px;
-		margin: 0;
-	}
-
-	dt {
-		color: var(--cinder-text-subtle);
-		font-size: var(--cinder-text-xs);
-		font-weight: 800;
-		text-transform: uppercase;
-	}
-
-	dd {
-		margin: 3px 0 0;
-		overflow-wrap: anywhere;
-	}
-
-	.prompt {
-		border-top: 1px solid var(--cinder-border-muted);
-		padding-top: 12px;
-	}
-
-	form {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 14px;
-	}
-
-	:global(.prompt-field) {
-		grid-column: 1 / -1;
-	}
-
-	.inspector-form {
-		grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
-		align-items: end;
-	}
-
-	:global(.form-submit) {
-		justify-self: start;
-	}
-
-	.actions {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px;
 	}
 
 	.error {
@@ -1107,25 +459,9 @@
 			padding-top: 20px;
 		}
 
-		.page-header,
-		.schedule-summary {
+		.page-header {
 			align-items: stretch;
 			flex-direction: column;
-		}
-
-		form,
-		.inspector-form,
-		dl {
-			grid-template-columns: 1fr;
-		}
-
-		.section-heading {
-			align-items: stretch;
-			flex-direction: column;
-		}
-
-		button {
-			width: 100%;
 		}
 	}
 </style>

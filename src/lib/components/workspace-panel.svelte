@@ -2,6 +2,7 @@
 	import EmptyState from '@lostgradient/cinder/empty-state';
 	import Badge from '@lostgradient/cinder/badge';
 	import Button from '@lostgradient/cinder/button';
+	import SourceDiffViewer from '@lostgradient/cinder/source-diff-viewer';
 
 	export type WorkspaceFile = {
 		path: string;
@@ -120,22 +121,6 @@
 		const match = diff.patch.match(/\+\+\+ b\/(.+)/);
 		return match?.[1] ?? 'diff';
 	}
-
-	type DiffLineKind = 'add' | 'remove' | 'context' | 'header';
-	type DiffLine = { kind: DiffLineKind; text: string };
-
-	function parsePatch(patch: string): DiffLine[] {
-		return patch
-			.split('\n')
-			.filter((line) => line.length > 0)
-			.map((line): DiffLine => {
-				if (line.startsWith('+') && !line.startsWith('+++')) return { kind: 'add', text: line };
-				if (line.startsWith('-') && !line.startsWith('---')) return { kind: 'remove', text: line };
-				if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++'))
-					return { kind: 'header', text: line };
-				return { kind: 'context', text: line };
-			});
-	}
 </script>
 
 <section class="workspace-panel" aria-labelledby="workspace-panel-heading">
@@ -243,11 +228,11 @@
 							</a>
 						{/if}
 					</div>
-					<div class="diff-content" data-diff-patch>
-						{#each parsePatch(activeDiff.patch) as line, i (`${i}:${line.text}`)}
-							<div class="diff-line diff-line-{line.kind}">{line.text}</div>
-						{/each}
-					</div>
+					<SourceDiffViewer
+						patch={activeDiff.patch}
+						ariaLabel="Workspace diff"
+						class="workspace-diff-viewer"
+					/>
 				{:else}
 					<div class="diff-placeholder">
 						<span class="subtle-text">No diff to display</span>
@@ -626,32 +611,9 @@
 		text-decoration: underline;
 	}
 
-	.diff-content {
+	:global(.workspace-diff-viewer) {
 		flex: 1;
-		overflow: auto;
-		font:
-			500 12px/1.7 ui-monospace,
-			monospace;
-		background: var(--cinder-surface-inset);
-	}
-
-	.diff-line {
-		padding: 0 6px;
-		white-space: pre;
-	}
-
-	.diff-line-add {
-		background: var(--cinder-color-success-bg);
-		color: var(--cinder-color-success-fg);
-	}
-
-	.diff-line-remove {
-		background: var(--cinder-color-danger-bg);
-		color: var(--cinder-color-danger-fg);
-	}
-
-	.diff-line-header {
-		color: var(--cinder-text-subtle);
+		min-height: 0;
 	}
 
 	.diff-placeholder {

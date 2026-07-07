@@ -1,4 +1,4 @@
-import { mount, unmount } from 'svelte';
+import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import ReplayScrubber from './replay-scrubber.svelte';
 
@@ -54,14 +54,42 @@ describe('ReplayScrubber', () => {
 			props: { maxSequence: 10, cursor: 4, onScrub }
 		});
 
-		const slider = document.querySelector('input[type="range"]') as HTMLInputElement;
-		slider.value = '10';
-		slider.dispatchEvent(new Event('input', { bubbles: true }));
-		expect(onScrub).toHaveBeenCalledWith(null);
+		const slider = document.querySelector('[role="slider"]') as HTMLElement;
+		expect(slider).toBeInstanceOf(HTMLElement);
+		expect(slider.getAttribute('aria-valuenow')).toBe('4');
+		expect(slider.getAttribute('aria-valuemax')).toBe('10');
 
-		slider.value = '5';
-		slider.dispatchEvent(new Event('input', { bubbles: true }));
+		unmount(component);
+	});
+
+	it('reports a numeric cursor while scrubbed before the latest event', () => {
+		const onScrub = vi.fn();
+		const component = mount(ReplayScrubber, {
+			target: document.body,
+			props: { maxSequence: 10, cursor: 4, onScrub }
+		});
+
+		const slider = document.querySelector('[role="slider"]') as HTMLElement;
+		slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+		flushSync();
+
 		expect(onScrub).toHaveBeenCalledWith(5);
+
+		unmount(component);
+	});
+
+	it('reports null when the slider reaches the live position', () => {
+		const onScrub = vi.fn();
+		const component = mount(ReplayScrubber, {
+			target: document.body,
+			props: { maxSequence: 10, cursor: 4, onScrub }
+		});
+
+		const slider = document.querySelector('[role="slider"]') as HTMLElement;
+		slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+		flushSync();
+
+		expect(onScrub).toHaveBeenCalledWith(null);
 
 		unmount(component);
 	});

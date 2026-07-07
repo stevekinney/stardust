@@ -47,7 +47,12 @@
 	]);
 </script>
 
-<NavigationBar label="Primary" class="top-nav" bind:mobileMenuOpen>
+<NavigationBar
+	label="Primary"
+	class="top-nav"
+	menuTogglePlacement="before-brand"
+	bind:mobileMenuOpen
+>
 	{#snippet brand()}
 		<a href={resolve('/')} class="brand" aria-label="Stardust home">STARDUST</a>
 	{/snippet}
@@ -211,24 +216,6 @@
 		color: var(--cinder-text);
 	}
 
-	/*
-	 * Cinder renders the toggle after the brand in markup, but it reads as a
-	 * "reveal the menu" control, so it belongs to the left of the wordmark it
-	 * expands — visually reorder it first. When the tab list then collapses
-	 * out of flow, the nav is left with three flex children (toggle, brand,
-	 * actions) and the bar's own `justify-content: space-between` would
-	 * center the middle one; an auto margin on the brand's end side absorbs
-	 * the leftover space instead, so space-between has nothing left to
-	 * distribute between the toggle+brand pair and actions.
-	 */
-	:global(.cinder-navigation-bar__menu-toggle) {
-		order: -1;
-	}
-
-	:global(.cinder-navigation-bar__brand) {
-		margin-inline-end: auto;
-	}
-
 	.menu-toggle {
 		display: flex;
 		align-items: center;
@@ -274,31 +261,5 @@
 		backdrop-filter: blur(3px);
 		/* One below Cinder's dropdown so the open menu still renders on top of it. */
 		z-index: calc(var(--cinder-z-dropdown, 1100) - 1);
-	}
-
-	/*
-	 * Cinder's collapsed-dropdown CSS (`[data-variant='mobile']` under a
-	 * top-placement bar) makes each item a full-width row, but never resets
-	 * the horizontal tab's active indicator — a 2px accent underline — so the
-	 * active row shows a stray line stretching the width of the dropdown
-	 * instead of reading as "selected". Give it a background highlight
-	 * instead, the conventional treatment for a vertical menu.
-	 */
-	:global(
-		.cinder-navigation-bar[data-collapsible='true']
-			.cinder-navigation-bar__items[data-open='true']
-			.cinder-navigation-item[data-variant='mobile']
-	) {
-		border-bottom-color: transparent;
-	}
-
-	:global(
-		.cinder-navigation-bar[data-collapsible='true']
-			.cinder-navigation-bar__items[data-open='true']
-			.cinder-navigation-item[data-variant='mobile'][data-active='true']
-	) {
-		background: var(--cinder-surface-inset);
-		border-radius: var(--cinder-radius-md);
-		color: var(--cinder-text);
 	}
 </style>
