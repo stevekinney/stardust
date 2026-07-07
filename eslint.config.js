@@ -95,7 +95,10 @@ export default defineConfig(
 			// throw is a normal test-utility pattern, not workflow code).
 			'temporal/workflow-no-nondeterministic-control-flow': 'off',
 			'temporal/workflow-no-throw-raw-error': 'off',
-			'temporal/workflow-prefer-sleep': 'off'
+			'temporal/workflow-prefer-sleep': 'off',
+			// Tests legitimately read/stub process.env (vi.stubEnv, building
+			// sanitized child-process environments) — same plain-Node rationale.
+			'temporal/workflow-no-process-env': 'off'
 		}
 	},
 	{
