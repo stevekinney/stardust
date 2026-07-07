@@ -3,13 +3,16 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import Button from '@lostgradient/cinder/button';
+	import FacetedFilterBar, {
+		type AppliedFilter,
+		type FacetDefinition
+	} from '@lostgradient/cinder/faceted-filter-bar';
 	import Textarea from '@lostgradient/cinder/textarea';
-	import SessionFilterChips, {
-		type SessionFilter
-	} from '$lib/components/session-filter-chips.svelte';
 	import SessionRowCard, { sessionTone } from '$lib/components/session-row.svelte';
 	import { sessionsStore } from '$lib/sessions.svelte';
 	import type { SessionRow } from '$lib/types';
+
+	type SessionFilter = 'all' | 'running' | 'needs-you' | 'complete';
 
 	let filter = $state<SessionFilter>('all');
 	let message = $state('');
@@ -35,6 +38,34 @@
 		}
 		return activeSessions;
 	});
+
+	const filterOptions = $derived([
+		{ value: 'all', label: `All ${counts.all}` },
+		{ value: 'running', label: `Running ${counts.running}` },
+		{ value: 'needs-you', label: `Needs you ${counts['needs-you']}` },
+		{ value: 'complete', label: `Complete ${counts.complete}` }
+	]);
+
+	const sessionFilterFacets = $derived<FacetDefinition[]>([
+		{
+			type: 'select',
+			key: 'status',
+			label: 'Status',
+			options: filterOptions
+		}
+	]);
+
+	const appliedSessionFilters = $derived<AppliedFilter[]>(
+		filter === 'all'
+			? []
+			: [
+					{
+						key: 'status',
+						value: filter,
+						label: filterOptions.find((option) => option.value === filter)?.label ?? filter
+					}
+				]
+	);
 
 	const CONCEPT_MAP = [
 		{ app: 'Session', temporal: 'Workflow' },
@@ -120,6 +151,11 @@
 		message = task.prompt;
 		handleSubmit();
 	}
+
+	function handleSessionFilterChange(key: string, value: string) {
+		if (key !== 'status') return;
+		filter = (value || 'all') as SessionFilter;
+	}
 </script>
 
 <svelte:head>
@@ -144,7 +180,14 @@
 			<Button variant="primary" size="sm" label="New session" onclick={handleNewSession} />
 		</div>
 
-		<SessionFilterChips value={filter} {counts} onchange={(next) => (filter = next)} />
+		<FacetedFilterBar
+			aria-label="Filter sessions"
+			facets={sessionFilterFacets}
+			appliedFilters={appliedSessionFilters}
+			onfacetchange={handleSessionFilterChange}
+			onfilterremove={() => (filter = 'all')}
+			onclearall={() => (filter = 'all')}
+		/>
 
 		<div class="session-rows">
 			{#each filteredSessions as session (session.id)}

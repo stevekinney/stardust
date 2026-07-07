@@ -46,6 +46,7 @@ test('new schedule button opens the create form and submits a schedule', async (
 	});
 
 	await page.goto('/schedules');
+	await expect(page.getByText('Loading…')).toHaveCount(0);
 
 	await page.getByRole('button', { name: 'New schedule' }).click();
 	await expect(page.getByRole('heading', { name: 'Create schedule' })).toBeVisible();

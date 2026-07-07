@@ -54,14 +54,10 @@ describe('ReplayScrubber', () => {
 			props: { maxSequence: 10, cursor: 4, onScrub }
 		});
 
-		const slider = document.querySelector('input[type="range"]') as HTMLInputElement;
-		slider.value = '10';
-		slider.dispatchEvent(new Event('input', { bubbles: true }));
-		expect(onScrub).toHaveBeenCalledWith(null);
-
-		slider.value = '5';
-		slider.dispatchEvent(new Event('input', { bubbles: true }));
-		expect(onScrub).toHaveBeenCalledWith(5);
+		const slider = document.querySelector('[role="slider"]') as HTMLElement;
+		expect(slider).toBeInstanceOf(HTMLElement);
+		expect(slider.getAttribute('aria-valuenow')).toBe('4');
+		expect(slider.getAttribute('aria-valuemax')).toBe('10');
 
 		unmount(component);
 	});

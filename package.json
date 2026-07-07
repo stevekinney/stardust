@@ -65,7 +65,7 @@
 	},
 	"dependencies": {
 		"@anthropic-ai/sdk": "^0.71.2",
-		"@lostgradient/cinder": "^0.4.1",
+		"@lostgradient/cinder": "0.7.0",
 		"@modelcontextprotocol/sdk": "^1.29.0",
 		"@playwright/mcp": "^0.0.77",
 		"@temporalio/activity": "^1.18.1",

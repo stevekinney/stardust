@@ -7,7 +7,13 @@
 	import { relativeTime } from '$lib/session-display';
 	import type { InboxMemoryCandidate, ScheduleProjection } from '$lib/types';
 
-	type ResolvedNotice = { approvalId: string; action: 'approve' | 'deny'; toolName: string };
+	type ApprovalResolveAction = 'approve' | 'approve_with_edits' | 'deny';
+
+	type ResolvedNotice = {
+		approvalId: string;
+		action: ApprovalResolveAction;
+		toolName: string;
+	};
 
 	let resolvedNow = $state<ResolvedNotice[]>([]);
 	let candidateDecisions = $state<Record<string, 'saved' | 'discarded'>>({});
@@ -18,13 +24,19 @@
 		void loadScheduleFyi();
 	});
 
-	async function resolveApproval(approvalId: string, action: 'approve' | 'deny') {
+	async function resolveApproval(
+		approvalId: string,
+		action: ApprovalResolveAction,
+		editedArguments?: unknown
+	) {
 		const approval = inbox.pendingApprovals.find((entry) => entry.approvalId === approvalId);
 		try {
 			const response = await fetch(`/api/approvals/${approvalId}/resolve`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ action })
+				body: JSON.stringify(
+					action === 'approve_with_edits' ? { action, editedArguments } : { action }
+				)
 			});
 			if (!response.ok) return;
 			resolvedNow = [

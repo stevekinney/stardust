@@ -1,5 +1,7 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/page-header.svelte';
+	import Button from '@lostgradient/cinder/button';
+	import NumberInput from '@lostgradient/cinder/number-input';
 	import Select from '@lostgradient/cinder/select';
 
 	type Theme = 'system' | 'light' | 'dark';
@@ -130,30 +132,22 @@
 					continue.
 				</div>
 				<div class="section-fields-grid">
-					<div class="field">
-						<label class="field-label" for="tokens-input">Tokens per run</label>
-						<input
-							id="tokens-input"
-							type="number"
-							min="0"
-							step="10000"
-							class="input"
-							bind:value={tokensPerRun}
-						/>
-						<span class="field-desc">Soft-stop & ask to continue</span>
-					</div>
-					<div class="field">
-						<label class="field-label" for="spend-input">Spend per run (USD)</label>
-						<input
-							id="spend-input"
-							type="number"
-							min="0"
-							step="0.5"
-							class="input"
-							bind:value={maxBudgetUsd}
-						/>
-						<span class="field-desc">Estimated from token usage</span>
-					</div>
+					<NumberInput
+						id="tokens-input"
+						label="Tokens per run"
+						description="Soft-stop & ask to continue"
+						min={0}
+						step={10000}
+						bind:value={tokensPerRun}
+					/>
+					<NumberInput
+						id="spend-input"
+						label="Spend per run (USD)"
+						description="Estimated from token usage"
+						min={0}
+						step={0.5}
+						bind:value={maxBudgetUsd}
+					/>
 				</div>
 			</section>
 
@@ -214,9 +208,12 @@
 						<div class="danger-title">Reset all local state</div>
 						<div class="danger-desc">{RESET_LOCAL_DATA_WARNING}</div>
 					</div>
-					<button type="button" class="danger-action" onclick={clearLocalData}>
-						Reset all local state
-					</button>
+					<Button
+						type="button"
+						variant="danger"
+						label="Reset all local state"
+						onclick={clearLocalData}
+					/>
 				</div>
 			</section>
 		</div>
@@ -277,37 +274,6 @@
 		background: var(--cinder-border);
 	}
 
-	.field {
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-	}
-
-	.field-label {
-		font: 500 12.5px system-ui;
-		color: var(--cinder-text);
-	}
-
-	.input {
-		width: 100%;
-		padding: 10px 12px;
-		border: 1px solid var(--cinder-border);
-		border-radius: var(--cinder-radius-md, 8px);
-		background: var(--cinder-surface-inset);
-		color: var(--cinder-text);
-		font: 500 13px system-ui;
-	}
-
-	.input:focus {
-		outline: 2px solid var(--cinder-accent);
-		outline-offset: 2px;
-	}
-
-	.field-desc {
-		font: 400 11px system-ui;
-		color: var(--cinder-text-subtle);
-	}
-
 	.mono {
 		font-family: var(--cinder-font-mono);
 	}
@@ -360,34 +326,13 @@
 		opacity: 0.9;
 	}
 
-	.danger-action {
-		flex: none;
-		min-height: 38px;
-		padding: 0 14px;
-		border: 1px solid var(--cinder-color-danger-border);
-		border-radius: var(--cinder-radius-md, 8px);
-		background: var(--cinder-color-danger-fg);
-		color: var(--cinder-color-danger-bg);
-		font: 700 12px system-ui;
-		cursor: pointer;
-	}
-
-	.danger-action:hover {
-		filter: brightness(1.08);
-	}
-
-	.danger-action:focus-visible {
-		outline: 2px solid var(--cinder-color-danger-fg);
-		outline-offset: 2px;
-	}
-
 	@media (max-width: 720px) {
 		.danger-zone {
 			align-items: stretch;
 			flex-direction: column;
 		}
 
-		.danger-action {
+		.danger-zone :global(.cinder-button) {
 			width: 100%;
 		}
 	}

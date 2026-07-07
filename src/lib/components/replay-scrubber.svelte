@@ -1,5 +1,7 @@
 <script lang="ts">
 	import Badge from '@lostgradient/cinder/badge';
+	import Button from '@lostgradient/cinder/button';
+	import Slider from '@lostgradient/cinder/slider';
 
 	type Props = {
 		/** Highest durable transcript sequence — the "live" position. */
@@ -16,8 +18,7 @@
 	const value = $derived(cursor === null ? maxSequence : Math.min(cursor, maxSequence));
 	const isLive = $derived(value >= maxSequence);
 
-	function handleInput(event: Event) {
-		const next = Number((event.target as HTMLInputElement).value);
+	function handleChange(next: number) {
 		onScrub(next >= maxSequence ? null : next);
 	}
 </script>
@@ -31,16 +32,15 @@
 			<Badge variant="success" size="sm" mono>LIVE</Badge>
 		{:else}
 			<Badge variant="warning" size="sm" mono>REPLAY</Badge>
-			<button type="button" class="jump-live" onclick={() => onScrub(null)}>Jump to live</button>
+			<Button size="xs" variant="ghost" label="Jump to live" onclick={() => onScrub(null)} />
 		{/if}
 	</div>
-	<input
-		type="range"
-		min="1"
+	<Slider
+		label="Replay history scrubber"
+		min={1}
 		max={maxSequence}
 		{value}
-		oninput={handleInput}
-		aria-label="Replay history scrubber"
+		onchange={handleChange}
 	/>
 	<p class="scrubber-caption">
 		{#if isLive}
@@ -84,27 +84,6 @@
 
 	.spacer {
 		flex: 1;
-	}
-
-	.jump-live {
-		border: none;
-		background: transparent;
-		color: var(--cinder-accent-text);
-		font-size: 11px;
-		font-weight: 600;
-		cursor: pointer;
-		padding: 0;
-	}
-
-	.jump-live:hover {
-		text-decoration: underline;
-	}
-
-	input[type='range'] {
-		width: 100%;
-		accent-color: var(--cinder-accent);
-		cursor: ew-resize;
-		margin: 0;
 	}
 
 	.scrubber-caption {

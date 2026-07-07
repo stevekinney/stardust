@@ -30,14 +30,13 @@ The current design handoff is `Stardust Console v2.dc.html` (1384 lines) — the
 
 ## Cinder Design System
 
-Uses `@lostgradient/cinder ^0.4.1`. Key components and their imports:
+Uses `@lostgradient/cinder 0.7.0`. Key components and their imports:
 
 ```ts
 import Badge from '@lostgradient/cinder/badge';
 import Button from '@lostgradient/cinder/button';
 import Select from '@lostgradient/cinder/select';
 import StatusDot from '@lostgradient/cinder/status-dot';
-import Toggle from '@lostgradient/cinder/toggle';
 import Textarea from '@lostgradient/cinder/textarea';
 import Chat from '@lostgradient/cinder/chat';
 import RunStepTimeline from '@lostgradient/cinder/run-step-timeline';
@@ -47,7 +46,7 @@ import ApprovalCard from '@lostgradient/cinder/approval-card';
 import FacetedFilterBar from '@lostgradient/cinder/faceted-filter-bar';
 ```
 
-**SSR bug (Cinder issue #533):** Cinder can't SSR. `src/routes/+layout.ts` sets `export const ssr = false;`—don't change this.
+`src/routes/+layout.svelte` imports `@lostgradient/cinder/styles` plus per-component style sidecars. Do not switch back to `@lostgradient/cinder/styles/all` for production paths.
 
 **Upstream issues:** `@lostgradient/*` packages are ours (repo: `stevekinney/cinder`). If you hit a bug, missing export, or need a new feature in Cinder, file a ticket on that repo with `gh issue create --repo stevekinney/cinder` including a clear repro or spec. Do not work around it silently, vendor a fork, or patch locally. Source map warnings during tests are the known Cinder issue #562—don't file a duplicate.
 

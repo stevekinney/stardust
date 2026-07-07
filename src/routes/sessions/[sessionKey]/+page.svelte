@@ -360,18 +360,24 @@
 		}
 	}
 
-	async function resolveSessionApproval(approvalId: string, action: 'approve' | 'deny') {
+	async function resolveSessionApproval(
+		approvalId: string,
+		action: 'approve' | 'approve_with_edits' | 'deny',
+		editedArguments?: unknown
+	) {
 		try {
 			await fetch(`/api/approvals/${approvalId}/resolve`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ action })
+				body: JSON.stringify(
+					action === 'approve_with_edits' ? { action, editedArguments } : { action }
+				)
 			});
 		} catch {
 			// Non-fatal
 		} finally {
 			pendingApproval = null;
-			approvalResolution = action;
+			approvalResolution = action === 'deny' ? 'deny' : 'approve';
 		}
 	}
 

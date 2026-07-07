@@ -43,8 +43,10 @@ test('home page shows welcome screen when there are no sessions', async ({ page 
 	await expect(nav.getByRole('link', { name: 'Sessions' })).toBeVisible();
 	await expect(nav.getByRole('link', { name: 'Schedules' })).toBeVisible();
 
-	await nav.getByRole('button', { name: /temporal/ }).click();
-	const health = page.getByRole('dialog', { name: 'Infrastructure health' });
+	const healthTrigger = nav.getByRole('button', { name: /temporal/ });
+	const health = page.locator('.cinder-popover').filter({ hasText: 'Everything durable' });
+	await expect(healthTrigger).toHaveAttribute('aria-haspopup', 'dialog');
+	await healthTrigger.click();
 	await expect(health).toBeVisible();
 	await expect(health.getByText('Everything durable')).toBeVisible();
 	await expect(health.getByRole('link', { name: 'Open Temporal Web ↗' })).toHaveAttribute(
@@ -218,8 +220,9 @@ test('home page shows the session list when sessions exist', async ({ page }) =>
 		main.getByRole('link', { name: 'Open my-test-session in Temporal Web' })
 	).toBeVisible();
 	await expect(main.getByText('Ready to resume where you left off.')).toHaveCount(0);
-	await expect(main.getByRole('group', { name: 'Filter sessions' })).toBeVisible();
-	await expect(main.getByRole('button', { name: 'Needs you 0' })).toBeVisible();
+	await expect(main.getByRole('search', { name: 'Filter sessions' })).toBeVisible();
+	await expect(main.getByRole('combobox', { name: 'Status' })).toBeVisible();
+	await expect(main.getByRole('option', { name: 'Needs you 0' })).toHaveCount(1);
 });
 
 test('resume: navigating to an existing session rehydrates the conversation from transcript', async ({

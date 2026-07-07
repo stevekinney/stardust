@@ -46,7 +46,11 @@
 		pendingApproval?: PendingApprovalEntry | null;
 		/** How the last approval was resolved, for the card's settled state. */
 		approvalResolution?: 'approve' | 'deny' | null;
-		onResolveApproval?: (approvalId: string, action: 'approve' | 'deny') => void;
+		onResolveApproval?: (
+			approvalId: string,
+			action: 'approve' | 'approve_with_edits' | 'deny',
+			editedArguments?: unknown
+		) => void;
 	};
 
 	let {
@@ -196,7 +200,8 @@
 							editableArgs={true}
 							onapprove={() => onResolveApproval(approval.approvalId, 'approve')}
 							ondeny={() => onResolveApproval(approval.approvalId, 'deny')}
-							onapprovewithedits={() => onResolveApproval(approval.approvalId, 'approve')}
+							onapprovewithedits={(editedArguments) =>
+								onResolveApproval(approval.approvalId, 'approve_with_edits', editedArguments)}
 						/>
 						<p class="inline-approval-note">
 							Approve here or from the Inbox — either way it is the same durable signal to the same
@@ -259,28 +264,6 @@
 		max-width: 760px;
 		margin: 0 auto;
 		overflow: hidden;
-	}
-
-	/*
-	 * Cinder's chat surface declares `display:flex; flex-direction:column; height:100%`
-	 * on `.chat-container` (with the timeline as a `flex:1` scroll region), but that
-	 * layout is not taking effect in our build — the container renders as `display:block`
-	 * so the message timeline sizes to its content and the whole surface overflows instead
-	 * of scrolling, pushing the composer off-screen. Re-assert the intended layout here so
-	 * the timeline scrolls internally and the composer stays pinned to the bottom.
-	 * Tracked upstream: https://github.com/stevekinney/cinder/issues/591
-	 */
-	.conversation-chat :global(.chat-container) {
-		display: flex;
-		flex-direction: column;
-		height: 100%;
-		min-height: 0;
-	}
-
-	.conversation-chat :global(.chat-timeline) {
-		flex: 1;
-		min-height: 0;
-		overflow-y: auto;
 	}
 
 	/* Stardust-specific row styles */
