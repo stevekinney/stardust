@@ -21,6 +21,8 @@
 </script>
 
 <script lang="ts">
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import Chat from '@lostgradient/cinder/chat';
 	import type { ChatSubmitEvent, Message } from '@lostgradient/cinder/chat';
 	import ApprovalCard from '@lostgradient/cinder/approval-card';
@@ -30,6 +32,13 @@
 		type UserMessage
 	} from '$lib/stream-to-conversation';
 	import type { PendingApprovalEntry } from '$lib/types';
+	import {
+		createDefaultSlashCommands,
+		filterSlashCommands,
+		type SlashCommand,
+		type SlashCommandContext
+	} from '$lib/slash-commands';
+	import SlashCommandPalette from './slash-command-palette.svelte';
 
 	type Props = {
 		sessionId: string;
@@ -69,6 +78,200 @@
 	}: Props = $props();
 
 	const conversation = $derived(buildConversation(sessionId, userMessage, events));
+
+	// ---- Slash commands (BUG-002) ----------------------------------------
+	// Cinder's Chat composer exposes no value binding, oninput hook, or clear()
+	// from its public API (only focusInput()/beginStreaming()/etc — see the
+	// CINDER-REQUEST logged in state/PROGRESS.md). Interception below reaches
+	// into the rendered `.chat-input-editor` DOM node instead of forking Cinder.
+
+	const slashListboxId = $derived(`session-${sessionId}-slash`);
+	const allSlashCommands = createDefaultSlashCommands();
+
+	let slashOpen = $state(false);
+	let slashQuery = $state('');
+	let slashActiveIndex = $state(0);
+	let slashInfo = $state<{ title: string; lines: string[] } | null>(null);
+	let composerEl = $state<HTMLElement | null>(null);
+
+	const filteredSlashCommands = $derived(filterSlashCommands(allSlashCommands, slashQuery));
+
+	const slashContext = $derived<SlashCommandContext>({
+		running,
+		hasRetry: !!onRetry,
+		hasPendingApproval: pendingApproval !== null,
+		onInterrupt: () => onInterrupt?.(),
+		onRetry: () => onRetry?.(),
+		createSession: async () => {
+			const response = await fetch('/api/sessions', { method: 'POST' });
+			if (!response.ok) throw new Error('Failed to create session');
+			const body = (await response.json()) as { sessionKey: string };
+			await goto(resolve(`/sessions/${encodeURIComponent(body.sessionKey)}`));
+			return body.sessionKey;
+		},
+		openApprovals: () => {
+			void goto(resolve('/inbox'));
+		},
+		listTools: async () => {
+			const response = await fetch('/api/tools');
+			if (!response.ok) return [];
+			const body = (await response.json()) as {
+				tools: Array<{ name: string; description: string; risk: string }>;
+			};
+			return body.tools;
+		},
+		listCommands: () =>
+			allSlashCommands.map((command) => ({ name: command.name, description: command.description }))
+	});
+
+	function isComposerElement(target: EventTarget | null): target is HTMLElement {
+		return target instanceof HTMLElement && target.closest('.chat-input-editor') !== null;
+	}
+
+	function getComposerText(element: HTMLElement): string {
+		if (element instanceof HTMLTextAreaElement) return element.value;
+		return element.textContent ?? '';
+	}
+
+	/**
+	 * Best-effort clear of Cinder's composer via `execCommand`, which dispatches
+	 * real `beforeinput`/`input` events the underlying ProseMirror editor already
+	 * listens to — a direct `textContent = ''` write would desync its internal
+	 * document model. See the CINDER-REQUEST in state/PROGRESS.md for the proper
+	 * `clearInput()` API this should become.
+	 */
+	function clearComposerText(element: HTMLElement): void {
+		if (element instanceof HTMLTextAreaElement) {
+			element.value = '';
+			element.dispatchEvent(new Event('input', { bubbles: true }));
+			return;
+		}
+		element.focus();
+		const selection = window.getSelection();
+		if (selection) {
+			const range = document.createRange();
+			range.selectNodeContents(element);
+			selection.removeAllRanges();
+			selection.addRange(range);
+		}
+		document.execCommand('delete');
+	}
+
+	function openSlash(): void {
+		slashOpen = true;
+		slashQuery = '';
+		slashActiveIndex = 0;
+		slashInfo = null;
+	}
+
+	function closeSlash(options: { clearText?: boolean; refocus?: boolean } = {}): void {
+		slashOpen = false;
+		slashQuery = '';
+		slashActiveIndex = 0;
+		if (options.clearText && composerEl) clearComposerText(composerEl);
+		if (options.refocus && composerEl) composerEl.focus();
+	}
+
+	async function executeSlashCommand(command: SlashCommand): Promise<void> {
+		const reason = command.unavailable(slashContext);
+		if (reason) {
+			slashInfo = { title: command.name, lines: [reason] };
+			closeSlash({ clearText: true });
+			return;
+		}
+		const outcome = await command.run(slashContext);
+		slashInfo = outcome.kind === 'info' ? { title: outcome.title, lines: outcome.lines } : null;
+		closeSlash({ clearText: true, refocus: true });
+	}
+
+	/** A single-line message that starts with `/` and has no space yet is a slash-command prefix. */
+	function isSlashTriggerText(text: string): boolean {
+		return text.startsWith('/') && !text.includes('\n') && !text.includes(' ');
+	}
+
+	function handleComposerInputCapture(event: Event): void {
+		if (!isComposerElement(event.target)) return;
+		composerEl = event.target;
+		const text = getComposerText(composerEl);
+		if (slashOpen) {
+			if (isSlashTriggerText(text)) {
+				slashQuery = text.slice(1);
+				slashActiveIndex = 0;
+			} else {
+				closeSlash();
+			}
+		} else if (isSlashTriggerText(text)) {
+			openSlash();
+			slashQuery = text.slice(1);
+		}
+	}
+
+	function handleComposerKeydownCapture(event: KeyboardEvent): void {
+		if (!isComposerElement(event.target)) return;
+		composerEl = event.target;
+		if (!slashOpen) return;
+		switch (event.key) {
+			case 'ArrowDown':
+				event.preventDefault();
+				event.stopPropagation();
+				slashActiveIndex = Math.min(
+					slashActiveIndex + 1,
+					Math.max(filteredSlashCommands.length - 1, 0)
+				);
+				break;
+			case 'ArrowUp':
+				event.preventDefault();
+				event.stopPropagation();
+				slashActiveIndex = Math.max(slashActiveIndex - 1, 0);
+				break;
+			case 'Enter': {
+				event.preventDefault();
+				event.stopPropagation();
+				const command = filteredSlashCommands[slashActiveIndex];
+				if (command) void executeSlashCommand(command);
+				break;
+			}
+			case 'Escape':
+				event.preventDefault();
+				event.stopPropagation();
+				closeSlash({ clearText: true, refocus: true });
+				break;
+			default:
+				break;
+		}
+	}
+
+	/** Keeps ARIA combobox semantics on Cinder's rendered composer node in sync with palette state. */
+	$effect(() => {
+		const element = composerEl;
+		if (!element) return;
+		if (slashOpen) {
+			if (element.dataset.slashOriginalRole === undefined) {
+				element.dataset.slashOriginalRole = element.getAttribute('role') ?? '';
+			}
+			element.setAttribute('role', 'combobox');
+			element.setAttribute('aria-expanded', 'true');
+			element.setAttribute('aria-autocomplete', 'list');
+			element.setAttribute('aria-controls', `${slashListboxId}-listbox`);
+			const active = filteredSlashCommands[slashActiveIndex];
+			if (active) {
+				element.setAttribute('aria-activedescendant', `${slashListboxId}-option-${active.id}`);
+			} else {
+				element.removeAttribute('aria-activedescendant');
+			}
+		} else {
+			element.setAttribute('aria-expanded', 'false');
+			element.removeAttribute('aria-controls');
+			element.removeAttribute('aria-activedescendant');
+			element.removeAttribute('aria-autocomplete');
+			const originalRole = element.dataset.slashOriginalRole;
+			if (originalRole) {
+				element.setAttribute('role', originalRole);
+			} else {
+				element.removeAttribute('role');
+			}
+		}
+	});
 
 	function handleSubmit(event: ChatSubmitEvent) {
 		const content = event.message.content;
@@ -232,7 +435,43 @@
 	</div>
 {/snippet}
 
-<div class="conversation-chat" aria-label="Conversation">
+<div
+	class="conversation-chat"
+	aria-label="Conversation"
+	onkeydowncapture={handleComposerKeydownCapture}
+	oninputcapture={handleComposerInputCapture}
+>
+	<div class="slash-anchor">
+		{#if slashOpen}
+			<SlashCommandPalette
+				id={slashListboxId}
+				commands={filteredSlashCommands}
+				activeIndex={slashActiveIndex}
+				context={slashContext}
+				onselect={(command) => void executeSlashCommand(command)}
+			/>
+		{/if}
+		{#if slashInfo}
+			<div class="slash-info" role="status">
+				<div class="slash-info-header">
+					<strong>{slashInfo.title}</strong>
+					<button
+						type="button"
+						class="slash-info-dismiss"
+						aria-label="Dismiss"
+						onclick={() => (slashInfo = null)}
+					>
+						×
+					</button>
+				</div>
+				<ul>
+					{#each slashInfo.lines as line, index (index)}
+						<li>{line}</li>
+					{/each}
+				</ul>
+			</div>
+		{/if}
+	</div>
 	<Chat
 		id="session-{sessionId}"
 		{conversation}
@@ -257,6 +496,7 @@
 
 <style>
 	.conversation-chat {
+		position: relative;
 		display: flex;
 		flex-direction: column;
 		height: 100%;
@@ -264,6 +504,66 @@
 		max-width: 760px;
 		margin: 0 auto;
 		overflow: hidden;
+	}
+
+	/*
+	 * Anchors the slash palette/info panel above the composer. Cinder's Chat
+	 * doesn't expose the composer's own bounding box, so this is an approximate
+	 * offset rather than a precise anchor — see the CINDER-REQUEST in
+	 * state/PROGRESS.md for a proper composer-anchor API.
+	 */
+	.slash-anchor {
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 84px;
+		z-index: 20;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		pointer-events: none;
+	}
+
+	.slash-anchor > :global(*) {
+		pointer-events: auto;
+	}
+
+	.slash-info {
+		border: 1px solid var(--cinder-border);
+		border-radius: var(--cinder-radius-md);
+		background: var(--cinder-surface-elevated, var(--cinder-surface));
+		box-shadow: var(--cinder-shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.24));
+		padding: 10px 12px;
+		font-size: var(--cinder-text-sm);
+	}
+
+	.slash-info-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.slash-info-dismiss {
+		border: none;
+		background: none;
+		color: var(--cinder-text-subtle);
+		font-size: var(--cinder-text-md, 16px);
+		line-height: 1;
+		cursor: pointer;
+		padding: 2px 6px;
+	}
+
+	.slash-info ul {
+		margin: 8px 0 0;
+		padding-left: 18px;
+		color: var(--cinder-text-subtle);
+	}
+
+	.slash-info li {
+		font-family: var(--cinder-font-mono);
+		font-size: var(--cinder-text-xs);
+		margin-bottom: 4px;
 	}
 
 	/* Stardust-specific row styles */
