@@ -25,7 +25,10 @@
 	import type { ChatSubmitEvent, Message } from '@lostgradient/cinder/chat';
 	import ApprovalCard from '@lostgradient/cinder/approval-card';
 	import {
-		buildConversation,
+		applyNewStreamEvents,
+		createConversationBuilder,
+		snapshotConversation,
+		type ConversationBuilderState,
 		type StreamEvent,
 		type UserMessage
 	} from '$lib/stream-to-conversation';
@@ -68,7 +71,45 @@
 		onResolveApproval
 	}: Props = $props();
 
-	const conversation = $derived(buildConversation(sessionId, userMessage, events));
+	// Non-reactive fold cache: `buildConversation` re-walking the entire event
+	// history on every streamed token is O(n²) over the life of a run. Instead,
+	// hold a plain (not `$state`) builder that carries the fold cursor across
+	// derivations, and only re-fold from scratch when the events array isn't a
+	// prefix-extension of what we last saw (session switch, transcript reload).
+	let builderState: ConversationBuilderState | null = null;
+	let cachedEvents: StreamEvent[] = [];
+	let cachedSessionId: string | null = null;
+	let cachedUserMessage: UserMessage | null = null;
+
+	function isPrefixExtension(previous: StreamEvent[], next: StreamEvent[]): boolean {
+		if (next.length < previous.length) return false;
+		for (let i = 0; i < previous.length; i++) {
+			if (previous[i] !== next[i]) return false;
+		}
+		return true;
+	}
+
+	const conversation = $derived.by(() => {
+		const needsReset =
+			builderState === null ||
+			cachedSessionId !== sessionId ||
+			cachedUserMessage !== userMessage ||
+			!isPrefixExtension(cachedEvents, events);
+
+		if (needsReset) {
+			builderState = createConversationBuilder(sessionId, userMessage);
+			cachedSessionId = sessionId;
+			cachedUserMessage = userMessage;
+		}
+
+		// `needsReset` guarantees `builderState` was just (re)created if it was ever
+		// null — the non-null assertion just tells TypeScript what the runtime
+		// control flow already established.
+		const state: ConversationBuilderState = builderState!;
+		applyNewStreamEvents(state, events);
+		cachedEvents = events;
+		return snapshotConversation(state);
+	});
 
 	function handleSubmit(event: ChatSubmitEvent) {
 		const content = event.message.content;
