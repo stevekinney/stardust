@@ -323,7 +323,9 @@ describe('ConversationView', () => {
 		editButton!.click();
 		await Promise.resolve();
 
-		const textarea = document.querySelector('textarea') as HTMLTextAreaElement | null;
+		const textarea = document.querySelector(
+			'.cinder-approval-card__editor textarea'
+		) as HTMLTextAreaElement | null;
 		expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
 		textarea!.value = JSON.stringify({ command: 'git status --short' });
 		textarea!.dispatchEvent(new Event('input', { bubbles: true }));
