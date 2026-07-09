@@ -8,6 +8,7 @@
 	import Segment from '@lostgradient/cinder/segment';
 	import StatusDot from '@lostgradient/cinder/status-dot';
 	import type { StatusDotStatus } from '@lostgradient/cinder/status-dot';
+	import { onDestroy } from 'svelte';
 	import ConversationView from '$lib/components/conversation-view.svelte';
 	import DurabilityRibbon from '$lib/components/durability-ribbon.svelte';
 	import RecoveryView from '$lib/components/recovery-view.svelte';
@@ -67,6 +68,7 @@
 	const isRecovered = $derived(inspector?.run.status === 'recovered');
 
 	let abortController: AbortController | null = null;
+	let catchupTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	/** Controls which pane is active on tablet (641–1024px). */
 	let tabletView = $state<'conversation' | 'run'>('conversation');
@@ -81,6 +83,7 @@
 
 		abortController?.abort();
 		abortController = null;
+		stopCanonicalCatchup();
 		running = false;
 		liveEvents = [];
 		canonicalEvents = [];
@@ -105,12 +108,21 @@
 			loadTranscript,
 			loadLatestRunInspector,
 			submitFirstTurn: handleSubmit
+		}).then(() => {
+			void startCanonicalCatchupIfNeeded();
 		});
+	});
+
+	onDestroy(() => {
+		abortController?.abort();
+		stopCanonicalCatchup();
 	});
 
 	async function loadTranscript() {
 		try {
-			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/transcript`);
+			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/transcript`, {
+				cache: 'no-store'
+			});
 			if (!response.ok) return;
 
 			const body = (await response.json()) as { events: TranscriptEventRow[] };
@@ -272,15 +284,17 @@
 		liveEvents = [...liveEvents, { id: id ?? liveEvents.length, kind, payload }];
 	}
 
-	async function loadLatestRunInspector() {
+	async function loadLatestRunInspector(): Promise<RunInspectorProjection | null> {
 		try {
-			const runsResponse = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/runs`);
-			if (!runsResponse.ok) return;
+			const runsResponse = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/runs`, {
+				cache: 'no-store'
+			});
+			if (!runsResponse.ok) return null;
 			const runsBody = (await runsResponse.json()) as {
 				runs: Array<{ id: string; createdAt: string }>;
 			};
 			runCount = runsBody.runs.length;
-			if (runsBody.runs.length === 0) return;
+			if (runsBody.runs.length === 0) return null;
 
 			const sorted = [...runsBody.runs].sort(
 				(a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -288,13 +302,64 @@
 			const latestRunId = sorted[0].id;
 
 			const inspectorResponse = await fetch(
-				`/api/sessions/${encodeURIComponent(sessionKey)}/runs/${encodeURIComponent(latestRunId)}/inspector`
+				`/api/sessions/${encodeURIComponent(sessionKey)}/runs/${encodeURIComponent(latestRunId)}/inspector`,
+				{ cache: 'no-store' }
 			);
-			if (!inspectorResponse.ok) return;
-			inspector = (await inspectorResponse.json()) as RunInspectorProjection;
+			if (!inspectorResponse.ok) return null;
+			const projection = (await inspectorResponse.json()) as RunInspectorProjection;
+			inspector = projection;
+			return projection;
 		} catch {
 			// Non-fatal
+			return null;
 		}
+	}
+
+	const TERMINAL_RUN_STATUSES = new Set(['complete', 'failed', 'cancelled', 'recovered']);
+	const CANONICAL_CATCHUP_INTERVAL_MS = 1000;
+	const CANONICAL_CATCHUP_MAX_ATTEMPTS = 20;
+
+	function isTerminalRunStatus(status: string | null | undefined): boolean {
+		return status != null && TERMINAL_RUN_STATUSES.has(status);
+	}
+
+	function stopCanonicalCatchup() {
+		if (catchupTimeout) {
+			clearTimeout(catchupTimeout);
+			catchupTimeout = null;
+		}
+	}
+
+	async function startCanonicalCatchupIfNeeded() {
+		stopCanonicalCatchup();
+		const latestInspector = inspector ?? (await loadLatestRunInspector());
+		if (!latestInspector || isTerminalRunStatus(latestInspector.run.status)) return;
+
+		transcriptMode = 'canonical';
+		void pollCanonicalCatchup(latestInspector.run.id, 0);
+	}
+
+	async function pollCanonicalCatchup(runId: string, attempt: number): Promise<void> {
+		await loadTranscript();
+		const latestInspector = await loadLatestRunInspector();
+
+		if (latestInspector && latestInspector.run.id !== runId) return;
+		if (latestInspector && isTerminalRunStatus(latestInspector.run.status)) {
+			await loadTranscript();
+			stopCanonicalCatchup();
+			return;
+		}
+
+		if (attempt >= CANONICAL_CATCHUP_MAX_ATTEMPTS) {
+			errorMessage =
+				'This run is still in progress, but the live connection could not be re-established. Reload to try again.';
+			stopCanonicalCatchup();
+			return;
+		}
+
+		catchupTimeout = setTimeout(() => {
+			void pollCanonicalCatchup(runId, attempt + 1);
+		}, CANONICAL_CATCHUP_INTERVAL_MS);
 	}
 
 	async function loadPendingApproval() {

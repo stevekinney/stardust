@@ -31,7 +31,7 @@ export type SessionPageBootstrapDeps = {
 	startMessage: string | null;
 	loadPendingApproval: () => Promise<void>;
 	loadTranscript: () => Promise<void>;
-	loadLatestRunInspector: () => Promise<void>;
+	loadLatestRunInspector: () => Promise<unknown>;
 	/** Submits the session's first turn — this is what creates the session row. */
 	submitFirstTurn: (message: string) => Promise<void>;
 };
