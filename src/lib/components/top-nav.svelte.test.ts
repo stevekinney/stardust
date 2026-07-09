@@ -93,4 +93,49 @@ describe('TopNav', () => {
 
 		unmount(component);
 	});
+
+	it('lets Cinder close the mobile menu after normal item activation', async () => {
+		const component = mount(TopNav, {
+			target: document.body,
+			props: { currentPath: '/' }
+		});
+
+		const toggle = document.querySelector('button[aria-label="Toggle navigation menu"]');
+		expect(toggle).not.toBeNull();
+		(toggle as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(toggle!.getAttribute('aria-expanded')).toBe('true'));
+
+		const inboxLink = Array.from(document.querySelectorAll<HTMLAnchorElement>('a')).find(
+			(link) => link.textContent?.trim() === 'Inbox'
+		);
+		expect(inboxLink).toBeDefined();
+		inboxLink!.click();
+		await vi.waitFor(() => expect(toggle!.getAttribute('aria-expanded')).toBe('false'));
+		expect(document.querySelector('.menu-backdrop')).toBeNull();
+
+		unmount(component);
+	});
+
+	it('keeps the mobile menu open for modified item activation', async () => {
+		const component = mount(TopNav, {
+			target: document.body,
+			props: { currentPath: '/' }
+		});
+
+		const toggle = document.querySelector('button[aria-label="Toggle navigation menu"]');
+		expect(toggle).not.toBeNull();
+		(toggle as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(toggle!.getAttribute('aria-expanded')).toBe('true'));
+
+		const inboxLink = Array.from(document.querySelectorAll<HTMLAnchorElement>('a')).find(
+			(link) => link.textContent?.trim() === 'Inbox'
+		);
+		expect(inboxLink).toBeDefined();
+		inboxLink!.dispatchEvent(
+			new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true })
+		);
+		await vi.waitFor(() => expect(toggle!.getAttribute('aria-expanded')).toBe('true'));
+
+		unmount(component);
+	});
 });

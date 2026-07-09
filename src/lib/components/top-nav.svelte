@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { afterNavigate } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import Badge from '@lostgradient/cinder/badge';
 	import NavigationBar from '@lostgradient/cinder/navigation-bar';
@@ -18,13 +17,6 @@
 	let { currentPath, health = null, onOpenPalette }: Props = $props();
 
 	let mobileMenuOpen = $state(false);
-
-	// The dropdown otherwise stays open across a route change (Cinder never
-	// closes it for you), which would leave the backdrop blurring the new
-	// page underneath it.
-	afterNavigate(() => {
-		mobileMenuOpen = false;
-	});
 
 	const tabs = $derived([
 		{

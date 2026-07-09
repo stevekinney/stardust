@@ -30,7 +30,7 @@ The current design handoff is `Stardust Console v2.dc.html` (1384 lines) — the
 
 ## Cinder Design System
 
-Uses `@lostgradient/cinder 0.7.0`. Key components and their imports:
+Uses `@lostgradient/cinder 0.9.0`. Key components and their imports:
 
 ```ts
 import Badge from '@lostgradient/cinder/badge';
