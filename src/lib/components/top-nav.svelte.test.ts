@@ -2,6 +2,9 @@ import { mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import TopNav from './top-nav.svelte';
 
+const getNavigationItem = (href: string) =>
+	document.querySelector<HTMLAnchorElement>(`a[data-cinder-navigation-item][href="${href}"]`);
+
 describe('TopNav', () => {
 	afterEach(() => {
 		document.body.innerHTML = '';
@@ -105,10 +108,8 @@ describe('TopNav', () => {
 		(toggle as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(toggle!.getAttribute('aria-expanded')).toBe('true'));
 
-		const inboxLink = Array.from(document.querySelectorAll<HTMLAnchorElement>('a')).find(
-			(link) => link.textContent?.trim() === 'Inbox'
-		);
-		expect(inboxLink).toBeDefined();
+		const inboxLink = getNavigationItem('/inbox');
+		expect(inboxLink).not.toBeNull();
 		inboxLink!.click();
 		await vi.waitFor(() => expect(toggle!.getAttribute('aria-expanded')).toBe('false'));
 		expect(document.querySelector('.menu-backdrop')).toBeNull();
@@ -127,14 +128,14 @@ describe('TopNav', () => {
 		(toggle as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(toggle!.getAttribute('aria-expanded')).toBe('true'));
 
-		const inboxLink = Array.from(document.querySelectorAll<HTMLAnchorElement>('a')).find(
-			(link) => link.textContent?.trim() === 'Inbox'
-		);
-		expect(inboxLink).toBeDefined();
+		const inboxLink = getNavigationItem('/inbox');
+		expect(inboxLink).not.toBeNull();
 		inboxLink!.dispatchEvent(
 			new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true })
 		);
-		await vi.waitFor(() => expect(toggle!.getAttribute('aria-expanded')).toBe('true'));
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(toggle!.getAttribute('aria-expanded')).toBe('true');
+		expect(document.querySelector('.menu-backdrop')).not.toBeNull();
 
 		unmount(component);
 	});
