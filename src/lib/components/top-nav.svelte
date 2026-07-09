@@ -16,7 +16,14 @@
 
 	let { currentPath, health = null, onOpenPalette }: Props = $props();
 
-	let mobileMenuOpen = $state(false);
+	let mobileMenuOpenPath = $state('');
+	let mobileMenuOpenRequested = $state(false);
+
+	const getMobileMenuOpen = () => mobileMenuOpenPath === currentPath && mobileMenuOpenRequested;
+	const setMobileMenuOpen = (open: boolean) => {
+		mobileMenuOpenPath = currentPath;
+		mobileMenuOpenRequested = open;
+	};
 
 	const tabs = $derived([
 		{
@@ -43,7 +50,7 @@
 	label="Primary"
 	class="top-nav"
 	menuTogglePlacement="before-brand"
-	bind:mobileMenuOpen
+	bind:mobileMenuOpen={getMobileMenuOpen, setMobileMenuOpen}
 >
 	{#snippet brand()}
 		<a href={resolve('/')} class="brand" aria-label="Stardust home">STARDUST</a>
@@ -154,8 +161,8 @@
 	{/snippet}
 </NavigationBar>
 
-{#if mobileMenuOpen}
-	<div class="menu-backdrop" role="presentation" onclick={() => (mobileMenuOpen = false)}></div>
+{#if getMobileMenuOpen()}
+	<div class="menu-backdrop" role="presentation" onclick={() => setMobileMenuOpen(false)}></div>
 {/if}
 
 <style>

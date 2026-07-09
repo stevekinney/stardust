@@ -1,9 +1,15 @@
-import { mount, unmount } from 'svelte';
+import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import TopNavRouteChangeHarness from './top-nav-route-change-harness.svelte';
 import TopNav from './top-nav.svelte';
 
 const getNavigationItem = (href: string) =>
 	document.querySelector<HTMLAnchorElement>(`a[data-cinder-navigation-item][href="${href}"]`);
+
+const activateNavigationItem = (link: HTMLAnchorElement, init?: MouseEventInit) => {
+	document.addEventListener('click', (event) => event.preventDefault(), { once: true });
+	link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...init }));
+};
 
 describe('TopNav', () => {
 	afterEach(() => {
@@ -110,7 +116,7 @@ describe('TopNav', () => {
 
 		const inboxLink = getNavigationItem('/inbox');
 		expect(inboxLink).not.toBeNull();
-		inboxLink!.click();
+		activateNavigationItem(inboxLink!);
 		await vi.waitFor(() => expect(toggle!.getAttribute('aria-expanded')).toBe('false'));
 		expect(document.querySelector('.menu-backdrop')).toBeNull();
 
@@ -130,12 +136,29 @@ describe('TopNav', () => {
 
 		const inboxLink = getNavigationItem('/inbox');
 		expect(inboxLink).not.toBeNull();
-		inboxLink!.dispatchEvent(
-			new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true })
-		);
+		activateNavigationItem(inboxLink!, { metaKey: true });
 		await new Promise((resolve) => setTimeout(resolve, 50));
 		expect(toggle!.getAttribute('aria-expanded')).toBe('true');
 		expect(document.querySelector('.menu-backdrop')).not.toBeNull();
+
+		unmount(component);
+	});
+
+	it('closes the mobile menu when navigation changes outside navigation item activation', async () => {
+		const component = mount(TopNavRouteChangeHarness, { target: document.body });
+
+		const toggle = document.querySelector('button[aria-label="Toggle navigation menu"]');
+		expect(toggle).not.toBeNull();
+		(toggle as HTMLButtonElement).click();
+		await vi.waitFor(() => expect(toggle!.getAttribute('aria-expanded')).toBe('true'));
+
+		const routeChange = document.querySelector<HTMLButtonElement>('[data-testid="route-change"]');
+		expect(routeChange).not.toBeNull();
+		routeChange!.click();
+		flushSync();
+
+		await vi.waitFor(() => expect(toggle!.getAttribute('aria-expanded')).toBe('false'));
+		expect(document.querySelector('.menu-backdrop')).toBeNull();
 
 		unmount(component);
 	});
