@@ -60,10 +60,14 @@
 				expiresAt={approval.expiresAt}
 				state="pending"
 				editableArgs={true}
-				onapprove={() => onResolve(approval.approvalId, 'approve')}
-				ondeny={() => onResolve(approval.approvalId, 'deny')}
-				onapprovewithedits={(editedArguments) =>
-					onResolve(approval.approvalId, 'approve_with_edits', editedArguments)}
+				onresolve={(resolution) => {
+					if (resolution.decision === 'cancel') return;
+					if (resolution.decision === 'approve_with_edits') {
+						onResolve(approval.approvalId, resolution.decision, resolution.editedArgs);
+					} else {
+						onResolve(approval.approvalId, resolution.decision);
+					}
+				}}
 			/>
 		</div>
 	{/each}

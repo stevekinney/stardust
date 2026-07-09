@@ -495,10 +495,18 @@
 							expiresAt={approval.expiresAt}
 							state="pending"
 							editableArgs={true}
-							onapprove={() => onResolveApproval(approval.approvalId, 'approve')}
-							ondeny={() => onResolveApproval(approval.approvalId, 'deny')}
-							onapprovewithedits={(editedArguments) =>
-								onResolveApproval(approval.approvalId, 'approve_with_edits', editedArguments)}
+							onresolve={(resolution) => {
+								if (resolution.decision === 'cancel') return;
+								if (resolution.decision === 'approve_with_edits') {
+									onResolveApproval(
+										approval.approvalId,
+										resolution.decision,
+										resolution.editedArgs
+									);
+								} else {
+									onResolveApproval(approval.approvalId, resolution.decision);
+								}
+							}}
 						/>
 						<p class="inline-approval-note">
 							Approve here or from the Inbox — either way it is the same durable signal to the same
