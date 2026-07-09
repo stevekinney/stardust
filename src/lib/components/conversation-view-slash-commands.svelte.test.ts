@@ -5,9 +5,9 @@ import ConversationView from './conversation-view.svelte';
 const gotoMock = vi.hoisted(() => vi.fn());
 vi.mock('$app/navigation', () => ({ goto: gotoMock }));
 
-/** Finds the real composer textarea Cinder renders inside `.chat-input-editor`. */
+/** Finds the public composer textarea rendered by Cinder Chat. */
 function composer(): HTMLTextAreaElement {
-	const element = document.querySelector<HTMLTextAreaElement>('.chat-input-editor');
+	const element = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]');
 	expect(element).toBeInstanceOf(HTMLTextAreaElement);
 	return element as HTMLTextAreaElement;
 }

@@ -256,7 +256,7 @@ describe('ConversationView', () => {
 		unmount(component);
 	});
 
-	it('BUG-004: announces a pending inline approval in a dedicated polite live region', () => {
+	it('BUG-004: announces a pending inline approval through the Cinder Chat announcer', async () => {
 		const events: StreamEvent[] = [
 			makeEvent(1, 'approval.request', { approvalId: 'apr-001', toolName: 'run_command' })
 		];
@@ -281,9 +281,13 @@ describe('ConversationView', () => {
 			}
 		});
 
-		const announcer = Array.from(
-			document.querySelectorAll('[aria-live="polite"][aria-atomic="true"]')
-		).find((region) => region.textContent?.includes('Approval required'));
+		let announcer: Element | undefined;
+		await waitFor(() => {
+			announcer = Array.from(
+				document.querySelectorAll('[aria-live="polite"][aria-atomic="true"]')
+			).find((region) => region.textContent?.includes('Approval required'));
+			return announcer !== undefined;
+		});
 		expect(announcer).toBeInstanceOf(HTMLElement);
 		expect(announcer!.textContent).toContain('Approval required: run_command');
 
