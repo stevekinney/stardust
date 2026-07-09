@@ -153,6 +153,18 @@
 		}
 	}
 
+	function applyInspectorTranscript(projection: RunInspectorProjection) {
+		const rows: TranscriptEventRow[] = projection.transcript.map((event) => ({
+			id: event.id,
+			kind: event.kind,
+			payload: typeof event.payload === 'string' ? event.payload : JSON.stringify(event.payload),
+			sequence: event.sequence
+		}));
+		currentUserMessage = findLastUserMessageText(rows);
+		canonicalEvents = mapTranscriptToStreamEvents(rows);
+		transcriptMode = 'canonical';
+	}
+
 	async function handleSubmit(message: string, attachments?: SessionAttachmentInput[]) {
 		if (running) return;
 
@@ -400,7 +412,7 @@
 
 		if (latestInspector && latestInspector.run.id !== runId) {
 			if (isTerminalRunStatus(latestInspector.run.status)) {
-				await loadTranscript(targetSessionKey);
+				applyInspectorTranscript(latestInspector);
 				if (isActiveCatchup(generation, targetSessionKey)) stopCanonicalCatchup();
 				return;
 			}
@@ -409,7 +421,7 @@
 			return;
 		}
 		if (latestInspector && isTerminalRunStatus(latestInspector.run.status)) {
-			await loadTranscript(targetSessionKey);
+			applyInspectorTranscript(latestInspector);
 			if (isActiveCatchup(generation, targetSessionKey)) stopCanonicalCatchup();
 			return;
 		}
