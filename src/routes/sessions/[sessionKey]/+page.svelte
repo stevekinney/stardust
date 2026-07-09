@@ -192,6 +192,13 @@
 			// Refresh the durable transcript so the next turn seeds from complete history
 			// and the Canonical view reflects this turn. Live mode is preserved.
 			await loadTranscript();
+			if (data.fresh) {
+				await goto(resolve(`/sessions/${encodeURIComponent(sessionKey)}`), {
+					replaceState: true,
+					noScroll: true,
+					keepFocus: true
+				});
+			}
 		} catch (caught) {
 			errorMessage = caught instanceof Error ? caught.message : 'Unknown error';
 		} finally {
