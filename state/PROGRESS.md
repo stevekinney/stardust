@@ -1,5 +1,14 @@
 # Progress Log
 
+## 2026-07-09 — Cinder 0.9 composer API cleanup
+
+Stardust now targets `@lostgradient/cinder@0.9.0` and `src/lib/components/conversation-view.svelte` uses Cinder's public Chat composer overlay API for slash commands:
+
+- Slash-command combobox state is passed through `composerRole`, `composerAriaExpanded`, `composerAriaControls`, `composerAriaActiveDescendant`, and `composerAriaAutocomplete`.
+- ArrowUp/ArrowDown/Enter/Escape handling uses `oncomposerkeydown`; the wrapper no longer captures keydown/input events or detects `.chat-input-editor`.
+- Pending inline approval announcements use `Chat.announce()` instead of a Stardust-owned parallel live region.
+- The old 0.8-era Cinder follow-up items cinder#684, cinder#685, and cinder#686 are considered adopted for this downstream integration.
+
 ## 2026-07-07 — Phase 0: Discovery (complete)
 
 Ran the full Phase 0 discovery pass against `/Users/stevekinney/Developer/stardust`, read-only except for writing the `state/` files themselves.

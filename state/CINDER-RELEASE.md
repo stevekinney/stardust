@@ -1,3 +1,14 @@
+# Cinder Release — @lostgradient/cinder 0.9.0
+
+## Current Stardust integration status
+
+Stardust now targets `@lostgradient/cinder@0.9.0`. The 0.9 Chat composer API closes the remaining 0.8-era slash-command overlay gaps:
+
+- `composerRole`, `composerAriaExpanded`, `composerAriaControls`, `composerAriaActiveDescendant`, and `composerAriaAutocomplete` carry slash-command combobox state through public `Chat` props.
+- `oncomposerkeydown` handles ArrowUp/ArrowDown/Enter/Escape before Chat's own send shortcut, without wrapper capture handlers.
+- `Chat.announce()` carries the inline approval announcement, so Stardust no longer needs a parallel app-owned live region for BUG-004.
+- `conversation-view.svelte` no longer queries or detects `.chat-input-editor`.
+
 # Cinder Release — @lostgradient/cinder 0.8.0
 
 Status: **PUBLISHED AND CONFIRMED** (2026-07-07). Supersedes the earlier blocked-state version of this file; the full unblocking history is in `PROGRESS.md`.

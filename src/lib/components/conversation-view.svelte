@@ -51,6 +51,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { tick } from 'svelte';
 	import Chat from '@lostgradient/cinder/chat';
 	import type { ChatSubmitEvent, Message } from '@lostgradient/cinder/chat';
 	import ApprovalCard from '@lostgradient/cinder/approval-card';
@@ -162,25 +163,26 @@
 	});
 
 	// ---- Slash commands (BUG-002) ----------------------------------------
-	// Cinder 0.8.0 added `getComposerValue()`/`clearInput()`/`oncomposerinput`
-	// to the public `Chat` component (the CINDER-REQUEST filed by this track —
-	// see state/CINDER-RELEASE.md), so reading/clearing the composer's text
-	// value goes through that API now instead of the raw DOM node. Cinder still
-	// exposes no element-ref getter for the composer itself, so ARIA combobox
-	// wiring and arrow-key/Enter/Escape interception (Chat has no keydown hook
-	// either) still reach into the rendered `.chat-input-editor` node.
+	// Cinder exposes the composer value, keydown hook, and combobox ARIA props,
+	// so Stardust keeps slash-command behavior on the public Chat contract.
 
 	const slashListboxId = $derived(`session-${sessionId}-slash`);
 	const allSlashCommands = createDefaultSlashCommands();
 
-	let chatRef: ReturnType<typeof Chat> | undefined;
+	let chatRef = $state<ReturnType<typeof Chat> | undefined>();
 	let slashOpen = $state(false);
 	let slashQuery = $state('');
 	let slashActiveIndex = $state(0);
 	let slashInfo = $state<{ title: string; lines: string[] } | null>(null);
-	let composerEl = $state<HTMLElement | null>(null);
+	let lastApprovalAnnouncement = '';
 
 	const filteredSlashCommands = $derived(filterSlashCommands(allSlashCommands, slashQuery));
+	const activeSlashCommand = $derived(filteredSlashCommands[slashActiveIndex]);
+	const composerAriaActiveDescendant = $derived(
+		slashOpen && activeSlashCommand
+			? `${slashListboxId}-option-${activeSlashCommand.id}`
+			: undefined
+	);
 
 	const slashContext = $derived<SlashCommandContext>({
 		running,
@@ -209,10 +211,6 @@
 		listCommands: () =>
 			allSlashCommands.map((command) => ({ name: command.name, description: command.description }))
 	});
-
-	function isComposerElement(target: EventTarget | null): target is HTMLElement {
-		return target instanceof HTMLElement && target.closest('.chat-input-editor') !== null;
-	}
 
 	function openSlash(): void {
 		slashOpen = true;
@@ -265,21 +263,7 @@
 		}
 	}
 
-	/**
-	 * Captures the composer DOM node for ARIA combobox wiring below — Cinder's
-	 * public API exposes imperative value/clear/focus methods but no
-	 * element-ref getter, so this capture-phase listener is still the only way
-	 * to reach it (kept minimal: it no longer reads the composer's text value,
-	 * that comes from `oncomposerinput` above).
-	 */
-	function handleComposerInputCapture(event: Event): void {
-		if (isComposerElement(event.target)) composerEl = event.target;
-	}
-
-	/** Arrow-key/Enter/Escape interception — Chat exposes no keydown hook, so this also reaches into the DOM. */
-	function handleComposerKeydownCapture(event: KeyboardEvent): void {
-		if (!isComposerElement(event.target)) return;
-		composerEl = event.target;
+	function handleComposerKeydown(event: KeyboardEvent): void {
 		if (!slashOpen) return;
 		switch (event.key) {
 			case 'ArrowDown':
@@ -298,8 +282,7 @@
 			case 'Enter': {
 				event.preventDefault();
 				event.stopPropagation();
-				const command = filteredSlashCommands[slashActiveIndex];
-				if (command) void executeSlashCommand(command);
+				if (activeSlashCommand) void executeSlashCommand(activeSlashCommand);
 				break;
 			}
 			case 'Escape':
@@ -312,36 +295,26 @@
 		}
 	}
 
-	/** Keeps ARIA combobox semantics on Cinder's rendered composer node in sync with palette state. */
 	$effect(() => {
-		const element = composerEl;
-		if (!element) return;
-		if (slashOpen) {
-			if (element.dataset.slashOriginalRole === undefined) {
-				element.dataset.slashOriginalRole = element.getAttribute('role') ?? '';
-			}
-			element.setAttribute('role', 'combobox');
-			element.setAttribute('aria-expanded', 'true');
-			element.setAttribute('aria-autocomplete', 'list');
-			element.setAttribute('aria-controls', `${slashListboxId}-listbox`);
-			const active = filteredSlashCommands[slashActiveIndex];
-			if (active) {
-				element.setAttribute('aria-activedescendant', `${slashListboxId}-option-${active.id}`);
-			} else {
-				element.removeAttribute('aria-activedescendant');
-			}
-		} else {
-			element.setAttribute('aria-expanded', 'false');
-			element.removeAttribute('aria-controls');
-			element.removeAttribute('aria-activedescendant');
-			element.removeAttribute('aria-autocomplete');
-			const originalRole = element.dataset.slashOriginalRole;
-			if (originalRole) {
-				element.setAttribute('role', originalRole);
-			} else {
-				element.removeAttribute('role');
-			}
+		const announcement = pendingApproval
+			? `Approval required: ${pendingApproval.toolCall.name}`
+			: '';
+		if (!announcement) {
+			lastApprovalAnnouncement = '';
+			return;
 		}
+		if (!chatRef || announcement === lastApprovalAnnouncement) return;
+
+		let cancelled = false;
+		void tick().then(() => {
+			if (cancelled || !chatRef || announcement === lastApprovalAnnouncement) return;
+			chatRef.announce(announcement, 'polite');
+			lastApprovalAnnouncement = announcement;
+		});
+
+		return () => {
+			cancelled = true;
+		};
 	});
 
 	async function handleSubmit(event: ChatSubmitEvent) {
@@ -394,17 +367,6 @@
 		const sequence = message.metadata['stardust:sequence'];
 		return typeof sequence === 'number' && sequence > dimAfterSequence;
 	}
-
-	/**
-	 * BUG-004: the inline ApprovalCard has no dedicated announcement distinct
-	 * from the transcript's own generic `aria-live="polite"` growth cue. This
-	 * derives a polite, higher-signal announcement text keyed to the pending
-	 * approval so screen-reader users learn an action is required as soon as
-	 * one appears, without stealing focus from wherever they were reading.
-	 */
-	const approvalAnnouncement = $derived(
-		pendingApproval ? `Approval required: ${pendingApproval.toolCall.name}` : ''
-	);
 </script>
 
 {#snippet stardustRow(message: Message, renderDefault: import('svelte').Snippet)}
@@ -537,15 +499,7 @@
 	</div>
 {/snippet}
 
-<div
-	class="conversation-chat"
-	aria-label="Conversation"
-	onkeydowncapture={handleComposerKeydownCapture}
-	oninputcapture={handleComposerInputCapture}
->
-	<div class="visually-hidden" aria-live="polite" aria-atomic="true">
-		{approvalAnnouncement}
-	</div>
+<div class="conversation-chat" aria-label="Conversation">
 	<div class="slash-anchor">
 		{#if slashOpen}
 			<SlashCommandPalette
@@ -598,6 +552,12 @@
 		onedit={handleEdit}
 		onstopgenerating={handleStopGenerating}
 		oncomposerinput={handleComposerInput}
+		oncomposerkeydown={handleComposerKeydown}
+		composerRole="combobox"
+		composerAriaExpanded={slashOpen ? 'true' : 'false'}
+		composerAriaControls={slashOpen ? `${slashListboxId}-listbox` : undefined}
+		{composerAriaActiveDescendant}
+		composerAriaAutocomplete={slashOpen ? 'list' : undefined}
 		row={stardustRow}
 	/>
 </div>
@@ -614,24 +574,6 @@
 		overflow: hidden;
 	}
 
-	.visually-hidden {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		margin: -1px;
-		overflow: hidden;
-		clip: rect(0, 0, 0, 0);
-		white-space: nowrap;
-		border: 0;
-	}
-
-	/*
-	 * Anchors the slash palette/info panel above the composer. Cinder's Chat
-	 * doesn't expose the composer's own bounding box, so this is an approximate
-	 * offset rather than a precise anchor — see the CINDER-REQUEST in
-	 * state/PROGRESS.md for a proper composer-anchor API.
-	 */
 	.slash-anchor {
 		position: absolute;
 		left: 0;

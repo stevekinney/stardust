@@ -8,10 +8,10 @@
  *  - the streaming transcript region announces via aria-live="polite", not "assertive"
  *  - focus is never stolen when new content streams in
  *  - the composer regains focus after a message is sent
- *  - BUG-004: a pending inline approval gets its own polite live-region announcement
+ *  - BUG-004: a pending inline approval is announced through Cinder Chat
  */
 import axe, { type AxeResults, type Result } from 'axe-core';
-import { flushSync, mount, unmount } from 'svelte';
+import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { StreamEvent } from '$lib/stream-to-conversation';
 import type { PendingApprovalEntry } from '$lib/types';
@@ -187,7 +187,7 @@ describe('ConversationView accessibility', () => {
 			unmount(component);
 		});
 
-		it('BUG-004: announces a newly pending approval in a dedicated polite live region', () => {
+		it('BUG-004: announces a newly pending approval through the Cinder Chat announcer', async () => {
 			const props = $state({
 				sessionId: 'toolcall-session',
 				onSubmit: vi.fn(),
@@ -201,7 +201,7 @@ describe('ConversationView accessibility', () => {
 			const component = mount(ConversationView, { target: document.body, props });
 			flushSync();
 
-			// No approval pending yet — the dedicated announcement region is empty.
+			// No approval pending yet, so Cinder's polite announcer has no approval text.
 			const liveRegions = Array.from(
 				document.querySelectorAll('[aria-live="polite"][aria-atomic="true"]')
 			);
@@ -212,6 +212,8 @@ describe('ConversationView accessibility', () => {
 
 			// A new approval becomes pending.
 			props.pendingApproval = pendingApproval;
+			flushSync();
+			await tick();
 			flushSync();
 
 			const announcer = Array.from(
