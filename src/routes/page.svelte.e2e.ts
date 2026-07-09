@@ -272,7 +272,7 @@ test('create → submit → stream: navigates to a conversation and renders the 
 });
 
 test('home page shows the session list when sessions exist', async ({ page }) => {
-	await page.route('/api/sessions', (route) => {
+	await page.route('**/api/sessions', (route) => {
 		void route.fulfill({
 			status: 200,
 			contentType: 'application/json',
@@ -410,6 +410,7 @@ test('resume: navigating to an existing session rehydrates the conversation from
 test('resume: a reloaded running session catches up from canonical state without another reload', async ({
 	page
 }) => {
+	let allowCompletion = false;
 	let completed = false;
 	let transcriptRequests = 0;
 	let inspectorRequests = 0;
@@ -473,7 +474,7 @@ test('resume: a reloaded running session catches up from canonical state without
 		});
 	});
 
-	await page.route('/api/sessions/reload-running-session/transcript', (route) => {
+	await page.route('**/api/sessions/reload-running-session/transcript', (route) => {
 		transcriptRequests += 1;
 		void route.fulfill({
 			status: 200,
@@ -482,7 +483,7 @@ test('resume: a reloaded running session catches up from canonical state without
 		});
 	});
 
-	await page.route('/api/sessions/reload-running-session/runs', (route) => {
+	await page.route('**/api/sessions/reload-running-session/runs', (route) => {
 		void route.fulfill({
 			status: 200,
 			contentType: 'application/json',
@@ -498,10 +499,10 @@ test('resume: a reloaded running session catches up from canonical state without
 	});
 
 	await page.route(
-		'/api/sessions/reload-running-session/runs/run-reload-001/inspector',
+		'**/api/sessions/reload-running-session/runs/run-reload-001/inspector',
 		(route) => {
 			inspectorRequests += 1;
-			if (inspectorRequests > 1) completed = true;
+			if (allowCompletion) completed = true;
 			const events = completed ? completeTranscript : partialTranscript;
 			void route.fulfill({
 				status: 200,
@@ -522,6 +523,18 @@ test('resume: a reloaded running session catches up from canonical state without
 	await expect(chat.getByText('Reply with exactly: RELOAD_CATCHUP_OK.')).toBeVisible({
 		timeout: 5_000
 	});
+	const transcriptRequestsBeforeReload = transcriptRequests;
+	const inspectorRequestsBeforeReload = inspectorRequests;
+
+	await page.reload();
+	await expect(chat.getByText('Reply with exactly: RELOAD_CATCHUP_OK.')).toBeVisible({
+		timeout: 5_000
+	});
+	await expect.poll(() => inspectorRequests).toBeGreaterThan(inspectorRequestsBeforeReload);
+	const inspectorRequestsBeforeCompletion = inspectorRequests;
+	allowCompletion = true;
+	await expect.poll(() => inspectorRequests).toBeGreaterThan(inspectorRequestsBeforeCompletion);
+
 	await expect(chat.getByText('RELOAD_CATCHUP_OK', { exact: true })).toBeVisible({
 		timeout: 10_000
 	});
@@ -529,6 +542,6 @@ test('resume: a reloaded running session catches up from canonical state without
 	await expect(page.locator('.session-strip').getByText('complete')).toBeVisible({
 		timeout: 10_000
 	});
-	expect(transcriptRequests).toBeGreaterThan(1);
-	expect(inspectorRequests).toBeGreaterThan(1);
+	expect(transcriptRequests).toBeGreaterThan(transcriptRequestsBeforeReload);
+	expect(inspectorRequests).toBeGreaterThan(inspectorRequestsBeforeReload);
 });

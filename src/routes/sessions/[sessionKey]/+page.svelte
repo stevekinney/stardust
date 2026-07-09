@@ -69,6 +69,8 @@
 
 	let abortController: AbortController | null = null;
 	let catchupTimeout: ReturnType<typeof setTimeout> | null = null;
+	let catchupGeneration = 0;
+	let destroyed = false;
 
 	/** Controls which pane is active on tablet (641–1024px). */
 	let tabletView = $state<'conversation' | 'run'>('conversation');
@@ -80,6 +82,7 @@
 	afterNavigate(() => {
 		if (initializedSessionKey === sessionKey) return;
 		initializedSessionKey = sessionKey;
+		const targetSessionKey = sessionKey;
 
 		abortController?.abort();
 		abortController = null;
@@ -109,23 +112,33 @@
 			loadLatestRunInspector,
 			submitFirstTurn: handleSubmit
 		}).then(() => {
+			if (!isCurrentSession(targetSessionKey)) return;
 			void startCanonicalCatchupIfNeeded();
 		});
 	});
 
 	onDestroy(() => {
+		destroyed = true;
 		abortController?.abort();
 		stopCanonicalCatchup();
 	});
 
-	async function loadTranscript() {
+	function isCurrentSession(targetSessionKey: string): boolean {
+		return !destroyed && targetSessionKey === sessionKey;
+	}
+
+	async function loadTranscript(targetSessionKey = sessionKey) {
 		try {
-			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/transcript`, {
-				cache: 'no-store'
-			});
+			const response = await fetch(
+				`/api/sessions/${encodeURIComponent(targetSessionKey)}/transcript`,
+				{
+					cache: 'no-store'
+				}
+			);
 			if (!response.ok) return;
 
 			const body = (await response.json()) as { events: TranscriptEventRow[] };
+			if (!isCurrentSession(targetSessionKey)) return;
 
 			currentUserMessage = findLastUserMessageText(body.events);
 
@@ -284,15 +297,21 @@
 		liveEvents = [...liveEvents, { id: id ?? liveEvents.length, kind, payload }];
 	}
 
-	async function loadLatestRunInspector(): Promise<RunInspectorProjection | null> {
+	async function loadLatestRunInspector(
+		targetSessionKey = sessionKey
+	): Promise<RunInspectorProjection | null> {
 		try {
-			const runsResponse = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/runs`, {
-				cache: 'no-store'
-			});
+			const runsResponse = await fetch(
+				`/api/sessions/${encodeURIComponent(targetSessionKey)}/runs`,
+				{
+					cache: 'no-store'
+				}
+			);
 			if (!runsResponse.ok) return null;
 			const runsBody = (await runsResponse.json()) as {
 				runs: Array<{ id: string; createdAt: string }>;
 			};
+			if (!isCurrentSession(targetSessionKey)) return null;
 			runCount = runsBody.runs.length;
 			if (runsBody.runs.length === 0) return null;
 
@@ -302,11 +321,12 @@
 			const latestRunId = sorted[0].id;
 
 			const inspectorResponse = await fetch(
-				`/api/sessions/${encodeURIComponent(sessionKey)}/runs/${encodeURIComponent(latestRunId)}/inspector`,
+				`/api/sessions/${encodeURIComponent(targetSessionKey)}/runs/${encodeURIComponent(latestRunId)}/inspector`,
 				{ cache: 'no-store' }
 			);
 			if (!inspectorResponse.ok) return null;
 			const projection = (await inspectorResponse.json()) as RunInspectorProjection;
+			if (!isCurrentSession(targetSessionKey)) return null;
 			inspector = projection;
 			return projection;
 		} catch {
@@ -316,6 +336,7 @@
 	}
 
 	const TERMINAL_RUN_STATUSES = new Set(['complete', 'failed', 'cancelled', 'recovered']);
+	const PAUSED_RUN_STATUSES = new Set(['waiting_approval']);
 	const CANONICAL_CATCHUP_INTERVAL_MS = 1000;
 	const CANONICAL_CATCHUP_MAX_ATTEMPTS = 20;
 
@@ -323,7 +344,12 @@
 		return status != null && TERMINAL_RUN_STATUSES.has(status);
 	}
 
+	function isPausedRunStatus(status: string | null | undefined): boolean {
+		return status != null && PAUSED_RUN_STATUSES.has(status);
+	}
+
 	function stopCanonicalCatchup() {
+		catchupGeneration += 1;
 		if (catchupTimeout) {
 			clearTimeout(catchupTimeout);
 			catchupTimeout = null;
@@ -332,41 +358,81 @@
 
 	async function startCanonicalCatchupIfNeeded() {
 		stopCanonicalCatchup();
-		const latestInspector = inspector ?? (await loadLatestRunInspector());
+		const generation = catchupGeneration;
+		const targetSessionKey = sessionKey;
+		const latestInspector = inspector ?? (await loadLatestRunInspector(targetSessionKey));
+		if (!isActiveCatchup(generation, targetSessionKey)) return;
 		if (!latestInspector || isTerminalRunStatus(latestInspector.run.status)) return;
 
 		transcriptMode = 'canonical';
-		void pollCanonicalCatchup(latestInspector.run.id, 0);
+		void pollCanonicalCatchup(targetSessionKey, latestInspector.run.id, 1, generation);
 	}
 
-	async function pollCanonicalCatchup(runId: string, attempt: number): Promise<void> {
-		await loadTranscript();
-		const latestInspector = await loadLatestRunInspector();
+	function isActiveCatchup(generation: number, targetSessionKey: string): boolean {
+		return catchupGeneration === generation && isCurrentSession(targetSessionKey);
+	}
 
-		if (latestInspector && latestInspector.run.id !== runId) return;
+	function scheduleCanonicalCatchup(
+		targetSessionKey: string,
+		runId: string,
+		attempt: number,
+		generation: number
+	) {
+		if (!isActiveCatchup(generation, targetSessionKey)) return;
+		catchupTimeout = setTimeout(() => {
+			void pollCanonicalCatchup(targetSessionKey, runId, attempt, generation);
+		}, CANONICAL_CATCHUP_INTERVAL_MS);
+	}
+
+	async function pollCanonicalCatchup(
+		targetSessionKey: string,
+		runId: string,
+		attempt: number,
+		generation: number
+	): Promise<void> {
+		if (!isActiveCatchup(generation, targetSessionKey)) return;
+
+		await loadTranscript(targetSessionKey);
+		if (!isActiveCatchup(generation, targetSessionKey)) return;
+
+		const latestInspector = await loadLatestRunInspector(targetSessionKey);
+		if (!isActiveCatchup(generation, targetSessionKey)) return;
+
+		if (latestInspector && latestInspector.run.id !== runId) {
+			if (isTerminalRunStatus(latestInspector.run.status)) {
+				await loadTranscript(targetSessionKey);
+				if (isActiveCatchup(generation, targetSessionKey)) stopCanonicalCatchup();
+				return;
+			}
+
+			scheduleCanonicalCatchup(targetSessionKey, latestInspector.run.id, 1, generation);
+			return;
+		}
 		if (latestInspector && isTerminalRunStatus(latestInspector.run.status)) {
-			await loadTranscript();
-			stopCanonicalCatchup();
+			await loadTranscript(targetSessionKey);
+			if (isActiveCatchup(generation, targetSessionKey)) stopCanonicalCatchup();
 			return;
 		}
 
-		if (attempt >= CANONICAL_CATCHUP_MAX_ATTEMPTS) {
+		const isPaused = isPausedRunStatus(latestInspector?.run.status);
+		if (!isPaused && attempt >= CANONICAL_CATCHUP_MAX_ATTEMPTS) {
 			errorMessage =
 				'This run is still in progress, but the live connection could not be re-established. Reload to try again.';
 			stopCanonicalCatchup();
 			return;
 		}
 
-		catchupTimeout = setTimeout(() => {
-			void pollCanonicalCatchup(runId, attempt + 1);
-		}, CANONICAL_CATCHUP_INTERVAL_MS);
+		scheduleCanonicalCatchup(targetSessionKey, runId, isPaused ? attempt : attempt + 1, generation);
 	}
 
-	async function loadPendingApproval() {
+	async function loadPendingApproval(targetSessionKey = sessionKey) {
 		try {
-			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/approvals`);
+			const response = await fetch(
+				`/api/sessions/${encodeURIComponent(targetSessionKey)}/approvals`
+			);
 			if (!response.ok) return;
 			const body = (await response.json()) as { approvals: PendingApprovalEntry[] };
+			if (!isCurrentSession(targetSessionKey)) return;
 			pendingApproval = body.approvals.find((a) => a.status === 'pending') ?? null;
 		} catch {
 			// Non-fatal — page works normally without pending approval
@@ -391,6 +457,7 @@
 		} finally {
 			pendingApproval = null;
 			approvalResolution = action === 'deny' ? 'deny' : 'approve';
+			void startCanonicalCatchupIfNeeded();
 		}
 	}
 
