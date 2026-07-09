@@ -23,11 +23,11 @@
  */
 import '../src/lib/server/load-env';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { createServer } from 'node:net';
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Connection } from '@temporalio/client';
+import { reserveFreePort } from './dev-ports';
 import { TEMPORAL_ADDRESS, TEMPORAL_API_KEY, TEMPORAL_NAMESPACE } from '../src/lib/server/config';
 import {
 	describeTemporalConfigProblem,
@@ -65,32 +65,6 @@ function startProcess(name: string, command: string, args: string[]): ManagedPro
 
 function sleep(milliseconds: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-/** Resolve true if a TCP listener can bind the port on the loopback interface. */
-function isPortFree(port: number): Promise<boolean> {
-	return new Promise((resolve) => {
-		const tester = createServer();
-		tester.once('error', () => resolve(false));
-		tester.once('listening', () => tester.close(() => resolve(true)));
-		tester.listen(port, '127.0.0.1');
-	});
-}
-
-// Ports handed out during this run, so a fallback never reassigns one already
-// chosen for another service (the preferred ranges are adjacent).
-const reservedPorts = new Set<number>();
-
-/** Find the first free port at or after `preferred`, skipping already-reserved ones. */
-async function reserveFreePort(preferred: number): Promise<number> {
-	for (let port = preferred; port < preferred + 100; port++) {
-		if (reservedPorts.has(port)) continue;
-		if (await isPortFree(port)) {
-			reservedPorts.add(port);
-			return port;
-		}
-	}
-	throw new Error(`[dev] No free port found near ${preferred}.`);
 }
 
 /** Try to reach a Temporal frontend, retrying a fixed number of times. */
