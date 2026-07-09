@@ -1,15 +1,10 @@
 import { defineConfig } from '@playwright/test';
 
-const webServerUrl = 'http://127.0.0.1:4319';
-
 export default defineConfig({
-	use: {
-		baseURL: webServerUrl
-	},
 	webServer: {
 		command:
-			'env -u FORCE_COLOR -u NO_COLOR bun run preview -- --host 127.0.0.1 --port 4319 --strictPort',
-		url: webServerUrl,
+			'env -u FORCE_COLOR -u NO_COLOR bun run build && env -u FORCE_COLOR -u NO_COLOR bun run preview -- --port 4319 --strictPort',
+		port: 4319,
 		// 4173 is Vite's global default preview port, so outside CI (where this
 		// defaults to true) Playwright could silently attach to an unrelated
 		// project's `vite preview` left running on that port instead of this app's
