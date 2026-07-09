@@ -8,6 +8,7 @@
 	import '@lostgradient/cinder/chat/styles';
 	import '@lostgradient/cinder/command-item/styles';
 	import '@lostgradient/cinder/command-palette/styles';
+	import '@lostgradient/cinder/confirm-dialog/styles';
 	import '@lostgradient/cinder/drawer/styles';
 	import '@lostgradient/cinder/empty-state/styles';
 	import '@lostgradient/cinder/event-stream-viewer/styles';

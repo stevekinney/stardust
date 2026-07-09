@@ -1,6 +1,7 @@
 <script lang="ts">
 	import PageHeader from '$lib/components/page-header.svelte';
 	import Button from '@lostgradient/cinder/button';
+	import ConfirmDialog from '@lostgradient/cinder/confirm-dialog';
 	import NumberInput from '@lostgradient/cinder/number-input';
 	import Select from '@lostgradient/cinder/select';
 
@@ -79,10 +80,14 @@
 		}
 	}
 
+	function openResetDialog(event: MouseEvent) {
+		if (typeof window === 'undefined') return;
+		resetDialogTriggerElement = event.currentTarget as HTMLElement;
+		resetDialogOpen = true;
+	}
+
 	function clearLocalData() {
 		if (typeof window === 'undefined') return;
-		const confirmed = confirm(RESET_LOCAL_DATA_WARNING);
-		if (!confirmed) return;
 		localStorage.clear();
 		model = MODEL_OPTIONS[0].value;
 		theme = 'dark';
@@ -97,6 +102,8 @@
 	let theme = $state<Theme>(initial.theme);
 	let maxBudgetUsd = $state(initial.maxBudgetUsd);
 	let tokensPerRun = $state(initial.tokensPerRun);
+	let resetDialogOpen = $state(false);
+	let resetDialogTriggerElement: HTMLElement | null = $state(null);
 
 	$effect(() => {
 		void [model, theme, maxBudgetUsd, tokensPerRun];
@@ -212,13 +219,23 @@
 						type="button"
 						variant="danger"
 						label="Reset all local state"
-						onclick={clearLocalData}
+						onclick={openResetDialog}
 					/>
 				</div>
 			</section>
 		</div>
 	</div>
 </div>
+
+<ConfirmDialog
+	bind:open={resetDialogOpen}
+	triggerRef={resetDialogTriggerElement}
+	title="Reset all local state?"
+	description={RESET_LOCAL_DATA_WARNING}
+	destructive
+	confirmLabel="Reset local state"
+	onconfirm={clearLocalData}
+/>
 
 <style>
 	.page {
