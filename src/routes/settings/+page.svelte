@@ -216,6 +216,7 @@
 						<div class="danger-desc">{RESET_LOCAL_DATA_WARNING}</div>
 					</div>
 					<Button
+						class="reset-local-state-button"
 						type="button"
 						variant="danger"
 						label="Reset all local state"
@@ -349,7 +350,7 @@
 			flex-direction: column;
 		}
 
-		.danger-zone :global(.cinder-button) {
+		:global(.reset-local-state-button) {
 			width: 100%;
 		}
 	}

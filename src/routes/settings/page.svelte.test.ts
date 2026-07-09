@@ -48,6 +48,16 @@ describe('Settings local data reset', () => {
 		unmount(component);
 	});
 
+	it('uses an app-owned class for the reset button layout hook', () => {
+		const component = mountSettingsPage();
+
+		expect(findButton('Reset all local state').classList.contains('reset-local-state-button')).toBe(
+			true
+		);
+
+		unmount(component);
+	});
+
 	it('leaves local data unchanged when the dialog is cancelled', async () => {
 		localStorage.setItem('stardust-workspace', 'preserved');
 		const component = mountSettingsPage();
