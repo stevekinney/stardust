@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { afterNavigate } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import Badge from '@lostgradient/cinder/badge';
 	import NavigationBar from '@lostgradient/cinder/navigation-bar';
@@ -17,14 +16,14 @@
 
 	let { currentPath, health = null, onOpenPalette }: Props = $props();
 
-	let mobileMenuOpen = $state(false);
+	let mobileMenuOpenPath = $state('');
+	let mobileMenuOpenRequested = $state(false);
 
-	// The dropdown otherwise stays open across a route change (Cinder never
-	// closes it for you), which would leave the backdrop blurring the new
-	// page underneath it.
-	afterNavigate(() => {
-		mobileMenuOpen = false;
-	});
+	const getMobileMenuOpen = () => mobileMenuOpenPath === currentPath && mobileMenuOpenRequested;
+	const setMobileMenuOpen = (open: boolean) => {
+		mobileMenuOpenPath = currentPath;
+		mobileMenuOpenRequested = open;
+	};
 
 	const tabs = $derived([
 		{
@@ -51,7 +50,7 @@
 	label="Primary"
 	class="top-nav"
 	menuTogglePlacement="before-brand"
-	bind:mobileMenuOpen
+	bind:mobileMenuOpen={getMobileMenuOpen, setMobileMenuOpen}
 >
 	{#snippet brand()}
 		<a href={resolve('/')} class="brand" aria-label="Stardust home">STARDUST</a>
@@ -162,8 +161,8 @@
 	{/snippet}
 </NavigationBar>
 
-{#if mobileMenuOpen}
-	<div class="menu-backdrop" role="presentation" onclick={() => (mobileMenuOpen = false)}></div>
+{#if getMobileMenuOpen()}
+	<div class="menu-backdrop" role="presentation" onclick={() => setMobileMenuOpen(false)}></div>
 {/if}
 
 <style>
