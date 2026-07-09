@@ -127,7 +127,7 @@
 		return !destroyed && targetSessionKey === sessionKey;
 	}
 
-	async function loadTranscript(targetSessionKey = sessionKey) {
+	async function loadTranscript(targetSessionKey = sessionKey, generation: number | null = null) {
 		try {
 			const response = await fetch(
 				`/api/sessions/${encodeURIComponent(targetSessionKey)}/transcript`,
@@ -139,6 +139,7 @@
 
 			const body = (await response.json()) as { events: TranscriptEventRow[] };
 			if (!isCurrentSession(targetSessionKey)) return;
+			if (generation != null && !isActiveCatchup(generation, targetSessionKey)) return;
 
 			currentUserMessage = findLastUserMessageText(body.events);
 
@@ -310,7 +311,8 @@
 	}
 
 	async function loadLatestRunInspector(
-		targetSessionKey = sessionKey
+		targetSessionKey = sessionKey,
+		generation: number | null = null
 	): Promise<RunInspectorProjection | null> {
 		try {
 			const runsResponse = await fetch(
@@ -324,6 +326,7 @@
 				runs: Array<{ id: string; createdAt: string }>;
 			};
 			if (!isCurrentSession(targetSessionKey)) return null;
+			if (generation != null && !isActiveCatchup(generation, targetSessionKey)) return null;
 			runCount = runsBody.runs.length;
 			if (runsBody.runs.length === 0) return null;
 
@@ -339,6 +342,7 @@
 			if (!inspectorResponse.ok) return null;
 			const projection = (await inspectorResponse.json()) as RunInspectorProjection;
 			if (!isCurrentSession(targetSessionKey)) return null;
+			if (generation != null && !isActiveCatchup(generation, targetSessionKey)) return null;
 			inspector = projection;
 			return projection;
 		} catch {
@@ -356,8 +360,28 @@
 		return status != null && TERMINAL_RUN_STATUSES.has(status);
 	}
 
+	function inspectorTranscriptIncludesStatus(
+		projection: RunInspectorProjection,
+		status: string | null | undefined
+	): boolean {
+		if (!isTerminalRunStatus(status)) return false;
+		return projection.transcript.some((event) => {
+			if (event.kind !== 'lifecycle') return false;
+			const payload = event.payload;
+			return typeof payload === 'object' && payload !== null && 'status' in payload
+				? payload.status === status
+				: false;
+		});
+	}
+
 	function isPausedRunStatus(status: string | null | undefined): boolean {
 		return status != null && PAUSED_RUN_STATUSES.has(status);
+	}
+
+	function surfaceCatchupFailure() {
+		errorMessage =
+			'This run is still in progress, but the live connection could not be re-established. Reload to try again.';
+		stopCanonicalCatchup();
 	}
 
 	function stopCanonicalCatchup() {
@@ -372,12 +396,13 @@
 		stopCanonicalCatchup();
 		const generation = catchupGeneration;
 		const targetSessionKey = sessionKey;
-		const latestInspector = inspector ?? (await loadLatestRunInspector(targetSessionKey));
+		const latestInspector =
+			inspector ?? (await loadLatestRunInspector(targetSessionKey, generation));
 		if (!isActiveCatchup(generation, targetSessionKey)) return;
-		if (!latestInspector || isTerminalRunStatus(latestInspector.run.status)) return;
+		if (latestInspector && isTerminalRunStatus(latestInspector.run.status)) return;
 
 		transcriptMode = 'canonical';
-		void pollCanonicalCatchup(targetSessionKey, latestInspector.run.id, 1, generation);
+		void pollCanonicalCatchup(targetSessionKey, latestInspector?.run.id ?? null, 1, generation);
 	}
 
 	function isActiveCatchup(generation: number, targetSessionKey: string): boolean {
@@ -386,7 +411,7 @@
 
 	function scheduleCanonicalCatchup(
 		targetSessionKey: string,
-		runId: string,
+		runId: string | null,
 		attempt: number,
 		generation: number
 	) {
@@ -398,22 +423,33 @@
 
 	async function pollCanonicalCatchup(
 		targetSessionKey: string,
-		runId: string,
+		runId: string | null,
 		attempt: number,
 		generation: number
 	): Promise<void> {
 		if (!isActiveCatchup(generation, targetSessionKey)) return;
 
-		await loadTranscript(targetSessionKey);
+		await loadTranscript(targetSessionKey, generation);
 		if (!isActiveCatchup(generation, targetSessionKey)) return;
 
-		const latestInspector = await loadLatestRunInspector(targetSessionKey);
+		const latestInspector = await loadLatestRunInspector(targetSessionKey, generation);
 		if (!isActiveCatchup(generation, targetSessionKey)) return;
 
 		if (latestInspector && latestInspector.run.id !== runId) {
 			if (isTerminalRunStatus(latestInspector.run.status)) {
-				applyInspectorTranscript(latestInspector);
-				if (isActiveCatchup(generation, targetSessionKey)) stopCanonicalCatchup();
+				if (inspectorTranscriptIncludesStatus(latestInspector, latestInspector.run.status)) {
+					applyInspectorTranscript(latestInspector);
+					if (isActiveCatchup(generation, targetSessionKey)) stopCanonicalCatchup();
+				} else if (attempt >= CANONICAL_CATCHUP_MAX_ATTEMPTS) {
+					surfaceCatchupFailure();
+				} else {
+					scheduleCanonicalCatchup(
+						targetSessionKey,
+						latestInspector.run.id,
+						attempt + 1,
+						generation
+					);
+				}
 				return;
 			}
 
@@ -421,16 +457,20 @@
 			return;
 		}
 		if (latestInspector && isTerminalRunStatus(latestInspector.run.status)) {
-			applyInspectorTranscript(latestInspector);
-			if (isActiveCatchup(generation, targetSessionKey)) stopCanonicalCatchup();
+			if (inspectorTranscriptIncludesStatus(latestInspector, latestInspector.run.status)) {
+				applyInspectorTranscript(latestInspector);
+				if (isActiveCatchup(generation, targetSessionKey)) stopCanonicalCatchup();
+			} else if (attempt >= CANONICAL_CATCHUP_MAX_ATTEMPTS) {
+				surfaceCatchupFailure();
+			} else {
+				scheduleCanonicalCatchup(targetSessionKey, latestInspector.run.id, attempt + 1, generation);
+			}
 			return;
 		}
 
 		const isPaused = isPausedRunStatus(latestInspector?.run.status);
 		if (!isPaused && attempt >= CANONICAL_CATCHUP_MAX_ATTEMPTS) {
-			errorMessage =
-				'This run is still in progress, but the live connection could not be re-established. Reload to try again.';
-			stopCanonicalCatchup();
+			surfaceCatchupFailure();
 			return;
 		}
 

@@ -414,6 +414,8 @@ test('resume: a reloaded running session catches up from canonical state without
 	let completed = false;
 	let transcriptRequests = 0;
 	let inspectorRequests = 0;
+	let runRowsVisible = false;
+	let terminalTranscriptVisible = false;
 
 	const partialTranscript = [
 		{
@@ -484,6 +486,16 @@ test('resume: a reloaded running session catches up from canonical state without
 	});
 
 	await page.route('**/api/sessions/reload-running-session/runs', (route) => {
+		if (!runRowsVisible) {
+			runRowsVisible = true;
+			void route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ runs: [] })
+			});
+			return;
+		}
+
 		void route.fulfill({
 			status: 200,
 			contentType: 'application/json',
@@ -503,7 +515,9 @@ test('resume: a reloaded running session catches up from canonical state without
 		(route) => {
 			inspectorRequests += 1;
 			if (allowCompletion) completed = true;
-			const events = completed ? completeTranscript : partialTranscript;
+			const events =
+				completed && terminalTranscriptVisible ? completeTranscript : partialTranscript;
+			if (completed) terminalTranscriptVisible = true;
 			void route.fulfill({
 				status: 200,
 				contentType: 'application/json',
