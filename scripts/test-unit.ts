@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { rmSync } from 'node:fs';
 
 export const unitTestProjects = ['client', 'server', 'workflows'] as const;
 
@@ -7,18 +8,38 @@ export function normalizeArguments(argumentsToForward: readonly string[]): strin
 	return argumentsToForward.filter((argument) => argument !== '--run');
 }
 
+/** Return whether a caller requested Vitest coverage collection. */
+export function hasCoverageArgument(argumentsToForward: readonly string[]): boolean {
+	return argumentsToForward.some(
+		(argument) =>
+			argument === '--coverage' ||
+			argument === '--coverage.enabled' ||
+			argument.startsWith('--coverage=') ||
+			argument.startsWith('--coverage.enabled=')
+	);
+}
+
 /** Build the command that verifies a targeted invocation matches at least one test. */
 export function createListCommand(
 	project: (typeof unitTestProjects)[number],
 	argumentsToForward: readonly string[]
 ): string[] {
-	return ['bunx', 'vitest', 'list', '--project', project, ...argumentsToForward];
+	return [
+		'bunx',
+		'vitest',
+		'list',
+		'--project',
+		project,
+		'--passWithNoTests',
+		...argumentsToForward
+	];
 }
 
 /** Build one isolated Vitest project command while preserving caller arguments. */
 export function createProjectCommand(
 	project: (typeof unitTestProjects)[number],
-	argumentsToForward: readonly string[]
+	argumentsToForward: readonly string[],
+	blobReportsDirectory?: string
 ): string[] {
 	return [
 		'bunx',
@@ -27,8 +48,16 @@ export function createProjectCommand(
 		'--project',
 		project,
 		...(argumentsToForward.length > 0 ? ['--passWithNoTests'] : []),
-		...argumentsToForward
+		...argumentsToForward,
+		...(blobReportsDirectory
+			? ['--reporter=blob', `--outputFile=${blobReportsDirectory}/${project}.json`]
+			: [])
 	];
+}
+
+/** Build the command that merges per-project blob reports and their coverage data. */
+export function createMergeCommand(blobReportsDirectory: string): string[] {
+	return ['bunx', 'vitest', 'run', `--merge-reports=${blobReportsDirectory}`, '--coverage'];
 }
 
 function runCommand(command: readonly string[], captureOutput = false): string {
@@ -47,6 +76,9 @@ function runCommand(command: readonly string[], captureOutput = false): string {
 
 if (import.meta.main) {
 	const argumentsToForward = normalizeArguments(process.argv.slice(2));
+	const blobReportsDirectory = hasCoverageArgument(argumentsToForward)
+		? `.vitest-reports-${process.pid}`
+		: undefined;
 
 	if (argumentsToForward.length > 0) {
 		const hasMatchingTest = unitTestProjects.some(
@@ -58,7 +90,13 @@ if (import.meta.main) {
 		}
 	}
 
-	for (const project of unitTestProjects) {
-		runCommand(createProjectCommand(project, argumentsToForward));
+	try {
+		for (const project of unitTestProjects) {
+			runCommand(createProjectCommand(project, argumentsToForward, blobReportsDirectory));
+		}
+
+		if (blobReportsDirectory) runCommand(createMergeCommand(blobReportsDirectory));
+	} finally {
+		if (blobReportsDirectory) rmSync(blobReportsDirectory, { recursive: true, force: true });
 	}
 }

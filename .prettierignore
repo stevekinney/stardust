@@ -8,6 +8,8 @@ bun.lockb
 # Miscellaneous
 /static/
 /drizzle/
+/coverage/
+/.vitest-reports-*/
 
 # Machine-local, git-ignored Claude Code settings
 .claude/settings.local.json
