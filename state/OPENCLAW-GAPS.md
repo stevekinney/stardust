@@ -26,7 +26,7 @@ Stardust is at parity or ahead of OpenClaw on tool-call visualization, streaming
 
 ## Update — 2026-07-07 (track/slash-commands)
 
-Gap 1 ("No in-chat slash commands") above is **closed**. Implemented as a Stardust-side text-parsing/capture-phase interception layer over Cinder's rendered composer DOM (not a Cinder feature request that blocked implementation — see the CINDER-REQUEST logged in `state/PROGRESS.md` for the follow-up API ask that would let this stop reaching into `.chat-input-editor` directly). Minimum command set shipped: `/help`, `/new`, `/tools`, `/stop`, `/retry`, `/approvals` — all wired to real existing durable-signal/API paths, not stubs. See `src/lib/slash-commands.ts`, `src/lib/components/slash-command-palette.svelte`, `src/lib/components/conversation-view.svelte`, and `src/routes/api/tools/+server.ts`.
+Gap 1 ("No in-chat slash commands") above is **closed**. The current integration uses Cinder's public Chat composer API, introduced in 0.9 and retained by Stardust's current Cinder version: slash-command combobox state passes through the `composerRole` and `composerAria*` props, command keys are handled by `oncomposerkeydown`, and inline approval messages use `Chat.announce()`. The earlier composer reach-in has been removed. The minimum command set remains `/help`, `/new`, `/tools`, `/stop`, `/retry`, and `/approvals`—all wired to real durable-signal or API paths, not stubs. See `state/CINDER-RELEASE.md`, `state/PROGRESS.md`, `src/lib/slash-commands.ts`, `src/lib/components/slash-command-palette.svelte`, `src/lib/components/conversation-view.svelte`, and `src/routes/api/tools/+server.ts`.
 
 ## Track E updates
 
