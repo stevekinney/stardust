@@ -45,11 +45,17 @@ describe('unit test script commands', () => {
 		]);
 	});
 
-	it('removes the legacy run flag that the script supplies itself', () => {
-		expect(normalizeArguments(['--run', '--coverage', 'run-pane.svelte.test.ts'])).toEqual([
-			'--coverage',
-			'run-pane.svelte.test.ts'
-		]);
+	it('removes run and project flags that the script supplies itself', () => {
+		expect(
+			normalizeArguments([
+				'--run',
+				'--project',
+				'client',
+				'--project=server',
+				'--coverage',
+				'run-pane.svelte.test.ts'
+			])
+		).toEqual(['--coverage', 'run-pane.svelte.test.ts']);
 	});
 
 	it('detects coverage requests', () => {

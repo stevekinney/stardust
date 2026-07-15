@@ -5,7 +5,20 @@ export const unitTestProjects = ['client', 'server', 'workflows'] as const;
 
 /** Remove flags that the isolated project runner supplies itself. */
 export function normalizeArguments(argumentsToForward: readonly string[]): string[] {
-	return argumentsToForward.filter((argument) => argument !== '--run');
+	const normalizedArguments: string[] = [];
+
+	for (let index = 0; index < argumentsToForward.length; index += 1) {
+		const argument = argumentsToForward[index];
+		if (argument === '--run') continue;
+		if (argument === '--project') {
+			index += 1;
+			continue;
+		}
+		if (argument?.startsWith('--project=')) continue;
+		if (argument) normalizedArguments.push(argument);
+	}
+
+	return normalizedArguments;
 }
 
 /** Return whether a caller requested Vitest coverage collection. */

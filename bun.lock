@@ -34,7 +34,7 @@
         "@types/better-sqlite3": "^7.6.13",
         "@types/node": "^24",
         "@vitest/browser-playwright": "^4.1.8",
-        "@vitest/coverage-v8": "4.1.9",
+        "@vitest/coverage-v8": "^4.1.9",
         "axe-core": "^4.12.1",
         "build-temporal-workflow": "^0.4.0",
         "concurrently": "^10.0.3",
