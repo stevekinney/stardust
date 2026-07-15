@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
+import { parseCLI } from 'vitest/node';
 
 export const unitTestProjects = ['client', 'server', 'workflows'] as const;
 
@@ -60,14 +61,12 @@ export function hasCoverageArgument(argumentsToForward: readonly string[]): bool
 
 /** Return whether caller arguments narrow which tests Vitest should execute. */
 export function hasTestSelectionArgument(argumentsToForward: readonly string[]): boolean {
-	return argumentsToForward.some(
-		(argument) =>
-			!argument.startsWith('-') ||
-			argument === '-t' ||
-			argument === '--testNamePattern' ||
-			argument.startsWith('--testNamePattern=') ||
-			argument === '--changed' ||
-			argument.startsWith('--changed=')
+	const { filter, options } = parseCLI(['vitest', 'run', ...argumentsToForward]);
+	return (
+		filter.length > 0 ||
+		options.testNamePattern !== undefined ||
+		options.changed !== undefined ||
+		options.related !== undefined
 	);
 }
 

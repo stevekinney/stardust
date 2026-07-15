@@ -87,7 +87,11 @@ describe('unit test script commands', () => {
 		expect(hasTestSelectionArgument(['src/lib/server/test-unit-script.test.ts'])).toBe(true);
 		expect(hasTestSelectionArgument(['--testNamePattern=unit test script'])).toBe(true);
 		expect(hasTestSelectionArgument(['--changed=main'])).toBe(true);
+		expect(hasTestSelectionArgument(['--related', 'src/lib/inbox.svelte.ts'])).toBe(true);
 		expect(hasTestSelectionArgument(['--coverage'])).toBe(false);
+		expect(hasTestSelectionArgument(['--coverage.reporter', 'lcov'])).toBe(false);
+		expect(hasTestSelectionArgument(['--coverage.reportsDirectory', 'tmp/coverage'])).toBe(false);
+		expect(hasTestSelectionArgument(['--maxWorkers', '2'])).toBe(false);
 	});
 
 	it('keeps coverage-only project runs strict', () => {
