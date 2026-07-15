@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	assertCommandSucceeded,
 	createListCommand,
 	createMergeArguments,
 	createMergeCommand,
@@ -13,6 +14,12 @@ import {
 } from '../../../scripts/test-unit';
 
 describe('unit test script commands', () => {
+	it('propagates command failures so report cleanup can finish', () => {
+		expect(() => assertCommandSucceeded(1)).toThrow('Test command failed with status 1.');
+		expect(() => assertCommandSucceeded(null)).toThrow('Test command failed with status 1.');
+		expect(() => assertCommandSucceeded(0)).not.toThrow();
+	});
+
 	it('checks targeted arguments within one isolated project', () => {
 		expect(createListCommand('client', ['run-pane.svelte.test.ts'])).toEqual([
 			'bunx',

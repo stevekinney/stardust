@@ -161,6 +161,10 @@ export function createMergeCommand(
 	];
 }
 
+export function assertCommandSucceeded(status: number | null): void {
+	if (status !== 0) throw new Error(`Test command failed with status ${status ?? 1}.`);
+}
+
 function runCommand(command: readonly string[], captureOutput = false): string {
 	const [executable, ...argumentsToPass] = command;
 	if (!executable) throw new Error('A command executable is required.');
@@ -170,7 +174,7 @@ function runCommand(command: readonly string[], captureOutput = false): string {
 		encoding: 'utf8'
 	});
 	if (result.error) throw result.error;
-	if (result.status !== 0) process.exit(result.status ?? 1);
+	assertCommandSucceeded(result.status);
 
 	return result.stdout ?? '';
 }
