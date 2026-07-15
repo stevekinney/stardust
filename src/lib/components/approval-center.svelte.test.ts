@@ -54,7 +54,14 @@ describe('ApprovalCenter', () => {
 			props: { approvals }
 		});
 
-		expect(document.querySelectorAll('.cinder-approval-card')).toHaveLength(2);
+		const approvalCards = Array.from(document.querySelectorAll('article[aria-labelledby]'));
+		expect(approvalCards).toHaveLength(2);
+		for (const approvalCard of approvalCards) {
+			const titleId = approvalCard.getAttribute('aria-labelledby');
+			expect(document.getElementById(titleId!)?.textContent).toContain(
+				'Approval required for workspace.writeFile'
+			);
+		}
 		expect(document.body.textContent).toContain('workspace.writeFile');
 
 		unmount(component);

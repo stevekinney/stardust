@@ -91,7 +91,7 @@
 		<ReplayScrubber {maxSequence} {cursor} {onScrub} {cursorSummary} />
 	{/if}
 
-	<Tabs bind:value={mode} fill>
+	<Tabs bind:value={mode} fill class="run-pane-fill">
 		<div class="mode-bar">
 			<TabList label="Run inspector view">
 				<Tab value="timeline">Timeline</Tab>

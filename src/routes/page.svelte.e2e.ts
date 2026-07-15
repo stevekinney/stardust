@@ -256,7 +256,7 @@ test('home page shows welcome screen when there are no sessions', async ({ page 
 	await expect(nav.getByRole('link', { name: 'Schedules' })).toBeVisible();
 
 	const healthTrigger = nav.getByRole('button', { name: /temporal/ });
-	const health = page.locator('.cinder-popover').filter({ hasText: 'Everything durable' });
+	const health = page.getByRole('dialog', { name: 'Infrastructure health' });
 	await expect(healthTrigger).toHaveAttribute('aria-haspopup', 'dialog');
 	await healthTrigger.click();
 	await expect(health).toBeVisible();

@@ -183,7 +183,7 @@ describe('WorkspacePanel', () => {
 
 		expect(document.body.textContent).toContain('aaa111b'); // shortSha of fromSnapshotId
 		expect(document.body.textContent).toContain('ccc333d'); // shortSha of toSnapshotId
-		const patchEl = document.querySelector('.cinder-source-diff-viewer');
+		const patchEl = document.querySelector('[role="region"][aria-label="Workspace diff"]');
 		expect(patchEl).not.toBeNull();
 		expect(patchEl?.textContent).toContain('+new');
 
