@@ -515,7 +515,13 @@ test('resume: a reloaded running session catches up from canonical state without
 		});
 	});
 
+	let approvalFailuresRemaining = 0;
 	await page.route('**/api/sessions/reload-running-session/approvals', (route) => {
+		if (approvalFailuresRemaining > 0) {
+			approvalFailuresRemaining -= 1;
+			void route.fulfill({ status: 503, body: 'temporarily unavailable' });
+			return;
+		}
 		void route.fulfill({
 			status: 200,
 			contentType: 'application/json',
@@ -619,6 +625,9 @@ test('resume: a reloaded running session catches up from canonical state without
 	});
 	const transcriptRequestsBeforeReload = transcriptRequests;
 	const inspectorRequestsBeforeReload = inspectorRequests;
+	// Both bootstrap and the first reconnection snapshot must treat a transient
+	// approvals outage as non-fatal while transcript and run state remain observable.
+	approvalFailuresRemaining = 2;
 
 	await page.reload();
 	await expect(chat.getByText('Reply with exactly: RELOAD_CATCHUP_OK.')).toBeVisible({

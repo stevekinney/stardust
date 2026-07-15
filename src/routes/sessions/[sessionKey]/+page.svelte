@@ -412,10 +412,14 @@
 		signal: AbortSignal
 	): Promise<SessionReconnectionSnapshot> {
 		const targetSessionKey = sessionKey;
+		const pendingApprovalRequest = fetchPendingApproval(targetSessionKey, signal).catch((error) => {
+			if (signal.aborted) throw error;
+			return null;
+		});
 		const [transcript, latestRun, latestApproval] = await Promise.all([
 			fetchTranscript(targetSessionKey, signal),
 			fetchLatestRunInspector(targetSessionKey, signal),
-			fetchPendingApproval(targetSessionKey, signal)
+			pendingApprovalRequest
 		]);
 		return {
 			transcript,
@@ -621,7 +625,7 @@
 				{#if streamGapNotice}
 					<div class="stream-gap-notice" role="status">{streamGapNotice}</div>
 				{/if}
-				{#if runActive}
+				{#if runActive && acceptsSteering}
 					<div class="steer-strip" role="status">
 						<StatusDot connectionState="connected" label="Streaming" showLabel={false} size="sm" />
 						<span>Streaming — anything you type steers the run</span>
