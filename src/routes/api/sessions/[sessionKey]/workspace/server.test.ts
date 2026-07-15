@@ -15,8 +15,11 @@ import { GET } from './+server';
 // Terminal methods in the Drizzle query chain used by this route:
 //   select().from().where().limit()   → sessions, sandboxes (one at a time)
 //   select().from().where().orderBy() → commands, snapshots, artifacts, tool invocations (Promise.all)
-const mockLimit = vi.fn();
-const mockOrderBy = vi.fn();
+const { mockLimit, mockOrderBy, mockGetSignedUrl } = vi.hoisted(() => ({
+	mockLimit: vi.fn(),
+	mockOrderBy: vi.fn(),
+	mockGetSignedUrl: vi.fn()
+}));
 
 vi.mock('$lib/server/db/client', () => ({
 	db: {
@@ -28,6 +31,12 @@ vi.mock('$lib/server/db/client', () => ({
 				})
 			})
 		})
+	}
+}));
+
+vi.mock('$lib/server/artifacts/local-artifact-store', () => ({
+	LocalArtifactStore: class {
+		getSignedUrl = mockGetSignedUrl;
 	}
 }));
 
@@ -109,13 +118,14 @@ function makeRequest(sessionKey: string): Parameters<typeof GET>[0] {
  */
 function primeDb(
 	commandRows: (typeof baseCommandRow)[] = [],
-	toolRows: Array<Record<string, unknown>> = []
+	toolRows: Array<Record<string, unknown>> = [],
+	artifactRows: Array<Record<string, unknown>> = []
 ) {
 	mockLimit.mockResolvedValueOnce([sessionRow]); // session
 	mockLimit.mockResolvedValueOnce([sandboxRow]); // sandbox
 	mockOrderBy.mockResolvedValueOnce(commandRows); // commands
 	mockOrderBy.mockResolvedValueOnce([]); // snapshots
-	mockOrderBy.mockResolvedValueOnce([]); // artifacts
+	mockOrderBy.mockResolvedValueOnce(artifactRows); // artifacts
 	mockOrderBy.mockResolvedValueOnce(toolRows); // tool invocations
 }
 
@@ -125,6 +135,7 @@ describe('GET /api/sessions/[sessionKey]/workspace', () => {
 	beforeEach(() => {
 		mockLimit.mockReset();
 		mockOrderBy.mockReset();
+		mockGetSignedUrl.mockReset();
 	});
 
 	it('maps stdoutRef to stdout in the WorkspaceCommand response', async () => {
@@ -179,6 +190,33 @@ describe('GET /api/sessions/[sessionKey]/workspace', () => {
 
 		expect(body.commands[0].stdout).toBeNull();
 		expect(body.commands[0].stderr).toBeNull();
+	});
+
+	it('adds a signed download URL to each workspace artifact', async () => {
+		const artifactRow = {
+			id: 'artifact-001',
+			objectKey: 'sessions/test-session/runs/run-001/artifacts/output.json',
+			mimeType: 'application/json',
+			sizeBytes: 2048,
+			createdAt: '2026-06-26T00:00:20.000Z'
+		};
+		mockGetSignedUrl.mockResolvedValue('/api/artifacts/artifact-001?token=signed-token');
+		primeDb([], [], [artifactRow]);
+
+		const response = await GET(makeRequest('test-session'));
+		const body = await response.json();
+
+		expect(mockGetSignedUrl).toHaveBeenCalledWith({
+			artifactId: artifactRow.id,
+			objectKey: artifactRow.objectKey,
+			storageProvider: 'local'
+		});
+		expect(body.artifacts).toEqual([
+			{
+				...artifactRow,
+				downloadUrl: '/api/artifacts/artifact-001?token=signed-token'
+			}
+		]);
 	});
 
 	it('projects persisted workspace.diff tool results as workspace diffs', async () => {

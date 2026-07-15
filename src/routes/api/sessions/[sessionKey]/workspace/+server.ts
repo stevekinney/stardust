@@ -2,6 +2,7 @@ import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db/client';
+import { LocalArtifactStore } from '$lib/server/artifacts/local-artifact-store';
 import {
 	artifacts,
 	sandboxCommands,
@@ -18,6 +19,7 @@ import type {
 } from '$lib/components/workspace-panel.svelte';
 
 const IDENTIFIER_RE = /^[\w-]{1,128}$/;
+const artifactStore = new LocalArtifactStore();
 
 /**
  * Return workspace data for a session: commands, snapshots, artifacts, and diffs.
@@ -96,13 +98,20 @@ export const GET: RequestHandler = async ({ params }) => {
 		createdAt: row.createdAt
 	}));
 
-	const workspaceArtifacts: WorkspaceArtifact[] = artifactRows.map((row) => ({
-		id: row.id,
-		objectKey: row.objectKey,
-		mimeType: row.mimeType,
-		sizeBytes: row.sizeBytes,
-		createdAt: row.createdAt
-	}));
+	const workspaceArtifacts: WorkspaceArtifact[] = await Promise.all(
+		artifactRows.map(async (row) => ({
+			id: row.id,
+			objectKey: row.objectKey,
+			mimeType: row.mimeType,
+			sizeBytes: row.sizeBytes,
+			createdAt: row.createdAt,
+			downloadUrl: await artifactStore.getSignedUrl({
+				artifactId: row.id,
+				objectKey: row.objectKey,
+				storageProvider: 'local'
+			})
+		}))
+	);
 
 	const diffs: WorkspaceDiff[] = diffToolRows
 		.filter((row) => row.toolName === 'workspace.diff')

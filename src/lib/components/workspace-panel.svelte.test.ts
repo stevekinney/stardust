@@ -34,6 +34,7 @@ export type WorkspaceArtifact = {
 	mimeType: string;
 	sizeBytes: number;
 	createdAt: string;
+	downloadUrl: string;
 };
 
 export type WorkspaceDiff = {
@@ -72,7 +73,8 @@ const sampleArtifact: WorkspaceArtifact = {
 	objectKey: 'session-001/run-001/output.json',
 	mimeType: 'application/json',
 	sizeBytes: 2048,
-	createdAt: '2026-06-26T00:00:20.000Z'
+	createdAt: '2026-06-26T00:00:20.000Z',
+	downloadUrl: '/api/artifacts/artifact-001?token=signed-token'
 };
 
 describe('WorkspacePanel', () => {
@@ -145,6 +147,8 @@ describe('WorkspacePanel', () => {
 
 		expect(document.body.textContent).toContain('output.json');
 		expect(document.body.textContent).toContain('application/json');
+		const downloadLink = document.querySelector('a[aria-label="Download output.json"]');
+		expect(downloadLink?.getAttribute('href')).toBe(sampleArtifact.downloadUrl);
 
 		unmount(component);
 	});

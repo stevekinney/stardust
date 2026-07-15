@@ -37,6 +37,7 @@
 		mimeType: string;
 		sizeBytes: number;
 		createdAt: string;
+		downloadUrl: string;
 	};
 
 	export type WorkspaceDiff = {
@@ -388,11 +389,17 @@
 								<span class="mono artifact-name">{artifactFilename(artifact.objectKey)}</span>
 								<span class="subtle-text artifact-mime">{artifact.mimeType}</span>
 								<span class="subtle-text artifact-size">{formatSize(artifact.sizeBytes)}</span>
-								<button
-									type="button"
-									class="download-btn"
+								<!-- eslint-disable svelte/no-navigation-without-resolve -- tokenized API download endpoint must remain route-relative and must not use resolve() -->
+								<Button
+									href={artifact.downloadUrl}
+									download={artifactFilename(artifact.objectKey)}
+									variant="ghost"
+									size="xs"
+									iconOnly
+									label="Download {artifactFilename(artifact.objectKey)}"
 									aria-label="Download {artifactFilename(artifact.objectKey)}"
 								>
+									<!-- eslint-enable svelte/no-navigation-without-resolve -->
 									<svg
 										class="icon-xs"
 										viewBox="0 0 24 24"
@@ -407,7 +414,7 @@
 										<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
 										<path d="m7 10 5 5 5-5" />
 									</svg>
-								</button>
+								</Button>
 							</div>
 						{/each}
 					</div>
@@ -770,21 +777,6 @@
 		color: var(--cinder-text-subtle);
 		font-size: 10px;
 		white-space: nowrap;
-	}
-
-	.download-btn {
-		background: none;
-		border: none;
-		cursor: pointer;
-		padding: 0;
-		color: var(--cinder-text-subtle);
-		display: flex;
-		align-items: center;
-		flex-shrink: 0;
-	}
-
-	.download-btn:hover {
-		color: var(--cinder-text);
 	}
 
 	/* Shared utilities */
