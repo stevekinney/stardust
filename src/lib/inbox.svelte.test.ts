@@ -79,6 +79,40 @@ describe('InboxStore', () => {
 		expect(fetch).toHaveBeenCalledTimes(4);
 	});
 
+	it('waits for a slow refresh before scheduling the next poll', async () => {
+		vi.useFakeTimers();
+		let finishFirstRefresh: () => void = () => undefined;
+		const firstRefresh = new Promise<void>((resolve) => {
+			finishFirstRefresh = resolve;
+		});
+		const fetch = vi.fn(async (input: RequestInfo | URL) => {
+			if (fetch.mock.calls.length <= 2) await firstRefresh;
+			const url = String(input);
+			if (url.endsWith('/api/approvals')) {
+				return new Response(JSON.stringify({ approvals: [] }), { status: 200 });
+			}
+			return new Response(JSON.stringify({ notes: [], candidates: [] }), { status: 200 });
+		});
+		vi.stubGlobal('fetch', fetch);
+		const store = new InboxStore();
+
+		const stopPolling = store.startPolling();
+		expect(fetch).toHaveBeenCalledTimes(2);
+
+		await vi.advanceTimersByTimeAsync(30_000);
+		expect(fetch).toHaveBeenCalledTimes(2);
+
+		finishFirstRefresh();
+		await vi.advanceTimersByTimeAsync(0);
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(fetch).toHaveBeenCalledTimes(4);
+
+		stopPolling();
+		stopPolling();
+		await vi.advanceTimersByTimeAsync(20_000);
+		expect(fetch).toHaveBeenCalledTimes(4);
+	});
+
 	it('counts pending approvals and candidates after a refresh', async () => {
 		mockEndpoints(
 			[makeApproval(), makeApproval({ approvalId: 'apr-002', status: 'approved' })],

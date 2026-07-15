@@ -30,9 +30,20 @@ export class InboxStore {
 
 	/** Refresh immediately, then poll until the returned cleanup function runs. */
 	startPolling(): () => void {
-		void this.refresh();
-		const interval = setInterval(() => void this.refresh(), POLL_INTERVAL_MS);
-		return () => clearInterval(interval);
+		let stopped = false;
+		let timeout: ReturnType<typeof setTimeout> | undefined;
+		const poll = async () => {
+			await this.refresh();
+			if (stopped) return;
+			timeout = setTimeout(() => void poll(), POLL_INTERVAL_MS);
+		};
+
+		void poll();
+		return () => {
+			if (stopped) return;
+			stopped = true;
+			if (timeout !== undefined) clearTimeout(timeout);
+		};
 	}
 }
 
