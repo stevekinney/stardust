@@ -16,7 +16,7 @@ export const TEMPORAL_WEB_URL = `http://localhost:${TEMPORAL_WEB_PORT}`;
 
 // ── Artifact store ────────────────────────────────────────────────────────────
 
-/** Root directory for local artifact storage. Tilde-expansion is handled by LocalArtifactStore. */
+/** Root directory for local artifact storage. Tilde expansion is handled by resolveLocalPath. */
 export const ARTIFACT_DIR = process.env.ARTIFACT_DIR ?? '~/.stardust/artifacts';
 
 /** Root directory for local subprocess workspaces. */
