@@ -414,18 +414,23 @@ test('resume: a reloaded running session catches up from canonical state without
 	let completed = false;
 	let transcriptRequests = 0;
 	let inspectorRequests = 0;
+	let steeringMessage: string | null = null;
+	let approvalRequested = false;
+	let approvalResolved = false;
 	let runRowsVisible = false;
 	let terminalTranscriptVisible = false;
 
 	const partialTranscript = [
 		{
 			id: 'evt-1',
+			runId: 'run-reload-001',
 			kind: 'user_message',
 			payload: JSON.stringify({ text: 'Reply with exactly: RELOAD_CATCHUP_OK.' }),
 			sequence: 1
 		},
 		{
 			id: 'evt-2',
+			runId: 'run-reload-001',
 			kind: 'lifecycle',
 			payload: JSON.stringify({ status: 'started', recoverySafe: true }),
 			sequence: 2
@@ -436,15 +441,34 @@ test('resume: a reloaded running session catches up from canonical state without
 		...partialTranscript,
 		{
 			id: 'evt-3',
+			runId: 'run-reload-001',
 			kind: 'assistant_message',
 			payload: JSON.stringify({ text: 'RELOAD_CATCHUP_OK' }),
 			sequence: 3
 		},
 		{
 			id: 'evt-4',
+			runId: 'run-reload-001',
 			kind: 'lifecycle',
 			payload: JSON.stringify({ status: 'complete', recoverySafe: true }),
 			sequence: 4
+		}
+	];
+	const approvalTranscript = [
+		...partialTranscript,
+		{
+			id: 'evt-approval',
+			runId: 'run-reload-001',
+			kind: 'approval_request',
+			payload: JSON.stringify({
+				approvalId: 'approval-reload',
+				toolCall: {
+					id: 'call-reload',
+					name: 'workspace.writeFile',
+					arguments: { path: 'result.txt' }
+				}
+			}),
+			sequence: 3
 		}
 	];
 
@@ -481,7 +505,59 @@ test('resume: a reloaded running session catches up from canonical state without
 		void route.fulfill({
 			status: 200,
 			contentType: 'application/json',
-			body: JSON.stringify({ events: completed ? completeTranscript : partialTranscript })
+			body: JSON.stringify({
+				events: completed
+					? completeTranscript
+					: approvalRequested
+						? approvalTranscript
+						: partialTranscript
+			})
+		});
+	});
+
+	await page.route('**/api/sessions/reload-running-session/approvals', (route) => {
+		void route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				approvals:
+					approvalRequested && !approvalResolved
+						? [
+								{
+									approvalId: 'approval-reload',
+									sessionId: 'reload-running-session',
+									toolCall: {
+										id: 'call-reload',
+										name: 'workspace.writeFile',
+										arguments: { path: 'result.txt' }
+									},
+									status: 'pending',
+									createdAt: '2026-07-09T12:00:01.000Z',
+									expiresAt: '2099-07-09T13:00:01.000Z'
+								}
+							]
+						: []
+			})
+		});
+	});
+
+	await page.route('**/api/approvals/approval-reload/resolve', async (route) => {
+		approvalResolved = true;
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ resolved: true })
+		});
+	});
+
+	await page.route('**/api/sessions/reload-running-session/steer', async (route) => {
+		const request = route.request();
+		const body = (await request.postDataJSON()) as { message: string };
+		steeringMessage = body.message;
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ accepted: true })
 		});
 	});
 
@@ -523,7 +599,11 @@ test('resume: a reloaded running session catches up from canonical state without
 				contentType: 'application/json',
 				body: JSON.stringify(
 					makeRunInspectorProjection(
-						completed ? 'complete' : 'running',
+						completed
+							? 'complete'
+							: approvalRequested && !approvalResolved
+								? 'waiting_approval'
+								: 'running',
 						inspectorTranscript(events)
 					)
 				)
@@ -545,6 +625,16 @@ test('resume: a reloaded running session catches up from canonical state without
 		timeout: 5_000
 	});
 	await expect.poll(() => inspectorRequests).toBeGreaterThan(inspectorRequestsBeforeReload);
+	const composer = page.getByRole('combobox', { name: 'Message' });
+	await expect(composer).toBeEnabled({ timeout: 5_000 });
+	await composer.fill('Use the shorter answer');
+	await composer.press('Enter');
+	await expect.poll(() => steeringMessage).toBe('Use the shorter answer');
+	approvalRequested = true;
+	const approveButton = chat.getByRole('button', { name: 'Approve', exact: true });
+	await expect(approveButton).toBeVisible({ timeout: 5_000 });
+	await approveButton.click();
+	await expect.poll(() => approvalResolved).toBe(true);
 	const inspectorRequestsBeforeCompletion = inspectorRequests;
 	allowCompletion = true;
 	await expect.poll(() => inspectorRequests).toBeGreaterThan(inspectorRequestsBeforeCompletion);

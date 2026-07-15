@@ -68,7 +68,7 @@ describe('ConversationView accessibility', () => {
 			];
 			const component = mount(ConversationView, {
 				target: document.body,
-				props: { sessionId: 'idle-session', onSubmit: vi.fn(), events, running: false }
+				props: { sessionId: 'idle-session', onSubmit: vi.fn(), events, runActive: false }
 			});
 			flushSync();
 
@@ -88,7 +88,7 @@ describe('ConversationView accessibility', () => {
 			];
 			return mount(ConversationView, {
 				target: document.body,
-				props: { sessionId: 'streaming-session', onSubmit: vi.fn(), events, running: true }
+				props: { sessionId: 'streaming-session', onSubmit: vi.fn(), events, runActive: true }
 			});
 		}
 
@@ -124,7 +124,7 @@ describe('ConversationView accessibility', () => {
 				sessionId: 'streaming-session',
 				onSubmit: vi.fn(),
 				events,
-				running: true
+				runActive: true
 			});
 			const component = mount(ConversationView, { target: document.body, props });
 			flushSync();
@@ -169,7 +169,7 @@ describe('ConversationView accessibility', () => {
 					sessionId: 'toolcall-session',
 					onSubmit: vi.fn(),
 					events,
-					running: true,
+					runActive: true,
 					pendingApproval,
 					onResolveApproval
 				}
@@ -194,7 +194,7 @@ describe('ConversationView accessibility', () => {
 				events: [
 					makeEvent(1, 'user.message', { text: 'Push the release branch.' })
 				] as StreamEvent[],
-				running: true,
+				runActive: true,
 				pendingApproval: null as PendingApprovalEntry | null,
 				onResolveApproval: vi.fn()
 			});

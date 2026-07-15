@@ -189,7 +189,7 @@ describe('ConversationView slash commands', () => {
 		const onInterrupt = vi.fn();
 		const component = mount(ConversationView, {
 			target: document.body,
-			props: { ...defaultProps, events: [], running: true, onInterrupt }
+			props: { ...defaultProps, events: [], runActive: true, onInterrupt }
 		});
 
 		typeInComposer('/stop');
@@ -203,7 +203,7 @@ describe('ConversationView slash commands', () => {
 		const onInterrupt = vi.fn();
 		const component = mount(ConversationView, {
 			target: document.body,
-			props: { ...defaultProps, events: [], running: false, onInterrupt }
+			props: { ...defaultProps, events: [], runActive: false, onInterrupt }
 		});
 
 		typeInComposer('/stop');

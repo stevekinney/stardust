@@ -17,6 +17,14 @@
 	import { sessionBadgeVariant } from '$lib/components/session-row.svelte';
 	import { formatStatus } from '$lib/session-display';
 	import { bootstrapSessionPage } from '$lib/session-page-bootstrap';
+	import {
+		SessionReconnection,
+		isTerminalRunStatus,
+		transcriptHasTerminalEvent,
+		transcriptHasUnsettledRun,
+		type SessionReconnectionSnapshot,
+		type SessionReconnectionState
+	} from '$lib/session-reconnection';
 	import { parseSseFrame, readSseStream } from '$lib/sse-stream';
 	import {
 		findLastUserMessageText,
@@ -51,6 +59,7 @@
 	let running = $state(false);
 	let liveEvents = $state<StreamEvent[]>([]);
 	let canonicalEvents = $state<StreamEvent[]>([]);
+	let canonicalTranscript = $state.raw<TranscriptEventRow[]>([]);
 	let transcriptMode = $state<'live' | 'canonical'>('live');
 	let events = $derived(transcriptMode === 'live' ? liveEvents : canonicalEvents);
 	let currentUserMessage = $state<string | null>(null);
@@ -68,9 +77,22 @@
 	const isRecovered = $derived(inspector?.run.status === 'recovered');
 
 	let abortController: AbortController | null = null;
-	let catchupTimeout: ReturnType<typeof setTimeout> | null = null;
-	let catchupGeneration = 0;
+	let reconnectionState = $state<SessionReconnectionState>({ kind: 'dormant' });
 	let destroyed = false;
+	const reconnectedRunActive = $derived(
+		reconnectionState.kind !== 'dormant' && reconnectionState.kind !== 'failed-unobservable'
+	);
+	const runActive = $derived(running || reconnectedRunActive);
+	const acceptsSteering = $derived(running || reconnectionState.kind === 'observing');
+
+	const reconnection = new SessionReconnection({
+		readSnapshot: readReconnectionSnapshot,
+		applySnapshot: applyReconnectionSnapshot,
+		setState: (state) => {
+			reconnectionState = state;
+			if (state.kind === 'failed-unobservable') errorMessage = state.message;
+		}
+	});
 
 	/** Controls which pane is active on tablet (641–1024px). */
 	let tabletView = $state<'conversation' | 'run'>('conversation');
@@ -86,10 +108,11 @@
 
 		abortController?.abort();
 		abortController = null;
-		stopCanonicalCatchup();
+		reconnection.stop();
 		running = false;
 		liveEvents = [];
 		canonicalEvents = [];
+		canonicalTranscript = [];
 		transcriptMode = 'live';
 		currentUserMessage = null;
 		errorMessage = null;
@@ -99,6 +122,7 @@
 		pendingApproval = null;
 		approvalResolution = null;
 		scrubCursor = null;
+		reconnectionState = { kind: 'dormant' };
 
 		if (data.startMessage) {
 			void goto(resolve(`/sessions/${encodeURIComponent(sessionKey)}`), { replaceState: true });
@@ -113,57 +137,61 @@
 			submitFirstTurn: handleSubmit
 		}).then(() => {
 			if (!isCurrentSession(targetSessionKey)) return;
-			void startCanonicalCatchupIfNeeded();
+			if (data.fresh || data.startMessage) return;
+			const latestStatus = inspector?.run.status;
+			const terminalInspectorNeedsSettlement =
+				inspector != null &&
+				isTerminalRunStatus(latestStatus) &&
+				!transcriptHasTerminalEvent(canonicalTranscript, inspector.run.id, latestStatus!);
+			if (
+				terminalInspectorNeedsSettlement ||
+				(inspector != null && !isTerminalRunStatus(latestStatus)) ||
+				transcriptHasUnsettledRun(canonicalTranscript)
+			) {
+				transcriptMode = 'canonical';
+				reconnection.start();
+			}
 		});
 	});
 
 	onDestroy(() => {
 		destroyed = true;
 		abortController?.abort();
-		stopCanonicalCatchup();
+		reconnection.stop();
 	});
 
 	function isCurrentSession(targetSessionKey: string): boolean {
 		return !destroyed && targetSessionKey === sessionKey;
 	}
 
-	async function loadTranscript(targetSessionKey = sessionKey, generation: number | null = null) {
+	async function fetchTranscript(
+		targetSessionKey: string,
+		signal?: AbortSignal
+	): Promise<TranscriptEventRow[]> {
+		const response = await fetch(
+			`/api/sessions/${encodeURIComponent(targetSessionKey)}/transcript`,
+			{ cache: 'no-store', signal }
+		);
+		if (!response.ok) throw new Error(`Transcript request failed (${response.status})`);
+		const body = (await response.json()) as { events: TranscriptEventRow[] };
+		return body.events;
+	}
+
+	function applyTranscript(rows: TranscriptEventRow[]) {
+		canonicalTranscript = rows;
+		currentUserMessage = findLastUserMessageText(rows);
+		canonicalEvents = mapTranscriptToStreamEvents(rows);
+		if (!running && liveEvents.length === 0) transcriptMode = 'canonical';
+	}
+
+	async function loadTranscript(targetSessionKey = sessionKey) {
 		try {
-			const response = await fetch(
-				`/api/sessions/${encodeURIComponent(targetSessionKey)}/transcript`,
-				{
-					cache: 'no-store'
-				}
-			);
-			if (!response.ok) return;
-
-			const body = (await response.json()) as { events: TranscriptEventRow[] };
+			const rows = await fetchTranscript(targetSessionKey);
 			if (!isCurrentSession(targetSessionKey)) return;
-			if (generation != null && !isActiveCatchup(generation, targetSessionKey)) return;
-
-			currentUserMessage = findLastUserMessageText(body.events);
-
-			// User messages stay in the event stream (mapped to `user.message`) so the
-			// transcript renders every turn in order, not just the latest one.
-			canonicalEvents = mapTranscriptToStreamEvents(body.events);
-			if (!running && liveEvents.length === 0) {
-				transcriptMode = 'canonical';
-			}
+			applyTranscript(rows);
 		} catch {
 			// Non-fatal
 		}
-	}
-
-	function applyInspectorTranscript(projection: RunInspectorProjection) {
-		const rows: TranscriptEventRow[] = projection.transcript.map((event) => ({
-			id: event.id,
-			kind: event.kind,
-			payload: typeof event.payload === 'string' ? event.payload : JSON.stringify(event.payload),
-			sequence: event.sequence
-		}));
-		currentUserMessage = findLastUserMessageText(rows);
-		canonicalEvents = mapTranscriptToStreamEvents(rows);
-		transcriptMode = 'canonical';
 	}
 
 	async function handleSubmit(message: string, attachments?: SessionAttachmentInput[]) {
@@ -310,185 +338,99 @@
 		liveEvents = [...liveEvents, { id: id ?? liveEvents.length, kind, payload }];
 	}
 
-	async function loadLatestRunInspector(
-		targetSessionKey = sessionKey,
-		generation: number | null = null
-	): Promise<RunInspectorProjection | null> {
+	async function fetchLatestRunInspector(
+		targetSessionKey: string,
+		signal?: AbortSignal
+	): Promise<{ projection: RunInspectorProjection | null; runCount: number }> {
+		const runsResponse = await fetch(`/api/sessions/${encodeURIComponent(targetSessionKey)}/runs`, {
+			cache: 'no-store',
+			signal
+		});
+		if (!runsResponse.ok) throw new Error(`Runs request failed (${runsResponse.status})`);
+		const runsBody = (await runsResponse.json()) as {
+			runs: Array<{ id: string; createdAt: string }>;
+		};
+		if (runsBody.runs.length === 0) return { projection: null, runCount: 0 };
+
+		const sorted = [...runsBody.runs].sort(
+			(a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+		);
+		const latestRunId = sorted[0].id;
+		const inspectorResponse = await fetch(
+			`/api/sessions/${encodeURIComponent(targetSessionKey)}/runs/${encodeURIComponent(latestRunId)}/inspector`,
+			{ cache: 'no-store', signal }
+		);
+		if (!inspectorResponse.ok) {
+			throw new Error(`Inspector request failed (${inspectorResponse.status})`);
+		}
+		return {
+			projection: (await inspectorResponse.json()) as RunInspectorProjection,
+			runCount: runsBody.runs.length
+		};
+	}
+
+	async function loadLatestRunInspector(targetSessionKey = sessionKey) {
 		try {
-			const runsResponse = await fetch(
-				`/api/sessions/${encodeURIComponent(targetSessionKey)}/runs`,
-				{
-					cache: 'no-store'
-				}
-			);
-			if (!runsResponse.ok) return null;
-			const runsBody = (await runsResponse.json()) as {
-				runs: Array<{ id: string; createdAt: string }>;
-			};
+			const latest = await fetchLatestRunInspector(targetSessionKey);
 			if (!isCurrentSession(targetSessionKey)) return null;
-			if (generation != null && !isActiveCatchup(generation, targetSessionKey)) return null;
-			runCount = runsBody.runs.length;
-			if (runsBody.runs.length === 0) return null;
-
-			const sorted = [...runsBody.runs].sort(
-				(a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-			);
-			const latestRunId = sorted[0].id;
-
-			const inspectorResponse = await fetch(
-				`/api/sessions/${encodeURIComponent(targetSessionKey)}/runs/${encodeURIComponent(latestRunId)}/inspector`,
-				{ cache: 'no-store' }
-			);
-			if (!inspectorResponse.ok) return null;
-			const projection = (await inspectorResponse.json()) as RunInspectorProjection;
-			if (!isCurrentSession(targetSessionKey)) return null;
-			if (generation != null && !isActiveCatchup(generation, targetSessionKey)) return null;
-			inspector = projection;
-			return projection;
+			runCount = latest.runCount;
+			inspector = latest.projection;
+			return latest.projection;
 		} catch {
 			// Non-fatal
 			return null;
 		}
 	}
 
-	const TERMINAL_RUN_STATUSES = new Set(['complete', 'failed', 'cancelled', 'recovered']);
-	const PAUSED_RUN_STATUSES = new Set(['waiting_approval']);
-	const CANONICAL_CATCHUP_INTERVAL_MS = 1000;
-	const CANONICAL_CATCHUP_MAX_ATTEMPTS = 20;
-
-	function isTerminalRunStatus(status: string | null | undefined): boolean {
-		return status != null && TERMINAL_RUN_STATUSES.has(status);
-	}
-
-	function inspectorTranscriptIncludesStatus(
-		projection: RunInspectorProjection,
-		status: string | null | undefined
-	): boolean {
-		if (!isTerminalRunStatus(status)) return false;
-		return projection.transcript.some((event) => {
-			if (event.kind !== 'lifecycle') return false;
-			const payload = event.payload;
-			return typeof payload === 'object' && payload !== null && 'status' in payload
-				? payload.status === status
-				: false;
-		});
-	}
-
-	function isPausedRunStatus(status: string | null | undefined): boolean {
-		return status != null && PAUSED_RUN_STATUSES.has(status);
-	}
-
-	function surfaceCatchupFailure() {
-		errorMessage =
-			'This run is still in progress, but the live connection could not be re-established. Reload to try again.';
-		stopCanonicalCatchup();
-	}
-
-	function stopCanonicalCatchup() {
-		catchupGeneration += 1;
-		if (catchupTimeout) {
-			clearTimeout(catchupTimeout);
-			catchupTimeout = null;
-		}
-	}
-
-	async function startCanonicalCatchupIfNeeded() {
-		stopCanonicalCatchup();
-		const generation = catchupGeneration;
-		const targetSessionKey = sessionKey;
-		const latestInspector =
-			inspector ?? (await loadLatestRunInspector(targetSessionKey, generation));
-		if (!isActiveCatchup(generation, targetSessionKey)) return;
-		if (latestInspector && isTerminalRunStatus(latestInspector.run.status)) return;
-
-		transcriptMode = 'canonical';
-		void pollCanonicalCatchup(targetSessionKey, latestInspector?.run.id ?? null, 1, generation);
-	}
-
-	function isActiveCatchup(generation: number, targetSessionKey: string): boolean {
-		return catchupGeneration === generation && isCurrentSession(targetSessionKey);
-	}
-
-	function scheduleCanonicalCatchup(
+	async function fetchPendingApproval(
 		targetSessionKey: string,
-		runId: string | null,
-		attempt: number,
-		generation: number
-	) {
-		if (!isActiveCatchup(generation, targetSessionKey)) return;
-		catchupTimeout = setTimeout(() => {
-			void pollCanonicalCatchup(targetSessionKey, runId, attempt, generation);
-		}, CANONICAL_CATCHUP_INTERVAL_MS);
-	}
-
-	async function pollCanonicalCatchup(
-		targetSessionKey: string,
-		runId: string | null,
-		attempt: number,
-		generation: number
-	): Promise<void> {
-		if (!isActiveCatchup(generation, targetSessionKey)) return;
-
-		await loadTranscript(targetSessionKey, generation);
-		if (!isActiveCatchup(generation, targetSessionKey)) return;
-
-		const latestInspector = await loadLatestRunInspector(targetSessionKey, generation);
-		if (!isActiveCatchup(generation, targetSessionKey)) return;
-
-		if (latestInspector && latestInspector.run.id !== runId) {
-			if (isTerminalRunStatus(latestInspector.run.status)) {
-				if (inspectorTranscriptIncludesStatus(latestInspector, latestInspector.run.status)) {
-					applyInspectorTranscript(latestInspector);
-					if (isActiveCatchup(generation, targetSessionKey)) stopCanonicalCatchup();
-				} else if (attempt >= CANONICAL_CATCHUP_MAX_ATTEMPTS) {
-					surfaceCatchupFailure();
-				} else {
-					scheduleCanonicalCatchup(
-						targetSessionKey,
-						latestInspector.run.id,
-						attempt + 1,
-						generation
-					);
-				}
-				return;
+		signal?: AbortSignal
+	): Promise<PendingApprovalEntry | null> {
+		const response = await fetch(
+			`/api/sessions/${encodeURIComponent(targetSessionKey)}/approvals`,
+			{
+				cache: 'no-store',
+				signal
 			}
-
-			scheduleCanonicalCatchup(targetSessionKey, latestInspector.run.id, 1, generation);
-			return;
-		}
-		if (latestInspector && isTerminalRunStatus(latestInspector.run.status)) {
-			if (inspectorTranscriptIncludesStatus(latestInspector, latestInspector.run.status)) {
-				applyInspectorTranscript(latestInspector);
-				if (isActiveCatchup(generation, targetSessionKey)) stopCanonicalCatchup();
-			} else if (attempt >= CANONICAL_CATCHUP_MAX_ATTEMPTS) {
-				surfaceCatchupFailure();
-			} else {
-				scheduleCanonicalCatchup(targetSessionKey, latestInspector.run.id, attempt + 1, generation);
-			}
-			return;
-		}
-
-		const isPaused = isPausedRunStatus(latestInspector?.run.status);
-		if (!isPaused && attempt >= CANONICAL_CATCHUP_MAX_ATTEMPTS) {
-			surfaceCatchupFailure();
-			return;
-		}
-
-		scheduleCanonicalCatchup(targetSessionKey, runId, isPaused ? attempt : attempt + 1, generation);
+		);
+		if (!response.ok) throw new Error(`Approvals request failed (${response.status})`);
+		const body = (await response.json()) as { approvals: PendingApprovalEntry[] };
+		return body.approvals.find((approval) => approval.status === 'pending') ?? null;
 	}
 
 	async function loadPendingApproval(targetSessionKey = sessionKey) {
 		try {
-			const response = await fetch(
-				`/api/sessions/${encodeURIComponent(targetSessionKey)}/approvals`
-			);
-			if (!response.ok) return;
-			const body = (await response.json()) as { approvals: PendingApprovalEntry[] };
+			const latestApproval = await fetchPendingApproval(targetSessionKey);
 			if (!isCurrentSession(targetSessionKey)) return;
-			pendingApproval = body.approvals.find((a) => a.status === 'pending') ?? null;
+			pendingApproval = latestApproval;
 		} catch {
 			// Non-fatal — page works normally without pending approval
 		}
+	}
+
+	async function readReconnectionSnapshot(
+		signal: AbortSignal
+	): Promise<SessionReconnectionSnapshot> {
+		const targetSessionKey = sessionKey;
+		const [transcript, latestRun, latestApproval] = await Promise.all([
+			fetchTranscript(targetSessionKey, signal),
+			fetchLatestRunInspector(targetSessionKey, signal),
+			fetchPendingApproval(targetSessionKey, signal)
+		]);
+		return {
+			transcript,
+			inspector: latestRun.projection,
+			runCount: latestRun.runCount,
+			pendingApproval: latestApproval
+		};
+	}
+
+	function applyReconnectionSnapshot(snapshot: SessionReconnectionSnapshot): void {
+		applyTranscript(snapshot.transcript);
+		inspector = snapshot.inspector;
+		runCount = snapshot.runCount;
+		pendingApproval = snapshot.pendingApproval;
+		transcriptMode = 'canonical';
 	}
 
 	async function resolveSessionApproval(
@@ -509,7 +451,6 @@
 		} finally {
 			pendingApproval = null;
 			approvalResolution = action === 'deny' ? 'deny' : 'approve';
-			void startCanonicalCatchupIfNeeded();
 		}
 	}
 
@@ -538,16 +479,16 @@
 	const runStepCount = $derived(inspector?.toolInvocations?.length ?? 0);
 
 	const sessionStatus = $derived(
-		running
-			? 'running'
-			: pendingApproval !== null
-				? 'waiting_approval'
+		pendingApproval !== null
+			? 'waiting_approval'
+			: runActive
+				? 'running'
 				: (inspector?.run.status ?? 'idle')
 	);
 
 	const stripDot = $derived.by((): StatusDotStatus => {
-		if (running) return 'accent';
 		if (pendingApproval !== null) return 'warning';
+		if (runActive) return 'accent';
 		if (sessionStatus === 'failed') return 'danger';
 		if (sessionStatus === 'complete' || sessionStatus === 'recovered') return 'success';
 		return 'neutral';
@@ -680,7 +621,7 @@
 				{#if streamGapNotice}
 					<div class="stream-gap-notice" role="status">{streamGapNotice}</div>
 				{/if}
-				{#if running}
+				{#if runActive}
 					<div class="steer-strip" role="status">
 						<StatusDot connectionState="connected" label="Streaming" showLabel={false} size="sm" />
 						<span>Streaming — anything you type steers the run</span>
@@ -691,7 +632,8 @@
 						sessionId={sessionKey}
 						userMessage={null}
 						{events}
-						{running}
+						{runActive}
+						{acceptsSteering}
 						onSubmit={handleSubmit}
 						onRetry={currentUserMessage ? () => handleSubmit(currentUserMessage!) : null}
 						onSteer={handleSteer}
@@ -710,7 +652,7 @@
 					<RunPane
 						{sessionKey}
 						{inspector}
-						{running}
+						running={runActive}
 						hasPendingApproval={pendingApproval !== null}
 						cursor={scrubCursor}
 						onScrub={(cursor) => (scrubCursor = cursor)}
@@ -724,7 +666,7 @@
 			{sessionKey}
 			{currentUserMessage}
 			{inspector}
-			{running}
+			running={runActive}
 			{pendingApproval}
 			onResolveApproval={resolveSessionApproval}
 		/>
