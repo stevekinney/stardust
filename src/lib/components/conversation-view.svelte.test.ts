@@ -1,5 +1,6 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { page } from 'vitest/browser';
 import type { StreamEvent } from '$lib/stream-to-conversation';
 import ConversationView, { chatAttachmentsToSessionAttachments } from './conversation-view.svelte';
 
@@ -327,12 +328,8 @@ describe('ConversationView', () => {
 		editButton!.click();
 		await Promise.resolve();
 
-		const textarea = document.querySelector(
-			'.cinder-approval-card__editor textarea'
-		) as HTMLTextAreaElement | null;
-		expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
-		textarea!.value = JSON.stringify({ command: 'git status --short' });
-		textarea!.dispatchEvent(new Event('input', { bubbles: true }));
+		const textarea = page.getByLabelText('Edited arguments JSON');
+		await textarea.fill(JSON.stringify({ command: 'git status --short' }));
 
 		const confirmButton = Array.from(document.querySelectorAll('button')).find(
 			(button) => button.textContent?.trim() === 'Confirm edited approval'
