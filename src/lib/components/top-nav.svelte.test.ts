@@ -95,10 +95,8 @@ describe('TopNav', () => {
 	});
 
 	// Regression: the nav overflows onto the search/health/settings controls at
-	// narrow container widths. Cinder's NavigationBar collapses the tab list
-	// behind a menu toggle to prevent that, but only if the bar opts in via a
-	// `menuToggle` snippet and forwards the `variant` it hands the `items`
-	// snippet — both were previously missing.
+	// narrow container widths. Verify the collapsed menu opens and exposes every
+	// primary destination through the public navigation contract.
 	it('opens the mobile tab list with every primary navigation destination', async () => {
 		const component = mount(TopNav, {
 			target: document.body,
