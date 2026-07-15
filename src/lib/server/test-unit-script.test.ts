@@ -2,14 +2,17 @@ import { describe, expect, it } from 'vitest';
 import {
 	assertCommandSucceeded,
 	createListCommand,
+	createBlobOutputFile,
 	createMergeArguments,
 	createMergeCommand,
 	createProjectArguments,
 	createProjectCommand,
 	hasBlobReporterArgument,
 	hasCoverageArgument,
+	getBlobOutputFile,
 	hasOnlyBlobReporterArgument,
 	hasReporterArgument,
+	hasSingleFailureBailArgument,
 	hasTestSelectionArgument,
 	normalizeArguments,
 	runSerializedCommands,
@@ -108,6 +111,7 @@ describe('unit test script commands', () => {
 		expect(hasTestSelectionArgument(['--coverage.reportsDirectory', 'tmp/coverage'])).toBe(false);
 		expect(hasTestSelectionArgument(['--maxWorkers', '2'])).toBe(false);
 		expect(hasTestSelectionArgument(['--shard=5/5'])).toBe(true);
+		expect(hasTestSelectionArgument(['--dir', 'src/workflows'])).toBe(true);
 	});
 
 	it('keeps coverage-only project runs strict', () => {
@@ -119,6 +123,12 @@ describe('unit test script commands', () => {
 			'server',
 			'--coverage'
 		]);
+	});
+
+	it('detects a one-failure bail request', () => {
+		expect(hasSingleFailureBailArgument(['--bail'])).toBe(true);
+		expect(hasSingleFailureBailArgument(['--bail=1'])).toBe(true);
+		expect(hasSingleFailureBailArgument(['--bail=2'])).toBe(false);
 	});
 
 	it('writes coverage runs to project-specific blob reports', () => {
@@ -170,6 +180,17 @@ describe('unit test script commands', () => {
 		]);
 	});
 
+	it('preserves custom blob output as collision-free project files', () => {
+		expect(getBlobOutputFile(['--reporter=blob', '--outputFile=reports/blob.json'])).toBe(
+			'reports/blob.json'
+		);
+		expect(getBlobOutputFile(['--reporter=blob', '--outputFile.blob', 'reports/run.json'])).toBe(
+			'reports/run.json'
+		);
+		expect(createBlobOutputFile('reports/blob.json', 'client')).toBe('reports/blob-client.json');
+		expect(createBlobOutputFile('blob', 'workflows')).toBe('blob-workflows');
+	});
+
 	it('removes dotted output file values from isolated projects', () => {
 		const argumentsToForward = ['--reporter=junit', '--outputFile.junit', 'junit.xml'];
 		expect(createProjectArguments(argumentsToForward)).toEqual([]);
@@ -185,6 +206,10 @@ describe('unit test script commands', () => {
 			'run-pane.svelte.test.ts'
 		];
 		expect(createMergeArguments(argumentsToForward)).toEqual(argumentsToForward.slice(0, 4));
+		expect(createProjectArguments(argumentsToForward)).toEqual([
+			'--coverage',
+			'run-pane.svelte.test.ts'
+		]);
 	});
 
 	it('preserves space-separated aggregate coverage option values', () => {
@@ -227,5 +252,19 @@ describe('unit test script commands', () => {
 			expect(error).toBeInstanceOf(AggregateError);
 			expect((error as AggregateError).errors).toEqual([projectFailure, mergeFailure]);
 		}
+	});
+
+	it('stops scheduling projects after a failure when bail is one', () => {
+		const calls: string[][] = [];
+		const projectFailure = new Error('project failed');
+		const execute = (command: readonly string[]) => {
+			calls.push([...command]);
+			if (command[0] === 'client') throw projectFailure;
+		};
+
+		expect(() =>
+			runSerializedCommands([['client'], ['server'], ['workflows']], ['merge'], execute, true)
+		).toThrow(projectFailure);
+		expect(calls).toEqual([['client'], ['merge']]);
 	});
 });

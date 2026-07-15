@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { basename, dirname, extname, join } from 'node:path';
 import { parseCLI } from 'vitest/node';
 
 export const unitTestProjects = ['client', 'server', 'workflows'] as const;
@@ -71,8 +72,17 @@ export function hasTestSelectionArgument(argumentsToForward: readonly string[]):
 		options.testNamePattern !== undefined ||
 		options.changed !== undefined ||
 		options.related !== undefined ||
-		options.shard !== undefined
+		options.shard !== undefined ||
+		options.dir !== undefined
 	);
+}
+
+/** Return whether Vitest should stop after the first failed project process. */
+export function hasSingleFailureBailArgument(argumentsToForward: readonly string[]): boolean {
+	const { bail } = parseCLI(['vitest', 'run', ...argumentsToForward]).options as {
+		bail?: number | boolean;
+	};
+	return bail === true || bail === 1;
 }
 
 function isReporterArgument(argument: string): boolean {
@@ -109,6 +119,34 @@ export function hasOnlyBlobReporterArgument(argumentsToForward: readonly string[
 	return reporters?.length === 1 && reporters[0] === 'blob';
 }
 
+/** Return the caller-selected blob output file, if one was provided. */
+export function getBlobOutputFile(argumentsToForward: readonly string[]): string | undefined {
+	const { outputFile } = parseCLI(['vitest', 'run', ...argumentsToForward]).options as {
+		outputFile?: string | Record<string, string>;
+	};
+	return typeof outputFile === 'string' ? outputFile : outputFile?.blob;
+}
+
+/** Derive one collision-free blob filename for an isolated project. */
+export function createBlobOutputFile(
+	outputFile: string,
+	project: (typeof unitTestProjects)[number]
+): string {
+	const extension = extname(outputFile);
+	const filename = basename(outputFile, extension);
+	return join(dirname(outputFile), `${filename}-${project}${extension}`);
+}
+
+function preserveBlobReports(blobReportsDirectory: string, outputFile: string): void {
+	for (const project of unitTestProjects) {
+		const source = join(blobReportsDirectory, `${project}.json`);
+		if (!existsSync(source)) continue;
+		const destination = createBlobOutputFile(outputFile, project);
+		mkdirSync(dirname(destination), { recursive: true });
+		copyFileSync(source, destination);
+	}
+}
+
 function isBlobReporterArgument(argument: string, nextArgument?: string): boolean {
 	return argument === '--reporter=blob' || (argument === '--reporter' && nextArgument === 'blob');
 }
@@ -119,6 +157,16 @@ function hasSeparateReporterValue(argument: string, nextArgument?: string): bool
 			(argument.startsWith('--outputFile') && !argument.includes('='))) &&
 		nextArgument !== undefined &&
 		!nextArgument.startsWith('-')
+	);
+}
+
+function isAggregateCoverageArgument(argument: string): boolean {
+	return (
+		argument === '--coverage.reporter' ||
+		argument === '--coverage.reportsDirectory' ||
+		argument.startsWith('--coverage.reporter=') ||
+		argument.startsWith('--coverage.reportsDirectory=') ||
+		argument.startsWith('--coverage.thresholds.')
 	);
 }
 
@@ -134,6 +182,12 @@ export function createProjectArguments(argumentsToForward: readonly string[]): s
 			continue;
 		}
 		if (isReporterArgument(argument)) continue;
+		if (isAggregateCoverageArgument(argument)) {
+			if (!argument.includes('=') && argumentsToForward[index + 1]?.startsWith('-') === false) {
+				index += 1;
+			}
+			continue;
+		}
 		projectArguments.push(argument);
 	}
 
@@ -244,7 +298,8 @@ function runCommand(command: readonly string[], captureOutput = false): string {
 export function runSerializedCommands(
 	projectCommands: readonly (readonly string[])[],
 	mergeCommand: readonly string[] | undefined,
-	execute: (command: readonly string[]) => unknown = runCommand
+	execute: (command: readonly string[]) => unknown = runCommand,
+	stopAfterFirstProjectFailure = false
 ): void {
 	let firstProjectFailure: unknown;
 	let mergeFailure: unknown;
@@ -254,6 +309,7 @@ export function runSerializedCommands(
 			execute(command);
 		} catch (error) {
 			firstProjectFailure ??= error;
+			if (stopAfterFirstProjectFailure) break;
 		}
 	}
 
@@ -277,11 +333,16 @@ export function runSerializedCommands(
 if (import.meta.main) {
 	const argumentsToForward = normalizeArguments(process.argv.slice(2));
 	const shouldPreserveBlobReports = hasBlobReporterArgument(argumentsToForward);
+	const customBlobOutputFile = shouldPreserveBlobReports
+		? getBlobOutputFile(argumentsToForward)
+		: undefined;
 	const shouldMergeReports =
 		hasCoverageArgument(argumentsToForward) ||
 		(hasReporterArgument(argumentsToForward) && !hasOnlyBlobReporterArgument(argumentsToForward));
 	const blobReportsDirectory = shouldPreserveBlobReports
-		? '.vitest-reports'
+		? customBlobOutputFile
+			? `.vitest-reports-${process.pid}`
+			: '.vitest-reports'
 		: shouldMergeReports
 			? `.vitest-reports-${process.pid}`
 			: undefined;
@@ -309,10 +370,15 @@ if (import.meta.main) {
 			),
 			shouldMergeReports && blobReportsDirectory
 				? createMergeCommand(blobReportsDirectory, argumentsToForward)
-				: undefined
+				: undefined,
+			runCommand,
+			hasSingleFailureBailArgument(argumentsToForward)
 		);
 	} finally {
-		if (blobReportsDirectory && !shouldPreserveBlobReports) {
+		if (blobReportsDirectory && customBlobOutputFile) {
+			preserveBlobReports(blobReportsDirectory, customBlobOutputFile);
+		}
+		if (blobReportsDirectory && (!shouldPreserveBlobReports || customBlobOutputFile)) {
 			rmSync(blobReportsDirectory, { recursive: true, force: true });
 		}
 	}
