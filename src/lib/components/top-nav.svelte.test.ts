@@ -5,10 +5,11 @@ import TopNav from './top-nav.svelte';
 
 const getPrimaryNavigation = () => document.querySelector('nav[aria-label="Primary"]');
 
-const getNavigationItem = (href: string) =>
-	getPrimaryNavigation()?.querySelector<HTMLAnchorElement>(
-		`a[href="${href}"]:not([aria-label="Stardust home"])`
-	) ?? null;
+const getNavigationItems = (container: ParentNode = document) =>
+	Array.from(container.querySelectorAll<HTMLAnchorElement>('a[href]:not([aria-label])'));
+
+const getNavigationItem = (href: string, container: ParentNode = document) =>
+	getNavigationItems(container).find((link) => link.getAttribute('href') === href) ?? null;
 
 const activateNavigationItem = (link: HTMLAnchorElement, init?: MouseEventInit) => {
 	document.addEventListener('click', (event) => event.preventDefault(), { once: true });
@@ -29,9 +30,7 @@ describe('TopNav', () => {
 		const nav = getPrimaryNavigation();
 		expect(nav).not.toBeNull();
 
-		const labels = ['/', '/inbox', '/schedules', '/artifacts', '/insights'].map((href) =>
-			getNavigationItem(href)?.textContent?.trim()
-		);
+		const labels = getNavigationItems(nav!).map((link) => link.textContent?.trim());
 		expect(labels).toEqual(['Sessions', 'Inbox', 'Schedules', 'Artifacts', 'Insights']);
 
 		unmount(component);
@@ -110,10 +109,12 @@ describe('TopNav', () => {
 		(toggle as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(toggle!.getAttribute('aria-expanded')).toBe('true'));
 
-		const destinations = ['/', '/inbox', '/schedules', '/artifacts', '/insights'];
-		for (const destination of destinations) {
-			expect(getNavigationItem(destination)).not.toBeNull();
-		}
+		const controlledMenuId = toggle!.getAttribute('aria-controls');
+		if (!controlledMenuId) throw new Error('Expected navigation toggle to control the mobile menu');
+		const mobileMenu = document.getElementById(controlledMenuId);
+		expect(mobileMenu).not.toBeNull();
+		const destinations = getNavigationItems(mobileMenu!).map((link) => link.getAttribute('href'));
+		expect(destinations).toEqual(['/', '/inbox', '/schedules', '/artifacts', '/insights']);
 
 		unmount(component);
 	});

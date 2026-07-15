@@ -124,7 +124,12 @@ describe('RunPane', () => {
 			}
 		});
 
-		expect(document.querySelector('.run-pane-fill')).toBeInstanceOf(HTMLElement);
+		const filledTabs = document.querySelector('.run-pane-fill');
+		expect(filledTabs).toBeInstanceOf(HTMLElement);
+		const filledTabsStyle = getComputedStyle(filledTabs!);
+		expect(filledTabsStyle.flexGrow).toBe('1');
+		expect(filledTabsStyle.minHeight).toBe('0px');
+		expect(filledTabsStyle.overflow).toBe('hidden');
 
 		unmount(component);
 	});

@@ -227,6 +227,12 @@
 		border-bottom: 1px solid var(--cinder-border-muted);
 	}
 
+	:global(.run-pane-fill) {
+		flex: 1;
+		min-height: 0;
+		overflow: hidden;
+	}
+
 	.mode-hint {
 		font-family: var(--cinder-font-mono);
 		font-size: 10.5px;
