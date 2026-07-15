@@ -10,6 +10,9 @@ export default defineConfig({
 	server: {
 		port: Number(process.env.APP_PORT ?? 7777)
 	},
+	optimizeDeps: {
+		include: ['@lostgradient/cinder/page-header']
+	},
 	plugins: [
 		sveltekit({
 			compilerOptions: {

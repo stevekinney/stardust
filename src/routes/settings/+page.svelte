@@ -1,8 +1,8 @@
 <script lang="ts">
-	import PageHeader from '$lib/components/page-header.svelte';
 	import Button from '@lostgradient/cinder/button';
 	import ConfirmDialog from '@lostgradient/cinder/confirm-dialog';
 	import NumberInput from '@lostgradient/cinder/number-input';
+	import PageHeader from '@lostgradient/cinder/page-header';
 	import Select from '@lostgradient/cinder/select';
 	import type { PageProps } from './$types';
 
@@ -119,7 +119,7 @@
 </svelte:head>
 
 <div class="page">
-	<PageHeader title="Settings" />
+	<PageHeader title="Settings" role="banner" />
 
 	<div class="page-body">
 		<div class="settings-column">
