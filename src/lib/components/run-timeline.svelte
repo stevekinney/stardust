@@ -238,7 +238,7 @@
 		</div>
 	{/if}
 
-	<div class="cinder-run-surface">
+	<div class="run-timeline-surface">
 		<section class="run-steps" aria-labelledby="run-steps-heading">
 			<h3 id="run-steps-heading">Step Timeline</h3>
 			<RunPaneTimeline inspector={projection} {running} {hasPendingApproval} />
@@ -479,7 +479,7 @@
 		gap: 6px;
 	}
 
-	.cinder-run-surface {
+	.run-timeline-surface {
 		display: grid;
 		gap: 1rem;
 	}
