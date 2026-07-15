@@ -32,7 +32,7 @@ async function mockFreshFirstTurnSession(
 	page: import('@playwright/test').Page,
 	sessionKey: string
 ) {
-	await page.route('**/api/sessions', (route) => {
+	await page.route('/api/sessions', (route) => {
 		if (route.request().method() === 'POST') {
 			void route.fulfill({
 				status: 201,
@@ -222,6 +222,7 @@ async function openFreshSessionFromNewSessionButton(
 ) {
 	await page.goto('/');
 
+	await expect(page.getByRole('heading', { name: 'Sessions' })).toBeVisible();
 	await page.getByRole('button', { name: 'New session' }).click();
 
 	await expect(page).toHaveURL(new RegExp(`/sessions/${sessionKey}\\?fresh=1$`));
