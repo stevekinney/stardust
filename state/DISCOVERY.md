@@ -64,7 +64,7 @@ The chat surface is a thin Stardust-specific wrapper around Cinder's `Chat` comp
 
 - **Local path**: `/Users/stevekinney/Developer/cinder` (exists; sibling directory to `stardust`, confirmed present).
 - **Repo**: `stevekinney/cinder` (per `.changeset/config.json`: `"changelog": ["@changesets/changelog-github", { "repo": "stevekinney/cinder" }]`).
-- **Currently published version**: `0.7.0` (`npm view @lostgradient/cinder version` → `0.7.0`), matching the version pinned in `stardust/package.json` (`"@lostgradient/cinder": "0.7.0"`).
+- **Version baseline (checked July 15, 2026)**: Stardust pins `@lostgradient/cinder@0.13.0` in `package.json` and `bun.lock`; npm currently publishes `0.13.0`. Treat these values as a snapshot and use those files plus `npm view @lostgradient/cinder version time --json` for the live baseline.
 - **Build command**: `bun run build` → `bun run --filter=@lostgradient/cinder build` (Turborepo-less Bun workspace filter).
 - **Test command**: `bun run test` → `bun run --filter='*' test`; browser/Playwright suite via `bun run test:browser` → `bun run --filter='@cinder/testing' test:playwright`.
 - **Typecheck**: `bun run typecheck` → `bun run --filter='*' typecheck`.
