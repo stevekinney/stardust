@@ -389,7 +389,7 @@
 								<span class="mono artifact-name">{artifactFilename(artifact.objectKey)}</span>
 								<span class="subtle-text artifact-mime">{artifact.mimeType}</span>
 								<span class="subtle-text artifact-size">{formatSize(artifact.sizeBytes)}</span>
-								<!-- eslint-disable svelte/no-navigation-without-resolve -- tokenized download URL from the artifact store, not an app route -->
+								<!-- eslint-disable svelte/no-navigation-without-resolve -- tokenized API download endpoint must remain route-relative and must not use resolve() -->
 								<Button
 									href={artifact.downloadUrl}
 									download={artifactFilename(artifact.objectKey)}
