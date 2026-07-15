@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import { parseCLI } from 'vitest/node';
 
@@ -12,6 +12,11 @@ export function normalizeArguments(argumentsToForward: readonly string[]): strin
 	for (let index = 0; index < argumentsToForward.length; index += 1) {
 		const argument = argumentsToForward[index];
 		if (argument === '--run') continue;
+		if (argument === '--bail') {
+			if (/^\d+$/.test(argumentsToForward[index + 1] ?? '')) index += 1;
+			continue;
+		}
+		if (argument?.startsWith('--bail=')) continue;
 		if (argument === '--project') {
 			index += 1;
 			continue;
@@ -73,16 +78,31 @@ export function hasTestSelectionArgument(argumentsToForward: readonly string[]):
 		options.changed !== undefined ||
 		options.related !== undefined ||
 		options.shard !== undefined ||
-		options.dir !== undefined
+		options.dir !== undefined ||
+		options.include !== undefined ||
+		options.exclude !== undefined
 	);
 }
 
-/** Return whether Vitest should stop after the first failed project process. */
-export function hasSingleFailureBailArgument(argumentsToForward: readonly string[]): boolean {
+/** Return the cross-project failure budget requested through Vitest's bail option. */
+export function getBailLimit(argumentsToForward: readonly string[]): number | undefined {
 	const { bail } = parseCLI(['vitest', 'run', ...argumentsToForward]).options as {
 		bail?: number | boolean;
 	};
-	return bail === true || bail === 1;
+	if (bail === true) return 1;
+	return typeof bail === 'number' && bail > 0 ? bail : undefined;
+}
+
+/** Return whether an empty changed/related selection is a valid no-op. */
+export function allowsNoMatchedTests(argumentsToForward: readonly string[]): boolean {
+	const { options } = parseCLI(['vitest', 'run', ...argumentsToForward]);
+	return options.changed !== undefined || options.related !== undefined;
+}
+
+/** Reject modes that cannot advance through synchronous project processes. */
+export function assertSerializedModeSupported(argumentsToForward: readonly string[]): void {
+	const { watch } = parseCLI(['vitest', 'run', ...argumentsToForward]).options;
+	if (watch) throw new Error('Watch mode is not supported by the serialized unit-test runner.');
 }
 
 function isReporterArgument(argument: string): boolean {
@@ -294,22 +314,70 @@ function runCommand(command: readonly string[], captureOutput = false): string {
 	return result.stdout ?? '';
 }
 
+export function createBailCommand(
+	command: readonly string[],
+	remainingFailures: number,
+	resultsFile: string
+): string[] {
+	const hasBlobReporter = command.includes('--reporter=blob');
+	return [
+		...command,
+		`--bail=${remainingFailures}`,
+		...(hasBlobReporter ? [] : ['--reporter=default']),
+		'--reporter=json',
+		`--outputFile.json=${resultsFile}`
+	];
+}
+
+export function readFailedTestCount(resultsFile: string): number {
+	const results = JSON.parse(readFileSync(resultsFile, 'utf8')) as { numFailedTests?: unknown };
+	if (!Number.isInteger(results.numFailedTests) || (results.numFailedTests as number) < 0) {
+		throw new Error(`Invalid Vitest failure count in ${resultsFile}.`);
+	}
+	return results.numFailedTests as number;
+}
+
+export interface BailConfiguration {
+	limit: number;
+	prepareCommand: (
+		command: readonly string[],
+		remainingFailures: number,
+		projectIndex: number
+	) => readonly string[];
+	getFailedTestCount: (projectIndex: number) => number;
+}
+
 /** Run every isolated project, merge reports, then propagate the first project failure. */
 export function runSerializedCommands(
 	projectCommands: readonly (readonly string[])[],
 	mergeCommand: readonly string[] | undefined,
 	execute: (command: readonly string[]) => unknown = runCommand,
-	stopAfterFirstProjectFailure = false
+	bail?: BailConfiguration
 ): void {
 	let firstProjectFailure: unknown;
+	let bailFailure: unknown;
 	let mergeFailure: unknown;
+	let remainingFailures = bail?.limit;
 
-	for (const command of projectCommands) {
+	for (const [projectIndex, command] of projectCommands.entries()) {
 		try {
-			execute(command);
+			execute(
+				bail && remainingFailures !== undefined
+					? bail.prepareCommand(command, remainingFailures, projectIndex)
+					: command
+			);
 		} catch (error) {
 			firstProjectFailure ??= error;
-			if (stopAfterFirstProjectFailure) break;
+		}
+
+		if (bail && remainingFailures !== undefined) {
+			try {
+				remainingFailures -= bail.getFailedTestCount(projectIndex);
+			} catch (error) {
+				bailFailure ??= error;
+				break;
+			}
+			if (remainingFailures <= 0) break;
 		}
 	}
 
@@ -320,18 +388,22 @@ export function runSerializedCommands(
 			mergeFailure = error;
 		}
 	}
-	if (firstProjectFailure && mergeFailure) {
-		throw new AggregateError(
-			[firstProjectFailure, mergeFailure],
-			'Unit tests and report merging both failed.'
-		);
+	const failures = [firstProjectFailure, bailFailure, mergeFailure].filter(
+		(failure) => failure !== undefined
+	);
+	if (failures.length > 1) {
+		throw new AggregateError(failures, 'Multiple serialized unit-test phases failed.');
 	}
 	if (firstProjectFailure) throw firstProjectFailure;
+	if (bailFailure) throw bailFailure;
 	if (mergeFailure) throw mergeFailure;
 }
 
 if (import.meta.main) {
-	const argumentsToForward = normalizeArguments(process.argv.slice(2));
+	const rawArguments = process.argv.slice(2);
+	assertSerializedModeSupported(rawArguments);
+	const bailLimit = getBailLimit(rawArguments);
+	const argumentsToForward = normalizeArguments(rawArguments);
 	const shouldPreserveBlobReports = hasBlobReporterArgument(argumentsToForward);
 	const customBlobOutputFile = shouldPreserveBlobReports
 		? getBlobOutputFile(argumentsToForward)
@@ -349,6 +421,7 @@ if (import.meta.main) {
 	const projectArguments = blobReportsDirectory
 		? createProjectArguments(argumentsToForward)
 		: argumentsToForward;
+	const bailResultsDirectory = bailLimit ? `.vitest-bail-results-${process.pid}` : undefined;
 	if (shouldPreserveBlobReports) {
 		rmSync(blobReportsDirectory!, { recursive: true, force: true });
 	}
@@ -357,7 +430,7 @@ if (import.meta.main) {
 		const hasMatchingTest = unitTestProjects.some(
 			(project) => runCommand(createListCommand(project, projectArguments), true).length > 0
 		);
-		if (!hasMatchingTest) {
+		if (!hasMatchingTest && !allowsNoMatchedTests(projectArguments)) {
 			console.error('No unit tests matched the provided arguments.');
 			process.exit(1);
 		}
@@ -372,7 +445,21 @@ if (import.meta.main) {
 				? createMergeCommand(blobReportsDirectory, argumentsToForward)
 				: undefined,
 			runCommand,
-			hasSingleFailureBailArgument(argumentsToForward)
+			bailLimit && bailResultsDirectory
+				? {
+						limit: bailLimit,
+						prepareCommand: (command, remainingFailures, projectIndex) =>
+							createBailCommand(
+								command,
+								remainingFailures,
+								join(bailResultsDirectory, `${unitTestProjects[projectIndex]}.json`)
+							),
+						getFailedTestCount: (projectIndex) =>
+							readFailedTestCount(
+								join(bailResultsDirectory, `${unitTestProjects[projectIndex]}.json`)
+							)
+					}
+				: undefined
 		);
 	} finally {
 		if (blobReportsDirectory && customBlobOutputFile) {
@@ -380,6 +467,9 @@ if (import.meta.main) {
 		}
 		if (blobReportsDirectory && (!shouldPreserveBlobReports || customBlobOutputFile)) {
 			rmSync(blobReportsDirectory, { recursive: true, force: true });
+		}
+		if (bailResultsDirectory) {
+			rmSync(bailResultsDirectory, { recursive: true, force: true });
 		}
 	}
 }

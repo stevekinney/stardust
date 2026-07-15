@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+	allowsNoMatchedTests,
 	assertCommandSucceeded,
+	assertSerializedModeSupported,
+	createBailCommand,
 	createListCommand,
 	createBlobOutputFile,
 	createMergeArguments,
@@ -10,9 +13,9 @@ import {
 	hasBlobReporterArgument,
 	hasCoverageArgument,
 	getBlobOutputFile,
+	getBailLimit,
 	hasOnlyBlobReporterArgument,
 	hasReporterArgument,
-	hasSingleFailureBailArgument,
 	hasTestSelectionArgument,
 	normalizeArguments,
 	runSerializedCommands,
@@ -68,6 +71,9 @@ describe('unit test script commands', () => {
 				'--project',
 				'client',
 				'--project=server',
+				'--bail',
+				'2',
+				'--bail=3',
 				'--coverage',
 				'run-pane.svelte.test.ts'
 			])
@@ -112,6 +118,8 @@ describe('unit test script commands', () => {
 		expect(hasTestSelectionArgument(['--maxWorkers', '2'])).toBe(false);
 		expect(hasTestSelectionArgument(['--shard=5/5'])).toBe(true);
 		expect(hasTestSelectionArgument(['--dir', 'src/workflows'])).toBe(true);
+		expect(hasTestSelectionArgument(['--include', 'src/**/*.server.test.ts'])).toBe(true);
+		expect(hasTestSelectionArgument(['--exclude', 'src/**/*.svelte.test.ts'])).toBe(true);
 	});
 
 	it('keeps coverage-only project runs strict', () => {
@@ -125,10 +133,40 @@ describe('unit test script commands', () => {
 		]);
 	});
 
-	it('detects a one-failure bail request', () => {
-		expect(hasSingleFailureBailArgument(['--bail'])).toBe(true);
-		expect(hasSingleFailureBailArgument(['--bail=1'])).toBe(true);
-		expect(hasSingleFailureBailArgument(['--bail=2'])).toBe(false);
+	it('parses the global bail budget', () => {
+		expect(getBailLimit(['--bail'])).toBe(1);
+		expect(getBailLimit(['--bail=1'])).toBe(1);
+		expect(getBailLimit(['--bail=2'])).toBe(2);
+		expect(getBailLimit(['--bail', '3'])).toBe(3);
+		expect(getBailLimit([])).toBeUndefined();
+	});
+
+	it('preserves valid no-op incremental selections', () => {
+		expect(allowsNoMatchedTests(['--changed'])).toBe(true);
+		expect(allowsNoMatchedTests(['--related', 'README.md'])).toBe(true);
+		expect(allowsNoMatchedTests(['missing.test.ts'])).toBe(false);
+	});
+
+	it('rejects watch mode before launching serialized projects', () => {
+		expect(() => assertSerializedModeSupported(['--watch'])).toThrow('Watch mode is not supported');
+		expect(() => assertSerializedModeSupported([])).not.toThrow();
+	});
+
+	it('adds a counted JSON result reporter to bail commands', () => {
+		expect(createBailCommand(['vitest'], 2, 'results/client.json')).toEqual([
+			'vitest',
+			'--bail=2',
+			'--reporter=default',
+			'--reporter=json',
+			'--outputFile.json=results/client.json'
+		]);
+		expect(createBailCommand(['vitest', '--reporter=blob'], 1, 'results/server.json')).toEqual([
+			'vitest',
+			'--reporter=blob',
+			'--bail=1',
+			'--reporter=json',
+			'--outputFile.json=results/server.json'
+		]);
 	});
 
 	it('writes coverage runs to project-specific blob reports', () => {
@@ -254,17 +292,23 @@ describe('unit test script commands', () => {
 		}
 	});
 
-	it('stops scheduling projects after a failure when bail is one', () => {
+	it('stops scheduling projects when the numeric bail budget is exhausted', () => {
 		const calls: string[][] = [];
 		const projectFailure = new Error('project failed');
+		const serverFailure = new Error('server failed');
 		const execute = (command: readonly string[]) => {
 			calls.push([...command]);
 			if (command[0] === 'client') throw projectFailure;
+			if (command[0] === 'server') throw serverFailure;
 		};
 
 		expect(() =>
-			runSerializedCommands([['client'], ['server'], ['workflows']], ['merge'], execute, true)
+			runSerializedCommands([['client'], ['server'], ['workflows']], ['merge'], execute, {
+				limit: 2,
+				prepareCommand: (command, remainingFailures) => [...command, `--bail=${remainingFailures}`],
+				getFailedTestCount: () => 1
+			})
 		).toThrow(projectFailure);
-		expect(calls).toEqual([['client'], ['merge']]);
+		expect(calls).toEqual([['client', '--bail=2'], ['server', '--bail=1'], ['merge']]);
 	});
 });
