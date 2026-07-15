@@ -15,6 +15,22 @@ export function normalizeArguments(argumentsToForward: readonly string[]): strin
 			continue;
 		}
 		if (argument?.startsWith('--project=')) continue;
+		if (argument === '--test-name-pattern') {
+			normalizedArguments.push('--testNamePattern');
+			continue;
+		}
+		if (argument?.startsWith('--test-name-pattern=')) {
+			normalizedArguments.push(argument.replace('--test-name-pattern=', '--testNamePattern='));
+			continue;
+		}
+		if (argument === '--output-file') {
+			normalizedArguments.push('--outputFile');
+			continue;
+		}
+		if (argument?.startsWith('--output-file=')) {
+			normalizedArguments.push(argument.replace('--output-file=', '--outputFile='));
+			continue;
+		}
 		if (argument) normalizedArguments.push(argument);
 	}
 
@@ -25,12 +41,16 @@ export function normalizeArguments(argumentsToForward: readonly string[]): strin
 export function hasCoverageArgument(argumentsToForward: readonly string[]): boolean {
 	let coverageEnabled = false;
 
-	for (const argument of argumentsToForward) {
+	for (let index = 0; index < argumentsToForward.length; index += 1) {
+		const argument = argumentsToForward[index];
 		if (argument === '--coverage' || argument === '--coverage.enabled') coverageEnabled = true;
 		if (argument === '--coverage=true' || argument === '--coverage.enabled=true') {
 			coverageEnabled = true;
 		}
 		if (argument === '--coverage=false' || argument === '--coverage.enabled=false') {
+			coverageEnabled = false;
+		}
+		if (argument === '--coverage.enabled' && argumentsToForward[index + 1] === 'false') {
 			coverageEnabled = false;
 		}
 	}
@@ -61,11 +81,9 @@ function isReporterArgument(argument: string): boolean {
 	);
 }
 
-/** Return whether reporter output must be aggregated instead of overwritten per project. */
-export function hasReporterOutputArgument(argumentsToForward: readonly string[]): boolean {
-	return argumentsToForward.some(
-		(argument) => argument === '--outputFile' || argument.startsWith('--outputFile')
-	);
+/** Return whether explicit reporter output must be aggregated across projects. */
+export function hasReporterArgument(argumentsToForward: readonly string[]): boolean {
+	return argumentsToForward.some((argument) => isReporterArgument(argument));
 }
 
 /** Remove reporter arguments that must only be applied to the merged report. */
@@ -97,10 +115,14 @@ export function createMergeArguments(argumentsToForward: readonly string[]): str
 		if (!shouldMerge) continue;
 
 		mergeArguments.push(argument);
-		if (
-			(argument === '--reporter' || argument === '--outputFile') &&
-			argumentsToForward[index + 1]
-		) {
+		const nextArgument = argumentsToForward[index + 1];
+		const hasSeparateValue =
+			(argument === '--reporter' ||
+				argument === '--outputFile' ||
+				(argument.startsWith('--coverage.') && !argument.includes('='))) &&
+			nextArgument !== undefined &&
+			!nextArgument.startsWith('-');
+		if (hasSeparateValue) {
 			index += 1;
 			mergeArguments.push(argumentsToForward[index]!);
 		}
@@ -182,7 +204,7 @@ function runCommand(command: readonly string[], captureOutput = false): string {
 if (import.meta.main) {
 	const argumentsToForward = normalizeArguments(process.argv.slice(2));
 	const shouldMergeReports =
-		hasCoverageArgument(argumentsToForward) || hasReporterOutputArgument(argumentsToForward);
+		hasCoverageArgument(argumentsToForward) || hasReporterArgument(argumentsToForward);
 	const blobReportsDirectory = shouldMergeReports ? `.vitest-reports-${process.pid}` : undefined;
 	const projectArguments = blobReportsDirectory
 		? createProjectArguments(argumentsToForward)

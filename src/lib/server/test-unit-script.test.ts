@@ -7,7 +7,7 @@ import {
 	createProjectArguments,
 	createProjectCommand,
 	hasCoverageArgument,
-	hasReporterOutputArgument,
+	hasReporterArgument,
 	hasTestSelectionArgument,
 	normalizeArguments,
 	unitTestProjects
@@ -68,11 +68,18 @@ describe('unit test script commands', () => {
 		).toEqual(['--coverage', 'run-pane.svelte.test.ts']);
 	});
 
+	it('normalizes supported kebab-case Vitest aliases', () => {
+		expect(
+			normalizeArguments(['--test-name-pattern=unit test script', '--output-file', 'results.json'])
+		).toEqual(['--testNamePattern=unit test script', '--outputFile', 'results.json']);
+	});
+
 	it('detects coverage requests', () => {
 		expect(hasCoverageArgument(['--coverage'])).toBe(true);
 		expect(hasCoverageArgument(['--coverage.enabled=true'])).toBe(true);
 		expect(hasCoverageArgument(['--coverage=false'])).toBe(false);
 		expect(hasCoverageArgument(['--coverage', '--coverage.enabled=false'])).toBe(false);
+		expect(hasCoverageArgument(['--coverage', '--coverage.enabled', 'false'])).toBe(false);
 		expect(hasCoverageArgument(['run-pane.svelte.test.ts'])).toBe(false);
 	});
 
@@ -116,7 +123,7 @@ describe('unit test script commands', () => {
 
 	it('applies file-backed reporters only to the aggregate merge', () => {
 		const argumentsToForward = ['--reporter=json', '--outputFile', 'results.json'];
-		expect(hasReporterOutputArgument(argumentsToForward)).toBe(true);
+		expect(hasReporterArgument(argumentsToForward)).toBe(true);
 		expect(createProjectArguments(argumentsToForward)).toEqual([]);
 		expect(createMergeArguments(argumentsToForward)).toEqual(argumentsToForward);
 		expect(createMergeCommand('.vitest-reports-123', argumentsToForward)).toEqual([
@@ -128,6 +135,12 @@ describe('unit test script commands', () => {
 		]);
 	});
 
+	it('aggregates structured reporters written to standard output', () => {
+		expect(hasReporterArgument(['--reporter=json'])).toBe(true);
+		expect(createProjectArguments(['--reporter=json'])).toEqual([]);
+		expect(createMergeArguments(['--reporter=json'])).toEqual(['--reporter=json']);
+	});
+
 	it('forwards aggregate coverage options to the merge', () => {
 		const argumentsToForward = [
 			'--coverage',
@@ -137,5 +150,16 @@ describe('unit test script commands', () => {
 			'run-pane.svelte.test.ts'
 		];
 		expect(createMergeArguments(argumentsToForward)).toEqual(argumentsToForward.slice(0, 4));
+	});
+
+	it('preserves space-separated aggregate coverage option values', () => {
+		const argumentsToForward = [
+			'--coverage',
+			'--coverage.reporter',
+			'lcov',
+			'--coverage.reportsDirectory',
+			'tmp/coverage'
+		];
+		expect(createMergeArguments(argumentsToForward)).toEqual(argumentsToForward);
 	});
 });
