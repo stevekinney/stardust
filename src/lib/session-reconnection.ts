@@ -34,6 +34,21 @@ export type SessionReconnectionDependencies = {
 
 const TERMINAL_STATUSES = new Set(['complete', 'failed', 'cancelled', 'recovered']);
 
+export function findLatestRunId(runs: Array<{ id: string; createdAt: string }>): string | null {
+	if (runs.length === 0) return null;
+	let latest = runs[0];
+	let latestTimestamp = Date.parse(latest.createdAt);
+	for (let index = 1; index < runs.length; index += 1) {
+		const candidate = runs[index];
+		const candidateTimestamp = Date.parse(candidate.createdAt);
+		if (candidateTimestamp > latestTimestamp) {
+			latest = candidate;
+			latestTimestamp = candidateTimestamp;
+		}
+	}
+	return latest.id;
+}
+
 export function isTerminalRunStatus(status: string | null | undefined): boolean {
 	return status != null && TERMINAL_STATUSES.has(status);
 }

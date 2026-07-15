@@ -121,6 +121,30 @@ describe('ConversationView', () => {
 		unmount(component);
 	});
 
+	it('does not announce thinking while a reconnected run waits for approval', () => {
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: {
+				...defaultProps,
+				events: [],
+				runActive: true,
+				acceptsSteering: false,
+				pendingApproval: {
+					approvalId: 'approval-waiting',
+					sessionId: 'test-session',
+					toolCall: { id: 'call-1', name: 'workspace.writeFile', arguments: {} },
+					status: 'pending',
+					createdAt: '2026-07-15T12:00:00.000Z',
+					expiresAt: '2099-07-15T13:00:00.000Z'
+				}
+			}
+		});
+
+		expect(document.body.textContent).not.toContain('Thinking…');
+
+		unmount(component);
+	});
+
 	it('renders lifecycle markers with custom row override', () => {
 		const events: StreamEvent[] = [makeEvent(1, 'lifecycle', { status: 'started' })];
 		const component = mount(ConversationView, {

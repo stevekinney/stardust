@@ -578,7 +578,7 @@
 		bind:this={chatRef}
 		id="session-{sessionId}"
 		{conversation}
-		streaming={runActive && !acceptsSteering}
+		streaming={runActive && !acceptsSteering && pendingApproval === null}
 		streamingStatus="Thinking…"
 		variant="flat"
 		density="comfortable"

@@ -3,6 +3,7 @@ import type { RunInspectorProjection } from '$lib/server/observability/projectio
 import type { TranscriptEventRow } from '$lib/stream-to-conversation';
 import {
 	SessionReconnection,
+	findLatestRunId,
 	transcriptHasTerminalEvent,
 	transcriptHasUnsettledRun,
 	type SessionReconnectionSnapshot,
@@ -205,6 +206,17 @@ describe('session reconnection state machine', () => {
 });
 
 describe('session reconnection transcript decisions', () => {
+	it('selects the newest run in one pass without mutating the API response', () => {
+		const runs = [
+			{ id: 'middle', createdAt: '2026-07-15T12:00:00.000Z' },
+			{ id: 'newest', createdAt: '2026-07-15T13:00:00.000Z' },
+			{ id: 'oldest', createdAt: '2026-07-15T11:00:00.000Z' }
+		];
+		expect(findLatestRunId(runs)).toBe('newest');
+		expect(runs.map((run) => run.id)).toEqual(['middle', 'newest', 'oldest']);
+		expect(findLatestRunId([])).toBeNull();
+	});
+
 	it('matches terminal lifecycle rows to their run', () => {
 		const transcript = [lifecycle('run-1', 'complete')];
 		expect(transcriptHasTerminalEvent(transcript, 'run-1', 'complete')).toBe(true);

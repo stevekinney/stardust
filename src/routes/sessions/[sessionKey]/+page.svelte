@@ -19,6 +19,7 @@
 	import { bootstrapSessionPage } from '$lib/session-page-bootstrap';
 	import {
 		SessionReconnection,
+		findLatestRunId,
 		isTerminalRunStatus,
 		transcriptHasTerminalEvent,
 		transcriptHasUnsettledRun,
@@ -352,10 +353,8 @@
 		};
 		if (runsBody.runs.length === 0) return { projection: null, runCount: 0 };
 
-		const sorted = [...runsBody.runs].sort(
-			(a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-		);
-		const latestRunId = sorted[0].id;
+		const latestRunId = findLatestRunId(runsBody.runs);
+		if (latestRunId === null) return { projection: null, runCount: 0 };
 		const inspectorResponse = await fetch(
 			`/api/sessions/${encodeURIComponent(targetSessionKey)}/runs/${encodeURIComponent(latestRunId)}/inspector`,
 			{ cache: 'no-store', signal }
