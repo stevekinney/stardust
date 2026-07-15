@@ -3,14 +3,9 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { existsSync, mkdirSync } from 'fs';
 import { dirname, resolve } from 'path';
-import { DATABASE_URL } from '../config';
+import { DATABASE_URL, resolveLocalPath } from '../config';
 import * as schema from './schema';
 import { loadSqliteVecExtension } from './sqlite-vec';
-
-function resolveDbPath(url: string): string {
-	const raw = url.startsWith('file:') ? url.slice(5) : url;
-	return raw.startsWith('~') ? resolve(process.env.HOME ?? '', raw.slice(2)) : resolve(raw);
-}
 
 function resolveMigrationsFolder(): string {
 	let dir = resolve('drizzle');
@@ -21,7 +16,7 @@ function resolveMigrationsFolder(): string {
 }
 
 function createClient() {
-	const dbPath = resolveDbPath(DATABASE_URL);
+	const dbPath = resolveLocalPath(DATABASE_URL);
 	mkdirSync(dirname(dbPath), { recursive: true });
 
 	const sqlite = new Database(dbPath);

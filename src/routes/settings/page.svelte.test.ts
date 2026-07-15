@@ -6,7 +6,18 @@ const SETTINGS_KEY = 'stardust-settings';
 
 function mountSettingsPage() {
 	return mount(SettingsPage, {
-		target: document.body
+		target: document.body,
+		props: {
+			params: {},
+			data: {
+				localDataPaths: [
+					{ label: 'Database', value: '/project/local.db' },
+					{ label: 'Artifacts', value: '/project/artifacts' },
+					{ label: 'Workspaces', value: '/project/workspaces' }
+				]
+			},
+			form: undefined
+		}
 	});
 }
 
@@ -54,6 +65,17 @@ describe('Settings local data reset', () => {
 		expect(findButton('Reset all local state').classList.contains('reset-local-state-button')).toBe(
 			true
 		);
+
+		unmount(component);
+	});
+
+	it('renders configured local data paths from route data', () => {
+		const component = mountSettingsPage();
+
+		expect(document.body.textContent).toContain('/project/local.db');
+		expect(document.body.textContent).toContain('/project/artifacts');
+		expect(document.body.textContent).toContain('/project/workspaces');
+		expect(document.body.textContent).not.toContain('~/.stardust/stardust.db');
 
 		unmount(component);
 	});

@@ -1,5 +1,8 @@
 // Framework-agnostic server configuration — safe to import from Worker (no SvelteKit virtuals).
 
+import { homedir } from 'node:os';
+import { resolve } from 'node:path';
+
 export const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
 export const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE ?? 'default';
 /** Temporal Cloud API key. Unset for the local dev server; presence with a local address is a leak. */
@@ -13,8 +16,43 @@ export const TEMPORAL_WEB_URL = `http://localhost:${TEMPORAL_WEB_PORT}`;
 
 // ── Artifact store ────────────────────────────────────────────────────────────
 
-/** Root directory for local artifact storage. Tilde-expansion is handled by LocalArtifactStore. */
+/** Root directory for local artifact storage. Tilde expansion is handled by resolveLocalPath. */
 export const ARTIFACT_DIR = process.env.ARTIFACT_DIR ?? '~/.stardust/artifacts';
+
+/** Root directory for local subprocess workspaces. */
+export const WORKSPACE_ROOT = process.env.WORKSPACE_ROOT ?? '~/.stardust/workspaces';
+
+export interface LocalDataPath {
+	label: string;
+	value: string;
+}
+
+interface LocalDataPathConfiguration {
+	databaseUrl?: string;
+	artifactDirectory?: string;
+	workspaceRoot?: string;
+}
+
+/** Resolve a configured local path exactly as the storage consumers do. */
+export function resolveLocalPath(raw: string): string {
+	const path = raw.startsWith('file:') ? raw.slice(5) : raw;
+	if (path === '~' || path.startsWith('~/')) {
+		return resolve(process.env.HOME ?? homedir(), path === '~' ? '' : path.slice(2));
+	}
+	return resolve(path);
+}
+
+/** Non-secret effective paths safe to expose in Settings route data. */
+export function localDataPaths(configuration: LocalDataPathConfiguration = {}): LocalDataPath[] {
+	return [
+		{ label: 'Database', value: resolveLocalPath(configuration.databaseUrl ?? DATABASE_URL) },
+		{
+			label: 'Artifacts',
+			value: resolveLocalPath(configuration.artifactDirectory ?? ARTIFACT_DIR)
+		},
+		{ label: 'Workspaces', value: resolveLocalPath(configuration.workspaceRoot ?? WORKSPACE_ROOT) }
+	];
+}
 
 /**
  * HMAC signing secret shared between the web process and the Worker process.

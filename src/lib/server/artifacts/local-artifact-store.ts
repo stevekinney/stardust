@@ -21,7 +21,7 @@
 import { createReadStream } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { ARTIFACT_DIR, ARTIFACT_TOKEN_SECRET } from '../config';
+import { ARTIFACT_DIR, ARTIFACT_TOKEN_SECRET, resolveLocalPath } from '../config';
 import { mintToken } from './token';
 import type {
 	ArtifactRef,
@@ -34,11 +34,7 @@ import type {
 const DEFAULT_EXPIRES_IN_SECONDS = 3600;
 
 function resolveStorageRoot(root?: string): string {
-	const raw = root ?? ARTIFACT_DIR;
-	if (raw.startsWith('~/')) {
-		return resolve(process.env.HOME ?? '', raw.slice(2));
-	}
-	return resolve(raw);
+	return resolveLocalPath(root ?? ARTIFACT_DIR);
 }
 
 export class LocalArtifactStore implements ArtifactStore {
