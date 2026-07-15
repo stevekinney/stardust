@@ -37,11 +37,20 @@ async function openResetDialog() {
 	);
 }
 
-describe('Settings local data reset', () => {
+describe('Settings', () => {
 	afterEach(() => {
 		document.body.innerHTML = '';
 		localStorage.clear();
 		vi.restoreAllMocks();
+	});
+
+	it('renders the page heading in a banner landmark', () => {
+		const component = mountSettingsPage();
+
+		const banner = document.querySelector('[role="banner"]');
+		expect(banner?.querySelector('h1')?.textContent).toBe('Settings');
+
+		unmount(component);
 	});
 
 	it('opens the Cinder confirmation dialog before resetting local data', async () => {

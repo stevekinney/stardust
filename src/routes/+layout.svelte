@@ -19,6 +19,7 @@
 	import '@lostgradient/cinder/navigation-bar/styles';
 	import '@lostgradient/cinder/navigation-item/styles';
 	import '@lostgradient/cinder/number-input/styles';
+	import '@lostgradient/cinder/page-header/styles';
 	import '@lostgradient/cinder/payload-inspector/styles';
 	import '@lostgradient/cinder/popover/styles';
 	import '@lostgradient/cinder/run-step-timeline/styles';
