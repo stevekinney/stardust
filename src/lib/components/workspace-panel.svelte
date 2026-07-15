@@ -37,6 +37,7 @@
 		mimeType: string;
 		sizeBytes: number;
 		createdAt: string;
+		downloadUrl: string;
 	};
 
 	export type WorkspaceDiff = {
@@ -388,9 +389,11 @@
 								<span class="mono artifact-name">{artifactFilename(artifact.objectKey)}</span>
 								<span class="subtle-text artifact-mime">{artifact.mimeType}</span>
 								<span class="subtle-text artifact-size">{formatSize(artifact.sizeBytes)}</span>
-								<button
-									type="button"
-									class="download-btn"
+								<!-- eslint-disable svelte/no-navigation-without-resolve -- tokenized download URL from the artifact store, not an app route -->
+								<a
+									href={artifact.downloadUrl}
+									download={artifactFilename(artifact.objectKey)}
+									class="download-link"
 									aria-label="Download {artifactFilename(artifact.objectKey)}"
 								>
 									<svg
@@ -407,7 +410,8 @@
 										<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
 										<path d="m7 10 5 5 5-5" />
 									</svg>
-								</button>
+								</a>
+								<!-- eslint-enable svelte/no-navigation-without-resolve -->
 							</div>
 						{/each}
 					</div>
@@ -772,7 +776,7 @@
 		white-space: nowrap;
 	}
 
-	.download-btn {
+	.download-link {
 		background: none;
 		border: none;
 		cursor: pointer;
@@ -783,7 +787,7 @@
 		flex-shrink: 0;
 	}
 
-	.download-btn:hover {
+	.download-link:hover {
 		color: var(--cinder-text);
 	}
 
