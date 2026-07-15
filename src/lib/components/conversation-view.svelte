@@ -289,9 +289,10 @@
 			// CommandMenu owns dismissal. Stardust only preserves the existing
 			// composer contract that Escape also clears the slash prefix.
 			chatRef?.clearInput();
-		} else if (event.key === 'Enter' && slashActiveItemId === null) {
-			// CommandMenu intentionally leaves Enter alone when it has no enabled
-			// item. Consume it here so Chat does not submit an unavailable command.
+		} else if (event.key === 'Enter') {
+			// Chat handles this callback before CommandMenu's keydown listener.
+			// Consume Enter here so Chat never submits the slash text; CommandMenu's
+			// listener on the same editor can still activate an enabled item.
 			event.preventDefault();
 			event.stopPropagation();
 		}

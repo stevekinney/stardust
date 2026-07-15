@@ -110,14 +110,15 @@ describe('ConversationView slash commands', () => {
 		unmount(component);
 	});
 
-	it('supports keyboard-only navigation and selection (ArrowDown + Enter, no mouse)', async () => {
+	it('supports keyboard-only navigation and selection without submitting the composer', async () => {
 		vi.stubGlobal(
 			'fetch',
 			vi.fn(async () => new Response(JSON.stringify({ tools: [] }), { status: 200 }))
 		);
+		const onSubmit = vi.fn();
 		const component = mount(ConversationView, {
 			target: document.body,
-			props: { ...defaultProps, events: [] }
+			props: { ...defaultProps, events: [], onSubmit }
 		});
 
 		typeInComposer('/');
@@ -136,6 +137,7 @@ describe('ConversationView slash commands', () => {
 		const enterEvent = pressKey('Enter');
 		expect(enterEvent.defaultPrevented).toBe(true);
 		await vi.waitFor(() => expect(palette()).toBeNull());
+		expect(onSubmit).not.toHaveBeenCalled();
 
 		unmount(component);
 	});
