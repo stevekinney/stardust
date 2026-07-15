@@ -21,8 +21,11 @@ export class InboxStore {
 	}
 
 	/** Fetch approvals and memory candidates in parallel; failures leave prior state intact. */
-	async refresh(): Promise<void> {
-		const [approvals, candidates] = await Promise.all([fetchApprovals(), fetchMemoryCandidates()]);
+	async refresh(signal?: AbortSignal): Promise<void> {
+		const [approvals, candidates] = await Promise.all([
+			fetchApprovals(signal),
+			fetchMemoryCandidates(signal)
+		]);
 		if (approvals !== null) this.approvals = approvals;
 		if (candidates !== null) this.candidates = candidates;
 		this.loaded = true;
@@ -30,11 +33,12 @@ export class InboxStore {
 
 	/** Refresh immediately, then poll until the returned cleanup function runs. */
 	startPolling(): () => void {
+		const abortController = new AbortController();
 		let stopped = false;
 		let timeout: ReturnType<typeof setTimeout> | undefined;
 		const poll = async () => {
 			if (stopped) return;
-			await this.refresh();
+			await this.refresh(abortController.signal);
 			if (stopped) return;
 			timeout = setTimeout(() => void poll(), POLL_INTERVAL_MS);
 		};
@@ -43,14 +47,15 @@ export class InboxStore {
 		return () => {
 			if (stopped) return;
 			stopped = true;
+			abortController.abort();
 			if (timeout !== undefined) clearTimeout(timeout);
 		};
 	}
 }
 
-async function fetchApprovals(): Promise<ApprovalEntry[] | null> {
+async function fetchApprovals(signal?: AbortSignal): Promise<ApprovalEntry[] | null> {
 	try {
-		const response = await fetch('/api/approvals');
+		const response = await fetch('/api/approvals', { signal });
 		if (!response.ok) return null;
 		const body = (await response.json()) as { approvals: ApprovalEntry[] };
 		return body.approvals;
@@ -59,9 +64,9 @@ async function fetchApprovals(): Promise<ApprovalEntry[] | null> {
 	}
 }
 
-async function fetchMemoryCandidates(): Promise<InboxMemoryCandidate[] | null> {
+async function fetchMemoryCandidates(signal?: AbortSignal): Promise<InboxMemoryCandidate[] | null> {
 	try {
-		const response = await fetch('/api/memory');
+		const response = await fetch('/api/memory', { signal });
 		if (!response.ok) return null;
 		const body = (await response.json()) as { candidates: InboxMemoryCandidate[] };
 		return body.candidates;

@@ -113,6 +113,36 @@ describe('InboxStore', () => {
 		expect(fetch).toHaveBeenCalledTimes(4);
 	});
 
+	it('aborts an active refresh when polling stops', async () => {
+		vi.useFakeTimers();
+		const signals: AbortSignal[] = [];
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+				const signal = init?.signal;
+				if (!signal) return Promise.reject(new Error('Expected an abort signal'));
+				signals.push(signal);
+				return new Promise<Response>((_resolve, reject) => {
+					signal.addEventListener(
+						'abort',
+						() => reject(new DOMException('The operation was aborted', 'AbortError')),
+						{ once: true }
+					);
+				});
+			})
+		);
+		const store = new InboxStore();
+
+		const stopPolling = store.startPolling();
+		expect(signals).toHaveLength(2);
+		expect(signals.every((signal) => !signal.aborted)).toBe(true);
+
+		stopPolling();
+		expect(signals.every((signal) => signal.aborted)).toBe(true);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
 	it('counts pending approvals and candidates after a refresh', async () => {
 		mockEndpoints(
 			[makeApproval(), makeApproval({ approvalId: 'apr-002', status: 'approved' })],
