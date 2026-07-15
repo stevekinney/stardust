@@ -306,6 +306,25 @@ describe('ConversationView', () => {
 		unmount(component);
 	});
 
+	it('does not expose retry or edit actions while a reconnected run is active', () => {
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: {
+				...defaultProps,
+				events: [makeEvent(1, 'lifecycle', { status: 'failed' })],
+				userMessage: { text: 'Original prompt' },
+				runActive: true,
+				onRetry: vi.fn(),
+				onEdit: vi.fn()
+			}
+		});
+
+		expect(document.querySelector('.lifecycle-retry')).toBeNull();
+		expect(document.querySelector('.chat-message-edit-button')).toBeNull();
+
+		unmount(component);
+	});
+
 	it('renders an inline ApprovalCard for a pending approval and resolves through it', () => {
 		const onResolveApproval = vi.fn();
 		const events: StreamEvent[] = [

@@ -29,6 +29,7 @@ export type SessionReconnectionDependencies = {
 	intervalMilliseconds?: number;
 	maximumUnobservableAttempts?: number;
 	maximumHandoffAttempts?: number;
+	maximumSettlementAttempts?: number;
 };
 
 const TERMINAL_STATUSES = new Set(['complete', 'failed', 'cancelled', 'recovered']);
@@ -43,26 +44,30 @@ export function transcriptHasTerminalEvent(
 	status: string
 ): boolean {
 	return transcript.some((event) => {
-		if (event.runId !== runId || event.kind !== 'lifecycle') return false;
-		try {
-			const payload = JSON.parse(event.payload) as { status?: unknown };
-			return payload.status === status;
-		} catch {
-			return false;
-		}
+		return event.runId === runId && parentLifecycleStatus(event) === status;
 	});
+}
+
+function parentLifecycleStatus(event: TranscriptEventRow): string | null {
+	if (event.kind !== 'lifecycle') return null;
+	try {
+		const payload = JSON.parse(event.payload) as {
+			type?: unknown;
+			status?: unknown;
+			recoverySafe?: unknown;
+		};
+		if (payload.type !== undefined || payload.recoverySafe !== true) return null;
+		return typeof payload.status === 'string' ? payload.status : null;
+	} catch {
+		return null;
+	}
 }
 
 export function transcriptHasUnsettledRun(transcript: TranscriptEventRow[]): boolean {
 	const latestStatusByRun = new Map<string, string>();
 	for (const event of transcript) {
-		if (event.kind !== 'lifecycle' || !event.runId) continue;
-		try {
-			const payload = JSON.parse(event.payload) as { status?: unknown };
-			if (typeof payload.status === 'string') latestStatusByRun.set(event.runId, payload.status);
-		} catch {
-			// Malformed lifecycle rows cannot establish an active run.
-		}
+		const status = parentLifecycleStatus(event);
+		if (status !== null) latestStatusByRun.set(event.runId, status);
 	}
 	return [...latestStatusByRun.values()].some((status) => !isTerminalRunStatus(status));
 }
@@ -78,6 +83,7 @@ export class SessionReconnection {
 	private readonly intervalMilliseconds: number;
 	private readonly maximumUnobservableAttempts: number;
 	private readonly maximumHandoffAttempts: number;
+	private readonly maximumSettlementAttempts: number;
 	private generation = 0;
 	private controller: AbortController | null = null;
 	private scheduled: ScheduledHandle | null = null;
@@ -85,6 +91,7 @@ export class SessionReconnection {
 	private missingRunAttempts = 0;
 	private observedRunId: string | null = null;
 	private handoffAttempts = 0;
+	private settlementAttempts = 0;
 
 	constructor(private readonly dependencies: SessionReconnectionDependencies) {
 		this.schedule = dependencies.schedule ?? ((callback, delay) => setTimeout(callback, delay));
@@ -92,6 +99,7 @@ export class SessionReconnection {
 		this.intervalMilliseconds = dependencies.intervalMilliseconds ?? 1_000;
 		this.maximumUnobservableAttempts = dependencies.maximumUnobservableAttempts ?? 5;
 		this.maximumHandoffAttempts = dependencies.maximumHandoffAttempts ?? 5;
+		this.maximumSettlementAttempts = dependencies.maximumSettlementAttempts ?? 30;
 	}
 
 	start(): void {
@@ -100,6 +108,7 @@ export class SessionReconnection {
 		this.missingRunAttempts = 0;
 		this.observedRunId = null;
 		this.handoffAttempts = 0;
+		this.settlementAttempts = 0;
 		this.dependencies.setState({ kind: 'discovering', attempt: 1 });
 		void this.poll(this.generation);
 	}
@@ -128,6 +137,15 @@ export class SessionReconnection {
 		const message =
 			'This run can no longer be observed from canonical state. Reload to try reconnecting again.';
 		this.dependencies.setState({ kind: 'failed-unobservable', message });
+		this.stop();
+	}
+
+	private failSettlement(): void {
+		this.dependencies.setState({
+			kind: 'failed-unobservable',
+			message:
+				'This run finished, but its canonical terminal event could not be observed. Reload to try reconnecting again.'
+		});
 		this.stop();
 	}
 
@@ -173,6 +191,7 @@ export class SessionReconnection {
 		if (this.observedRunId && runId !== this.observedRunId) {
 			this.observedRunId = runId;
 			this.handoffAttempts = 0;
+			this.settlementAttempts = 0;
 			this.dependencies.setState({ kind: 'handoff', runId, attempt: 0 });
 			this.scheduleNext(generation);
 			return;
@@ -181,10 +200,16 @@ export class SessionReconnection {
 
 		if (isTerminalRunStatus(status)) {
 			if (!transcriptHasTerminalEvent(snapshot.transcript, runId, status)) {
+				this.settlementAttempts += 1;
+				if (this.settlementAttempts >= this.maximumSettlementAttempts) {
+					this.failSettlement();
+					return;
+				}
 				this.dependencies.setState({ kind: 'settling', runId, status });
 				this.scheduleNext(generation);
 				return;
 			}
+			this.settlementAttempts = 0;
 
 			if (this.handoffAttempts < this.maximumHandoffAttempts) {
 				this.handoffAttempts += 1;
@@ -199,6 +224,7 @@ export class SessionReconnection {
 		}
 
 		this.handoffAttempts = 0;
+		this.settlementAttempts = 0;
 		this.dependencies.setState(
 			status === 'waiting_approval'
 				? { kind: 'awaiting-approval', runId }

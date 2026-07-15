@@ -195,7 +195,7 @@
 	}
 
 	async function handleSubmit(message: string, attachments?: SessionAttachmentInput[]) {
-		if (running) return;
+		if (runActive) return;
 
 		running = true;
 		errorMessage = null;

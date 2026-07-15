@@ -195,7 +195,7 @@
 
 	const slashContext = $derived<SlashCommandContext>({
 		running: runActive,
-		hasRetry: !!onRetry,
+		hasRetry: !!onRetry && !runActive,
 		hasPendingApproval: pendingApproval !== null,
 		onInterrupt: () => onInterrupt?.(),
 		onRetry: () => onRetry?.(),
@@ -354,6 +354,7 @@
 	}
 
 	function handleRetry() {
+		if (runActive) return;
 		onRetry?.();
 	}
 
@@ -362,6 +363,7 @@
 	}
 
 	function handleEdit(event: { messageId: string; content: string }) {
+		if (runActive) return;
 		onEdit?.(event.content);
 	}
 
@@ -405,7 +407,7 @@
 					{#if status === 'failed' && reason}
 						<span class="lifecycle-reason">{reason}</span>
 					{/if}
-					{#if status === 'failed' && onRetry}
+					{#if status === 'failed' && onRetry && !runActive}
 						<button class="lifecycle-retry" onclick={() => onRetry?.()}>Retry</button>
 					{/if}
 				</div>
@@ -585,8 +587,8 @@
 			attachments: true,
 			search: false,
 			copy: true,
-			editing: !!onEdit,
-			retry: !!onRetry
+			editing: !!onEdit && !runActive,
+			retry: !!onRetry && !runActive
 		}}
 		onsubmit={handleSubmit}
 		onretry={handleRetry}

@@ -18,7 +18,17 @@ function lifecycle(runId: string, status: string, sequence = 1): TranscriptEvent
 		id: `${runId}:${status}`,
 		runId,
 		kind: 'lifecycle',
-		payload: JSON.stringify({ status }),
+		payload: JSON.stringify({ status, recoverySafe: true }),
+		sequence
+	};
+}
+
+function subagentLifecycle(runId: string, status: string, sequence = 1): TranscriptEventRow {
+	return {
+		id: `${runId}:subagent:${status}`,
+		runId,
+		kind: 'lifecycle',
+		payload: JSON.stringify({ type: 'subagent.complete', status }),
 		sequence
 	};
 }
@@ -49,7 +59,8 @@ function harness(readSnapshot: (signal: AbortSignal) => Promise<SessionReconnect
 		},
 		cancelSchedule: vi.fn(),
 		maximumUnobservableAttempts: 3,
-		maximumHandoffAttempts: 2
+		maximumHandoffAttempts: 2,
+		maximumSettlementAttempts: 3
 	});
 
 	async function settle(): Promise<void> {
@@ -107,6 +118,21 @@ describe('session reconnection state machine', () => {
 		});
 		await testHarness.advance();
 		expect(testHarness.states.at(-1)).toEqual({ kind: 'handoff', runId: 'run-1', attempt: 1 });
+	});
+
+	it('bounds settlement when the canonical terminal row never appears', async () => {
+		const testHarness = harness(vi.fn().mockResolvedValue(snapshot('complete')));
+		testHarness.reconnection.start();
+		await testHarness.settle();
+		await testHarness.advance();
+		await testHarness.advance();
+
+		expect(testHarness.states.at(-1)).toEqual({
+			kind: 'failed-unobservable',
+			message:
+				'This run finished, but its canonical terminal event could not be observed. Reload to try reconnecting again.'
+		});
+		expect(testHarness.callbacks).toHaveLength(0);
 	});
 
 	it('follows a queued run handoff and observes the replacement run', async () => {
@@ -183,6 +209,15 @@ describe('session reconnection transcript decisions', () => {
 		const transcript = [lifecycle('run-1', 'complete')];
 		expect(transcriptHasTerminalEvent(transcript, 'run-1', 'complete')).toBe(true);
 		expect(transcriptHasTerminalEvent(transcript, 'run-2', 'complete')).toBe(false);
+	});
+
+	it('does not treat a subagent completion as the parent terminal lifecycle', () => {
+		const transcript = [
+			lifecycle('run-1', 'started', 1),
+			subagentLifecycle('run-1', 'complete', 2)
+		];
+		expect(transcriptHasTerminalEvent(transcript, 'run-1', 'complete')).toBe(false);
+		expect(transcriptHasUnsettledRun(transcript)).toBe(true);
 	});
 
 	it('detects an unsettled run without treating an earlier completed turn as active', () => {
