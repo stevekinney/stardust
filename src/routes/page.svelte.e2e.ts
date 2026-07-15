@@ -284,6 +284,10 @@ test('top nav sheds chrome at narrower viewports without overlapping', async ({ 
 	const insights = nav.getByRole('link', { name: 'Insights' });
 	const search = nav.getByRole('button', { name: /search or run a command/i });
 	await expect(insights).toBeVisible();
+	await expect(search).toBeVisible();
+	await expect(search.locator('.palette-hint')).toBeHidden();
+	await expect(search.locator('.palette-shortcut')).toHaveCount(1);
+	await expect(search.locator('.palette-shortcut')).toBeHidden();
 	const insightsBox = await insights.boundingBox();
 	const searchBox = await search.boundingBox();
 	expect(insightsBox).not.toBeNull();

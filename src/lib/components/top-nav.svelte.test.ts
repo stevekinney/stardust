@@ -76,6 +76,20 @@ describe('TopNav', () => {
 		unmount(component);
 	});
 
+	it('uses an app-owned responsive hook for the command shortcut', () => {
+		const component = mount(TopNav, {
+			target: document.body,
+			props: { currentPath: '/', onOpenPalette: vi.fn() }
+		});
+
+		const search = document.querySelector('button[aria-label="Search or run a command"]');
+		const shortcut = search?.querySelector('.palette-shortcut');
+		expect(shortcut).not.toBeNull();
+		expect(shortcut?.textContent).toContain('⌘K');
+
+		unmount(component);
+	});
+
 	// Regression: the nav overflows onto the search/health/settings controls at
 	// narrow container widths. Cinder's NavigationBar collapses the tab list
 	// behind a menu toggle to prevent that, but only if the bar opts in via a
