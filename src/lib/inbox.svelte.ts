@@ -33,6 +33,7 @@ export class InboxStore {
 		let stopped = false;
 		let timeout: ReturnType<typeof setTimeout> | undefined;
 		const poll = async () => {
+			if (stopped) return;
 			await this.refresh();
 			if (stopped) return;
 			timeout = setTimeout(() => void poll(), POLL_INTERVAL_MS);
