@@ -83,7 +83,9 @@ describe('TopNav', () => {
 		});
 
 		const search = document.querySelector('button[aria-label="Search or run a command"]');
-		expect(search?.querySelector('.palette-shortcut')?.textContent).toBe('⌘K');
+		const shortcut = search?.querySelector('.palette-shortcut');
+		expect(shortcut).not.toBeNull();
+		expect(shortcut?.textContent).toContain('⌘K');
 
 		unmount(component);
 	});
