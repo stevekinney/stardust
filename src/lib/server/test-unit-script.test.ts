@@ -4,6 +4,7 @@ import {
 	createMergeCommand,
 	createProjectCommand,
 	hasCoverageArgument,
+	hasTestSelectionArgument,
 	normalizeArguments,
 	unitTestProjects
 } from '../../../scripts/test-unit';
@@ -57,6 +58,23 @@ describe('unit test script commands', () => {
 		expect(hasCoverageArgument(['run-pane.svelte.test.ts'])).toBe(false);
 	});
 
+	it('distinguishes test selection arguments from run options', () => {
+		expect(hasTestSelectionArgument(['src/lib/server/test-unit-script.test.ts'])).toBe(true);
+		expect(hasTestSelectionArgument(['--testNamePattern=unit test script'])).toBe(true);
+		expect(hasTestSelectionArgument(['--coverage'])).toBe(false);
+	});
+
+	it('keeps coverage-only project runs strict', () => {
+		expect(createProjectCommand('server', ['--coverage'])).toEqual([
+			'bunx',
+			'vitest',
+			'run',
+			'--project',
+			'server',
+			'--coverage'
+		]);
+	});
+
 	it('writes coverage runs to project-specific blob reports', () => {
 		expect(createProjectCommand('server', ['--coverage'], '.vitest-reports-123')).toEqual([
 			'bunx',
@@ -64,7 +82,6 @@ describe('unit test script commands', () => {
 			'run',
 			'--project',
 			'server',
-			'--passWithNoTests',
 			'--coverage',
 			'--reporter=blob',
 			'--outputFile=.vitest-reports-123/server.json'

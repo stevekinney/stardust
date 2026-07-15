@@ -19,6 +19,17 @@ export function hasCoverageArgument(argumentsToForward: readonly string[]): bool
 	);
 }
 
+/** Return whether caller arguments narrow which tests Vitest should execute. */
+export function hasTestSelectionArgument(argumentsToForward: readonly string[]): boolean {
+	return argumentsToForward.some(
+		(argument) =>
+			!argument.startsWith('-') ||
+			argument === '-t' ||
+			argument === '--testNamePattern' ||
+			argument.startsWith('--testNamePattern=')
+	);
+}
+
 /** Build the command that verifies a targeted invocation matches at least one test. */
 export function createListCommand(
 	project: (typeof unitTestProjects)[number],
@@ -41,13 +52,15 @@ export function createProjectCommand(
 	argumentsToForward: readonly string[],
 	blobReportsDirectory?: string
 ): string[] {
+	const hasTestSelection = hasTestSelectionArgument(argumentsToForward);
+
 	return [
 		'bunx',
 		'vitest',
 		'run',
 		'--project',
 		project,
-		...(argumentsToForward.length > 0 ? ['--passWithNoTests'] : []),
+		...(hasTestSelection ? ['--passWithNoTests'] : []),
 		...argumentsToForward,
 		...(blobReportsDirectory
 			? ['--reporter=blob', `--outputFile=${blobReportsDirectory}/${project}.json`]
@@ -80,7 +93,7 @@ if (import.meta.main) {
 		? `.vitest-reports-${process.pid}`
 		: undefined;
 
-	if (argumentsToForward.length > 0) {
+	if (hasTestSelectionArgument(argumentsToForward)) {
 		const hasMatchingTest = unitTestProjects.some(
 			(project) => runCommand(createListCommand(project, argumentsToForward), true).length > 0
 		);
