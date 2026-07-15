@@ -259,7 +259,7 @@
 		if (!editor) return null;
 
 		slashAnchor = editor;
-		slashCaretIndex = editor.selectionStart;
+		slashCaretIndex = editor.selectionStart ?? editor.value.length;
 		return editor;
 	}
 
