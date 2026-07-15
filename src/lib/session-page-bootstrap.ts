@@ -1,3 +1,5 @@
+import type { RunInspectorProjection } from '$lib/server/observability/projection';
+
 /**
  * Decides which detail fetches the session page is allowed to make on mount.
  *
@@ -31,7 +33,7 @@ export type SessionPageBootstrapDeps = {
 	startMessage: string | null;
 	loadPendingApproval: () => Promise<void>;
 	loadTranscript: () => Promise<void>;
-	loadLatestRunInspector: () => Promise<void>;
+	loadLatestRunInspector: () => Promise<RunInspectorProjection | null>;
 	/** Submits the session's first turn — this is what creates the session row. */
 	submitFirstTurn: (message: string) => Promise<void>;
 };

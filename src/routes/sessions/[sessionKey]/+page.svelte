@@ -8,6 +8,7 @@
 	import Segment from '@lostgradient/cinder/segment';
 	import StatusDot from '@lostgradient/cinder/status-dot';
 	import type { StatusDotStatus } from '@lostgradient/cinder/status-dot';
+	import { onDestroy } from 'svelte';
 	import ConversationView from '$lib/components/conversation-view.svelte';
 	import DurabilityRibbon from '$lib/components/durability-ribbon.svelte';
 	import RecoveryView from '$lib/components/recovery-view.svelte';
@@ -16,6 +17,15 @@
 	import { sessionBadgeVariant } from '$lib/components/session-row.svelte';
 	import { formatStatus } from '$lib/session-display';
 	import { bootstrapSessionPage } from '$lib/session-page-bootstrap';
+	import {
+		SessionReconnection,
+		findLatestRunId,
+		isTerminalRunStatus,
+		transcriptHasTerminalEvent,
+		transcriptHasUnsettledRun,
+		type SessionReconnectionSnapshot,
+		type SessionReconnectionState
+	} from '$lib/session-reconnection';
 	import { parseSseFrame, readSseStream } from '$lib/sse-stream';
 	import {
 		findLastUserMessageText,
@@ -50,6 +60,7 @@
 	let running = $state(false);
 	let liveEvents = $state<StreamEvent[]>([]);
 	let canonicalEvents = $state<StreamEvent[]>([]);
+	let canonicalTranscript = $state.raw<TranscriptEventRow[]>([]);
 	let transcriptMode = $state<'live' | 'canonical'>('live');
 	let events = $derived(transcriptMode === 'live' ? liveEvents : canonicalEvents);
 	let currentUserMessage = $state<string | null>(null);
@@ -67,6 +78,26 @@
 	const isRecovered = $derived(inspector?.run.status === 'recovered');
 
 	let abortController: AbortController | null = null;
+	let reconnectionState = $state<SessionReconnectionState>({ kind: 'dormant' });
+	let destroyed = false;
+	const reconnectedRunActive = $derived(
+		reconnectionState.kind !== 'dormant' && reconnectionState.kind !== 'failed-unobservable'
+	);
+	const runActive = $derived(running || reconnectedRunActive);
+	const acceptsSteering = $derived(
+		running ||
+			reconnectionState.kind === 'observing' ||
+			reconnectionState.kind === 'awaiting-approval'
+	);
+
+	const reconnection = new SessionReconnection({
+		readSnapshot: readReconnectionSnapshot,
+		applySnapshot: applyReconnectionSnapshot,
+		setState: (state) => {
+			reconnectionState = state;
+			if (state.kind === 'failed-unobservable') errorMessage = state.message;
+		}
+	});
 
 	/** Controls which pane is active on tablet (641–1024px). */
 	let tabletView = $state<'conversation' | 'run'>('conversation');
@@ -78,12 +109,15 @@
 	afterNavigate(() => {
 		if (initializedSessionKey === sessionKey) return;
 		initializedSessionKey = sessionKey;
+		const targetSessionKey = sessionKey;
 
 		abortController?.abort();
 		abortController = null;
+		reconnection.stop();
 		running = false;
 		liveEvents = [];
 		canonicalEvents = [];
+		canonicalTranscript = [];
 		transcriptMode = 'live';
 		currentUserMessage = null;
 		errorMessage = null;
@@ -93,6 +127,7 @@
 		pendingApproval = null;
 		approvalResolution = null;
 		scrubCursor = null;
+		reconnectionState = { kind: 'dormant' };
 
 		if (data.startMessage) {
 			void goto(resolve(`/sessions/${encodeURIComponent(sessionKey)}`), { replaceState: true });
@@ -105,31 +140,67 @@
 			loadTranscript,
 			loadLatestRunInspector,
 			submitFirstTurn: handleSubmit
+		}).then(() => {
+			if (!isCurrentSession(targetSessionKey)) return;
+			if (data.fresh || data.startMessage) return;
+			const latestStatus = inspector?.run.status;
+			const terminalInspectorNeedsSettlement =
+				inspector != null &&
+				isTerminalRunStatus(latestStatus) &&
+				!transcriptHasTerminalEvent(canonicalTranscript, inspector.run.id, latestStatus!);
+			if (
+				terminalInspectorNeedsSettlement ||
+				(inspector != null && !isTerminalRunStatus(latestStatus)) ||
+				transcriptHasUnsettledRun(canonicalTranscript)
+			) {
+				transcriptMode = 'canonical';
+				reconnection.start();
+			}
 		});
 	});
 
-	async function loadTranscript() {
+	onDestroy(() => {
+		destroyed = true;
+		abortController?.abort();
+		reconnection.stop();
+	});
+
+	function isCurrentSession(targetSessionKey: string): boolean {
+		return !destroyed && targetSessionKey === sessionKey;
+	}
+
+	async function fetchTranscript(
+		targetSessionKey: string,
+		signal?: AbortSignal
+	): Promise<TranscriptEventRow[]> {
+		const response = await fetch(
+			`/api/sessions/${encodeURIComponent(targetSessionKey)}/transcript`,
+			{ cache: 'no-store', signal }
+		);
+		if (!response.ok) throw new Error(`Transcript request failed (${response.status})`);
+		const body = (await response.json()) as { events: TranscriptEventRow[] };
+		return body.events;
+	}
+
+	function applyTranscript(rows: TranscriptEventRow[]) {
+		canonicalTranscript = rows;
+		currentUserMessage = findLastUserMessageText(rows);
+		canonicalEvents = mapTranscriptToStreamEvents(rows);
+		if (!running && liveEvents.length === 0) transcriptMode = 'canonical';
+	}
+
+	async function loadTranscript(targetSessionKey = sessionKey) {
 		try {
-			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/transcript`);
-			if (!response.ok) return;
-
-			const body = (await response.json()) as { events: TranscriptEventRow[] };
-
-			currentUserMessage = findLastUserMessageText(body.events);
-
-			// User messages stay in the event stream (mapped to `user.message`) so the
-			// transcript renders every turn in order, not just the latest one.
-			canonicalEvents = mapTranscriptToStreamEvents(body.events);
-			if (!running && liveEvents.length === 0) {
-				transcriptMode = 'canonical';
-			}
+			const rows = await fetchTranscript(targetSessionKey);
+			if (!isCurrentSession(targetSessionKey)) return;
+			applyTranscript(rows);
 		} catch {
 			// Non-fatal
 		}
 	}
 
 	async function handleSubmit(message: string, attachments?: SessionAttachmentInput[]) {
-		if (running) return;
+		if (runActive) return;
 
 		running = true;
 		errorMessage = null;
@@ -272,40 +343,101 @@
 		liveEvents = [...liveEvents, { id: id ?? liveEvents.length, kind, payload }];
 	}
 
-	async function loadLatestRunInspector() {
+	async function fetchLatestRunInspector(
+		targetSessionKey: string,
+		signal?: AbortSignal
+	): Promise<{ projection: RunInspectorProjection | null; runCount: number }> {
+		const runsResponse = await fetch(`/api/sessions/${encodeURIComponent(targetSessionKey)}/runs`, {
+			cache: 'no-store',
+			signal
+		});
+		if (!runsResponse.ok) throw new Error(`Runs request failed (${runsResponse.status})`);
+		const runsBody = (await runsResponse.json()) as {
+			runs: Array<{ id: string; createdAt: string }>;
+		};
+		if (runsBody.runs.length === 0) return { projection: null, runCount: 0 };
+
+		const latestRunId = findLatestRunId(runsBody.runs);
+		if (latestRunId === null) return { projection: null, runCount: 0 };
+		const inspectorResponse = await fetch(
+			`/api/sessions/${encodeURIComponent(targetSessionKey)}/runs/${encodeURIComponent(latestRunId)}/inspector`,
+			{ cache: 'no-store', signal }
+		);
+		if (!inspectorResponse.ok) {
+			throw new Error(`Inspector request failed (${inspectorResponse.status})`);
+		}
+		return {
+			projection: (await inspectorResponse.json()) as RunInspectorProjection,
+			runCount: runsBody.runs.length
+		};
+	}
+
+	async function loadLatestRunInspector(targetSessionKey = sessionKey) {
 		try {
-			const runsResponse = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/runs`);
-			if (!runsResponse.ok) return;
-			const runsBody = (await runsResponse.json()) as {
-				runs: Array<{ id: string; createdAt: string }>;
-			};
-			runCount = runsBody.runs.length;
-			if (runsBody.runs.length === 0) return;
-
-			const sorted = [...runsBody.runs].sort(
-				(a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-			);
-			const latestRunId = sorted[0].id;
-
-			const inspectorResponse = await fetch(
-				`/api/sessions/${encodeURIComponent(sessionKey)}/runs/${encodeURIComponent(latestRunId)}/inspector`
-			);
-			if (!inspectorResponse.ok) return;
-			inspector = (await inspectorResponse.json()) as RunInspectorProjection;
+			const latest = await fetchLatestRunInspector(targetSessionKey);
+			if (!isCurrentSession(targetSessionKey)) return null;
+			runCount = latest.runCount;
+			inspector = latest.projection;
+			return latest.projection;
 		} catch {
 			// Non-fatal
+			return null;
 		}
 	}
 
-	async function loadPendingApproval() {
+	async function fetchPendingApproval(
+		targetSessionKey: string,
+		signal?: AbortSignal
+	): Promise<PendingApprovalEntry | null> {
+		const response = await fetch(
+			`/api/sessions/${encodeURIComponent(targetSessionKey)}/approvals`,
+			{
+				cache: 'no-store',
+				signal
+			}
+		);
+		if (!response.ok) throw new Error(`Approvals request failed (${response.status})`);
+		const body = (await response.json()) as { approvals: PendingApprovalEntry[] };
+		return body.approvals.find((approval) => approval.status === 'pending') ?? null;
+	}
+
+	async function loadPendingApproval(targetSessionKey = sessionKey) {
 		try {
-			const response = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}/approvals`);
-			if (!response.ok) return;
-			const body = (await response.json()) as { approvals: PendingApprovalEntry[] };
-			pendingApproval = body.approvals.find((a) => a.status === 'pending') ?? null;
+			const latestApproval = await fetchPendingApproval(targetSessionKey);
+			if (!isCurrentSession(targetSessionKey)) return;
+			pendingApproval = latestApproval;
 		} catch {
 			// Non-fatal — page works normally without pending approval
 		}
+	}
+
+	async function readReconnectionSnapshot(
+		signal: AbortSignal
+	): Promise<SessionReconnectionSnapshot> {
+		const targetSessionKey = sessionKey;
+		const pendingApprovalRequest = fetchPendingApproval(targetSessionKey, signal).catch((error) => {
+			if (signal.aborted) throw error;
+			return null;
+		});
+		const [transcript, latestRun, latestApproval] = await Promise.all([
+			fetchTranscript(targetSessionKey, signal),
+			fetchLatestRunInspector(targetSessionKey, signal),
+			pendingApprovalRequest
+		]);
+		return {
+			transcript,
+			inspector: latestRun.projection,
+			runCount: latestRun.runCount,
+			pendingApproval: latestApproval
+		};
+	}
+
+	function applyReconnectionSnapshot(snapshot: SessionReconnectionSnapshot): void {
+		applyTranscript(snapshot.transcript);
+		inspector = snapshot.inspector;
+		runCount = snapshot.runCount;
+		pendingApproval = snapshot.pendingApproval;
+		transcriptMode = 'canonical';
 	}
 
 	async function resolveSessionApproval(
@@ -354,16 +486,16 @@
 	const runStepCount = $derived(inspector?.toolInvocations?.length ?? 0);
 
 	const sessionStatus = $derived(
-		running
-			? 'running'
-			: pendingApproval !== null
-				? 'waiting_approval'
+		pendingApproval !== null
+			? 'waiting_approval'
+			: runActive
+				? 'running'
 				: (inspector?.run.status ?? 'idle')
 	);
 
 	const stripDot = $derived.by((): StatusDotStatus => {
-		if (running) return 'accent';
 		if (pendingApproval !== null) return 'warning';
+		if (runActive) return 'accent';
 		if (sessionStatus === 'failed') return 'danger';
 		if (sessionStatus === 'complete' || sessionStatus === 'recovered') return 'success';
 		return 'neutral';
@@ -496,7 +628,7 @@
 				{#if streamGapNotice}
 					<div class="stream-gap-notice" role="status">{streamGapNotice}</div>
 				{/if}
-				{#if running}
+				{#if runActive && acceptsSteering && pendingApproval === null}
 					<div class="steer-strip" role="status">
 						<StatusDot connectionState="connected" label="Streaming" showLabel={false} size="sm" />
 						<span>Streaming — anything you type steers the run</span>
@@ -507,7 +639,8 @@
 						sessionId={sessionKey}
 						userMessage={null}
 						{events}
-						{running}
+						{runActive}
+						{acceptsSteering}
 						onSubmit={handleSubmit}
 						onRetry={currentUserMessage ? () => handleSubmit(currentUserMessage!) : null}
 						onSteer={handleSteer}
@@ -526,7 +659,7 @@
 					<RunPane
 						{sessionKey}
 						{inspector}
-						{running}
+						running={runActive}
 						hasPendingApproval={pendingApproval !== null}
 						cursor={scrubCursor}
 						onScrub={(cursor) => (scrubCursor = cursor)}
@@ -540,7 +673,7 @@
 			{sessionKey}
 			{currentUserMessage}
 			{inspector}
-			{running}
+			running={runActive}
 			{pendingApproval}
 			onResolveApproval={resolveSessionApproval}
 		/>

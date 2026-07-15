@@ -78,7 +78,8 @@
 		sessionId: string;
 		userMessage?: UserMessage | null;
 		events?: StreamEvent[];
-		running?: boolean;
+		runActive?: boolean;
+		acceptsSteering?: boolean;
 		onSubmit: (message: string, attachments?: SessionAttachmentInput[]) => void;
 		onRetry?: (() => void) | null;
 		onSteer?: (message: string) => void;
@@ -107,7 +108,8 @@
 		sessionId,
 		userMessage = null,
 		events = [],
-		running = false,
+		runActive = false,
+		acceptsSteering = false,
 		onSubmit,
 		onRetry = null,
 		onSteer,
@@ -137,7 +139,13 @@
 	function isPrefixExtension(previous: StreamEvent[], next: StreamEvent[]): boolean {
 		if (next.length < previous.length) return false;
 		for (let i = 0; i < previous.length; i++) {
-			if (previous[i].id !== next[i].id) return false;
+			if (
+				previous[i].id !== next[i].id ||
+				previous[i].kind !== next[i].kind ||
+				previous[i].sequence !== next[i].sequence
+			) {
+				return false;
+			}
 		}
 		return true;
 	}
@@ -186,8 +194,8 @@
 	);
 
 	const slashContext = $derived<SlashCommandContext>({
-		running,
-		hasRetry: !!onRetry,
+		running: runActive,
+		hasRetry: !!onRetry && !runActive,
 		hasPendingApproval: pendingApproval !== null,
 		onInterrupt: () => onInterrupt?.(),
 		onRetry: () => onRetry?.(),
@@ -330,12 +338,13 @@
 		const trimmed = text.trim();
 		if (!trimmed && event.attachments.length === 0) return;
 
-		if (running && onSteer) {
+		if (acceptsSteering && onSteer) {
 			// Steering an in-flight run has no attachment path — the sandbox tool
 			// call that would consume a file is already mid-run.
 			if (trimmed) onSteer(trimmed);
 			return;
 		}
+		if (runActive) return;
 
 		const attachments =
 			event.attachments.length > 0
@@ -345,6 +354,7 @@
 	}
 
 	function handleRetry() {
+		if (runActive) return;
 		onRetry?.();
 	}
 
@@ -353,6 +363,7 @@
 	}
 
 	function handleEdit(event: { messageId: string; content: string }) {
+		if (runActive) return;
 		onEdit?.(event.content);
 	}
 
@@ -396,7 +407,7 @@
 					{#if status === 'failed' && reason}
 						<span class="lifecycle-reason">{reason}</span>
 					{/if}
-					{#if status === 'failed' && onRetry}
+					{#if status === 'failed' && onRetry && !runActive}
 						<button class="lifecycle-retry" onclick={() => onRetry?.()}>Retry</button>
 					{/if}
 				</div>
@@ -567,7 +578,7 @@
 		bind:this={chatRef}
 		id="session-{sessionId}"
 		{conversation}
-		streaming={running}
+		streaming={runActive && !acceptsSteering && pendingApproval === null}
 		streamingStatus="Thinking…"
 		variant="flat"
 		density="comfortable"
@@ -576,8 +587,8 @@
 			attachments: true,
 			search: false,
 			copy: true,
-			editing: !!onEdit,
-			retry: !!onRetry
+			editing: !!onEdit && !runActive,
+			retry: !!onRetry && !runActive
 		}}
 		onsubmit={handleSubmit}
 		onretry={handleRetry}

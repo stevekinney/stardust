@@ -61,6 +61,7 @@ export type UserMessage = {
 /** A raw row as returned by `GET /api/sessions/{sessionKey}/transcript`. */
 export type TranscriptEventRow = {
 	id: string;
+	runId: string;
 	kind: string;
 	payload: string;
 	sequence: number;

@@ -703,7 +703,13 @@ describe('mapTranscriptToStreamEvents — refresh rehydration', () => {
 		kind: string,
 		payload: Record<string, unknown>
 	): TranscriptEventRow {
-		return { id: `evt-${sequence}`, kind, payload: JSON.stringify(payload), sequence };
+		return {
+			id: `evt-${sequence}`,
+			runId: 'run-refresh',
+			kind,
+			payload: JSON.stringify(payload),
+			sequence
+		};
 	}
 
 	it('recovers an in-flight tool call as pending, not failed or lost, after a refresh', () => {

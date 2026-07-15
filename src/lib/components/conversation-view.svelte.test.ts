@@ -35,6 +35,18 @@ const defaultProps = {
 	onSubmit: vi.fn()
 };
 
+function submitComposerMessage(message: string): void {
+	const composer = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]');
+	expect(composer).toBeInstanceOf(HTMLTextAreaElement);
+	composer!.value = message;
+	composer!.dispatchEvent(new Event('input', { bubbles: true }));
+	flushSync();
+	composer!.dispatchEvent(
+		new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+	);
+	flushSync();
+}
+
 describe('ConversationView', () => {
 	afterEach(() => {
 		document.body.innerHTML = '';
@@ -60,6 +72,105 @@ describe('ConversationView', () => {
 
 		const chatContainer = document.querySelector('[id^="session-test-session"]');
 		expect(chatContainer).toBeInstanceOf(HTMLElement);
+
+		unmount(component);
+	});
+
+	it('routes composer input to steering for a reconnected active run', async () => {
+		const onSubmit = vi.fn();
+		const onSteer = vi.fn();
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: {
+				sessionId: 'reconnected-session',
+				events: [],
+				runActive: true,
+				acceptsSteering: true,
+				onSubmit,
+				onSteer
+			}
+		});
+
+		submitComposerMessage('change direction');
+		await vi.waitFor(() => expect(onSteer).toHaveBeenCalledWith('change direction'));
+		expect(onSubmit).not.toHaveBeenCalled();
+
+		unmount(component);
+	});
+
+	it('does not steer or submit a new turn while an active run is settling', async () => {
+		const onSubmit = vi.fn();
+		const onSteer = vi.fn();
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: {
+				sessionId: 'settling-session',
+				events: [],
+				runActive: true,
+				acceptsSteering: false,
+				onSubmit,
+				onSteer
+			}
+		});
+
+		submitComposerMessage('next turn');
+		await Promise.resolve();
+		expect(onSubmit).not.toHaveBeenCalled();
+		expect(onSteer).not.toHaveBeenCalled();
+
+		unmount(component);
+	});
+
+	it('does not announce thinking while a reconnected run waits for approval', () => {
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: {
+				...defaultProps,
+				events: [],
+				runActive: true,
+				acceptsSteering: false,
+				pendingApproval: {
+					approvalId: 'approval-waiting',
+					sessionId: 'test-session',
+					toolCall: { id: 'call-1', name: 'workspace.writeFile', arguments: {} },
+					status: 'pending',
+					createdAt: '2026-07-15T12:00:00.000Z',
+					expiresAt: '2099-07-15T13:00:00.000Z'
+				}
+			}
+		});
+
+		expect(document.body.textContent).not.toContain('Thinking…');
+
+		unmount(component);
+	});
+
+	it('routes composer input to steering while a reconnected run waits for approval', async () => {
+		const onSubmit = vi.fn();
+		const onSteer = vi.fn();
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: {
+				sessionId: 'approval-session',
+				events: [],
+				runActive: true,
+				acceptsSteering: true,
+				onSubmit,
+				onSteer,
+				pendingApproval: {
+					approvalId: 'approval-steer',
+					sessionId: 'approval-session',
+					toolCall: { id: 'call-1', name: 'workspace.writeFile', arguments: {} },
+					status: 'pending',
+					createdAt: '2026-07-15T12:00:00.000Z',
+					expiresAt: '2099-07-15T13:00:00.000Z'
+				}
+			}
+		});
+
+		submitComposerMessage('change the file name');
+		await vi.waitFor(() => expect(onSteer).toHaveBeenCalledWith('change the file name'));
+		expect(onSubmit).not.toHaveBeenCalled();
 
 		unmount(component);
 	});
@@ -104,6 +215,37 @@ describe('ConversationView', () => {
 		} finally {
 			warnSpy.mockRestore();
 		}
+	});
+
+	it('rebuilds the fold when canonical polling replaces an event at the same position', () => {
+		const props = $state({
+			...defaultProps,
+			events: [
+				{ ...makeEvent(0, 'lifecycle', { status: 'started' }), sequence: 1 },
+				{
+					...makeEvent(1, 'approval.request', {
+						approvalId: 'approval-1',
+						toolCall: { id: 'call-1', name: 'workspace.writeFile', arguments: {} }
+					}),
+					sequence: 2
+				}
+			]
+		});
+		const component = mount(ConversationView, { target: document.body, props });
+		flushSync();
+
+		props.events = [
+			{ ...makeEvent(0, 'lifecycle', { status: 'started' }), sequence: 1 },
+			{ ...makeEvent(1, 'assistant.message', { text: 'Finished' }), sequence: 2 },
+			{ ...makeEvent(2, 'lifecycle', { status: 'complete' }), sequence: 3 }
+		];
+		flushSync();
+
+		expect(document.body.textContent).toContain('Finished');
+		expect(document.body.textContent).not.toContain('workspace.writeFile');
+		expect(document.querySelector('[aria-label="Run complete"]')).toBeInstanceOf(HTMLElement);
+
+		unmount(component);
 	});
 
 	it('renders lifecycle complete marker', () => {
@@ -214,6 +356,25 @@ describe('ConversationView', () => {
 		});
 
 		expect(document.querySelector('.lifecycle-retry')).toBeNull();
+
+		unmount(component);
+	});
+
+	it('does not expose retry or edit actions while a reconnected run is active', () => {
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: {
+				...defaultProps,
+				events: [makeEvent(1, 'lifecycle', { status: 'failed' })],
+				userMessage: { text: 'Original prompt' },
+				runActive: true,
+				onRetry: vi.fn(),
+				onEdit: vi.fn()
+			}
+		});
+
+		expect(document.querySelector('.lifecycle-retry')).toBeNull();
+		expect(document.querySelector('.chat-message-edit-button')).toBeNull();
 
 		unmount(component);
 	});

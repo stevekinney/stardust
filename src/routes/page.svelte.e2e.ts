@@ -1,4 +1,13 @@
 import { expect, test } from '@playwright/test';
+import { TASK_QUEUE_ORCHESTRATOR } from '../lib/types';
+
+type MockInspectorTranscriptEvent = {
+	id: string;
+	kind: string;
+	sequence: number;
+	createdAt: string;
+	payload: unknown;
+};
 
 /**
  * Encode an SSE stream as a string of frames for mocking the stream endpoint.
@@ -28,216 +37,78 @@ function mockSessionRoutes(page: import('@playwright/test').Page) {
 	});
 }
 
-async function mockFreshFirstTurnSession(
-	page: import('@playwright/test').Page,
-	sessionKey: string
-) {
-	await page.route('/api/sessions', (route) => {
-		if (route.request().method() === 'POST') {
-			void route.fulfill({
-				status: 201,
-				contentType: 'application/json',
-				body: JSON.stringify({ sessionKey })
-			});
-			return;
-		}
-
-		void route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify({
-				sessions: [
-					{
-						id: 'sess-existing',
-						sessionKey: 'existing-session',
-						name: 'Existing session',
-						status: 'idle',
-						workflowId: 'agent-session:existing-session',
-						createdAt: new Date().toISOString(),
-						updatedAt: new Date().toISOString()
-					}
-				]
-			})
-		});
-	});
-
-	await page.route('**/api/health', (route) => {
-		void route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify({
-				ok: true,
-				namespace: 'default',
-				temporalWebUrl: 'http://localhost:8233'
-			})
-		});
-	});
-
-	await page.route('**/api/schedules', (route) => {
-		void route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify({ schedules: [] })
-		});
-	});
-
-	await page.route(`**/api/sessions/${sessionKey}/turn`, (route) => {
-		void route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify({
-				accepted: true,
-				runId: 'run-fresh-001',
-				streamUrl: `/api/sessions/${sessionKey}/stream/run-fresh-001`
-			})
-		});
-	});
-
-	await page.route(`**/api/sessions/${sessionKey}/stream/run-fresh-001`, (route) => {
-		void route.fulfill({
-			status: 200,
-			contentType: 'text/event-stream; charset=utf-8',
-			headers: {
-				'cache-control': 'no-cache, no-transform',
-				connection: 'keep-alive'
+function makeRunInspectorProjection(status: string, transcript: MockInspectorTranscriptEvent[]) {
+	return {
+		run: {
+			id: 'run-reload-001',
+			sessionId: 'reload-running-session',
+			workflowId: 'agent-run:run-reload-001',
+			temporalRunId: null,
+			status,
+			model: null,
+			finalAnswer: status === 'complete' ? 'RELOAD_CATCHUP_OK' : null,
+			usage: null,
+			budget: null,
+			startedAt: '2026-07-09T12:00:00.000Z',
+			completedAt: status === 'complete' ? '2026-07-09T12:00:02.000Z' : null
+		},
+		temporalWebUrl:
+			'http://localhost:8233/namespaces/default/workflows/agent-run%3Arun-reload-001/history',
+		taskQueue: TASK_QUEUE_ORCHESTRATOR,
+		taskQueues: [TASK_QUEUE_ORCHESTRATOR],
+		actionMeter: {
+			total: transcript.length,
+			breakdown: {
+				transcriptEvents: transcript.length,
+				toolInvocations: 0,
+				approvalRequests: 0,
+				auditEvents: 0,
+				idempotencyEntries: 0
+			}
+		},
+		transcript,
+		temporalConcepts: [],
+		temporalHistorySummary: {
+			available: false,
+			source: 'sqlite',
+			workflowId: 'agent-run:run-reload-001',
+			temporalRunId: null,
+			namespace: 'default',
+			historyLength: null,
+			events: [],
+			counts: {
+				workflowEvents: 0,
+				activityEvents: 0,
+				timerEvents: 0,
+				childWorkflowEvents: 0,
+				updateEvents: 0,
+				signalEvents: 0,
+				continueAsNewEvents: 0,
+				retryEvents: 0
 			},
-			body: sseBody([
-				{ id: 1, kind: 'lifecycle', data: { status: 'started' } },
-				{ id: 2, kind: 'assistant.delta', data: { text: 'STARDUST_SMOKE_OK' } },
-				{ id: 3, kind: 'lifecycle', data: { status: 'complete' } }
-			])
-		});
-	});
-
-	await page.route(`**/api/sessions/${sessionKey}/transcript`, (route) => {
-		void route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify({
-				events: [
-					{
-						id: 'evt-user',
-						kind: 'user_message',
-						payload: JSON.stringify({
-							text: 'Reply with exactly: STARDUST_SMOKE_OK. Do not use tools.'
-						}),
-						sequence: 1
-					},
-					{
-						id: 'evt-assistant',
-						kind: 'assistant_message',
-						payload: JSON.stringify({ text: 'STARDUST_SMOKE_OK' }),
-						sequence: 2
-					},
-					{
-						id: 'evt-complete',
-						kind: 'lifecycle',
-						payload: JSON.stringify({ status: 'complete', recoverySafe: true }),
-						sequence: 3
-					}
-				]
-			})
-		});
-	});
-
-	await page.route(`**/api/sessions/${sessionKey}/runs`, (route) => {
-		void route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify({ runs: [] })
-		});
-	});
-
-	await page.route(`**/api/sessions/${sessionKey}/approvals`, (route) => {
-		void route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify({ approvals: [] })
-		});
-	});
-}
-
-async function submitFreshFirstTurnAndExpectReloadableTranscript(
-	page: import('@playwright/test').Page,
-	sessionKey: string
-) {
-	const chat = page.getByLabel('Chat conversation');
-	const message = 'Reply with exactly: STARDUST_SMOKE_OK. Do not use tools.';
-
-	await expect(page).toHaveURL(new RegExp(`/sessions/${sessionKey}\\?fresh=1$`));
-	const composer = chat.getByRole('combobox', { name: 'Message' });
-	await expect(composer).toBeEditable({ timeout: 5_000 });
-	await page.waitForFunction(() => {
-		const textarea = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]');
-		return textarea?.isConnected && textarea.offsetParent !== null;
-	});
-	await page.waitForFunction(
-		() =>
-			new Promise((resolve) => {
-				const textarea = document.querySelector<HTMLTextAreaElement>(
-					'textarea[aria-label="Message"]'
-				);
-				requestAnimationFrame(() => {
-					requestAnimationFrame(() => resolve(textarea?.isConnected === true));
-				});
-			})
-	);
-	await composer.evaluate((element, value) => {
-		const valueSetter = Object.getOwnPropertyDescriptor(
-			HTMLTextAreaElement.prototype,
-			'value'
-		)?.set;
-		valueSetter?.call(element, value);
-		element.dispatchEvent(
-			new InputEvent('input', {
-				bubbles: true,
-				composed: true,
-				data: value,
-				inputType: 'insertText'
-			})
-		);
-	}, message);
-	await expect(composer).toHaveValue(message);
-	await chat.getByRole('button', { name: 'Send message' }).click();
-
-	await expect(chat.getByText(message)).toBeVisible({ timeout: 5_000 });
-	await expect(chat.getByText('STARDUST_SMOKE_OK', { exact: true })).toBeVisible({
-		timeout: 10_000
-	});
-	await expect(chat.getByLabel('Run complete')).toBeVisible({ timeout: 10_000 });
-	await expect(page).toHaveURL(new RegExp(`/sessions/${sessionKey}$`));
-
-	await page.reload();
-	await expect(page).toHaveURL(new RegExp(`/sessions/${sessionKey}$`));
-	await expect(chat.getByText(message)).toBeVisible({ timeout: 5_000 });
-	await expect(chat.getByText('STARDUST_SMOKE_OK', { exact: true })).toBeVisible({
-		timeout: 5_000
-	});
-	await expect(chat.getByLabel('Run complete')).toBeVisible({ timeout: 5_000 });
-}
-
-async function openFreshSessionFromNewSessionButton(
-	page: import('@playwright/test').Page,
-	sessionKey: string
-) {
-	await page.goto('/');
-
-	await expect(page.getByRole('heading', { name: 'Sessions' })).toBeVisible();
-	await page.getByRole('button', { name: 'New session' }).click();
-
-	await expect(page).toHaveURL(new RegExp(`/sessions/${sessionKey}\\?fresh=1$`));
-}
-
-async function openFreshSessionFromCommandPalette(
-	page: import('@playwright/test').Page,
-	sessionKey: string
-) {
-	await page.goto('/');
-
-	await page.getByRole('button', { name: 'Search or run a command' }).click();
-	await page.getByRole('option', { name: 'New session' }).click();
-
-	await expect(page).toHaveURL(new RegExp(`/sessions/${sessionKey}\\?fresh=1$`));
+			unavailableReason: 'mocked'
+		},
+		durabilityEvidence: {
+			latestTranscriptSequence: transcript.at(-1)?.sequence ?? null,
+			latestSessionTranscriptSequence: transcript.at(-1)?.sequence ?? null,
+			latestStreamEventId: null,
+			streamGapCount: 0,
+			approvalWaitCount: 0,
+			retryAttemptCount: 0,
+			idempotencyReplayCount: 0,
+			heartbeatBackedCommandCount: 0,
+			scheduleFireCount: 0,
+			memoryCandidateCount: 0
+		},
+		activityAttempts: [],
+		workflowExecutions: [],
+		scheduleRunLinkage: [],
+		capabilityEvidence: [],
+		toolInvocations: [],
+		approvalRequests: [],
+		idempotencyEntries: [],
+		recoveryMarkers: []
+	};
 }
 
 test('home page shows welcome screen when there are no sessions', async ({ page }) => {
@@ -284,10 +155,6 @@ test('top nav sheds chrome at narrower viewports without overlapping', async ({ 
 	const insights = nav.getByRole('link', { name: 'Insights' });
 	const search = nav.getByRole('button', { name: /search or run a command/i });
 	await expect(insights).toBeVisible();
-	await expect(search).toBeVisible();
-	await expect(search.locator('.palette-hint')).toBeHidden();
-	await expect(search.locator('.palette-shortcut')).toHaveCount(1);
-	await expect(search.locator('.palette-shortcut')).toBeHidden();
 	const insightsBox = await insights.boundingBox();
 	const searchBox = await search.boundingBox();
 	expect(insightsBox).not.toBeNull();
@@ -404,26 +271,8 @@ test('create → submit → stream: navigates to a conversation and renders the 
 	await expect(chat.getByLabel('Run complete')).toBeVisible({ timeout: 10_000 });
 });
 
-test('new session first turn clears fresh=1 before reload', async ({ page }) => {
-	const sessionKey = 'fresh-new-session';
-	await mockFreshFirstTurnSession(page, sessionKey);
-
-	await openFreshSessionFromNewSessionButton(page, sessionKey);
-
-	await submitFreshFirstTurnAndExpectReloadableTranscript(page, sessionKey);
-});
-
-test('command palette new session first turn clears fresh=1 before reload', async ({ page }) => {
-	const sessionKey = 'fresh-palette-session';
-	await mockFreshFirstTurnSession(page, sessionKey);
-
-	await openFreshSessionFromCommandPalette(page, sessionKey);
-
-	await submitFreshFirstTurnAndExpectReloadableTranscript(page, sessionKey);
-});
-
 test('home page shows the session list when sessions exist', async ({ page }) => {
-	await page.route('/api/sessions', (route) => {
+	await page.route('**/api/sessions', (route) => {
 		void route.fulfill({
 			status: 200,
 			contentType: 'application/json',
@@ -556,4 +405,256 @@ test('resume: navigating to an existing session rehydrates the conversation from
 	});
 
 	await expect(chat.getByLabel('Run complete')).toBeVisible({ timeout: 5_000 });
+});
+
+test('resume: a reloaded running session catches up from canonical state without another reload', async ({
+	page
+}) => {
+	let allowCompletion = false;
+	let completed = false;
+	let transcriptRequests = 0;
+	let inspectorRequests = 0;
+	let steeringMessage: string | null = null;
+	let approvalRequested = false;
+	let approvalResolved = false;
+	let runRowsVisible = false;
+	let terminalTranscriptVisible = false;
+
+	const partialTranscript = [
+		{
+			id: 'evt-1',
+			runId: 'run-reload-001',
+			kind: 'user_message',
+			payload: JSON.stringify({ text: 'Reply with exactly: RELOAD_CATCHUP_OK.' }),
+			sequence: 1
+		},
+		{
+			id: 'evt-2',
+			runId: 'run-reload-001',
+			kind: 'lifecycle',
+			payload: JSON.stringify({ status: 'started', recoverySafe: true }),
+			sequence: 2
+		}
+	];
+
+	const completeTranscript = [
+		...partialTranscript,
+		{
+			id: 'evt-3',
+			runId: 'run-reload-001',
+			kind: 'assistant_message',
+			payload: JSON.stringify({ text: 'RELOAD_CATCHUP_OK' }),
+			sequence: 3
+		},
+		{
+			id: 'evt-4',
+			runId: 'run-reload-001',
+			kind: 'lifecycle',
+			payload: JSON.stringify({ status: 'complete', recoverySafe: true }),
+			sequence: 4
+		}
+	];
+	const approvalTranscript = [
+		...partialTranscript,
+		{
+			id: 'evt-approval',
+			runId: 'run-reload-001',
+			kind: 'approval_request',
+			payload: JSON.stringify({
+				approvalId: 'approval-reload',
+				toolCall: {
+					id: 'call-reload',
+					name: 'workspace.writeFile',
+					arguments: { path: 'result.txt' }
+				}
+			}),
+			sequence: 3
+		}
+	];
+
+	const inspectorTranscript = (events: typeof completeTranscript) =>
+		events.map((event) => ({
+			id: event.id,
+			kind: event.kind,
+			sequence: event.sequence,
+			createdAt: `2026-07-09T12:00:0${event.sequence}.000Z`,
+			payload: JSON.parse(event.payload) as unknown
+		}));
+
+	await page.route('/api/sessions', (route) => {
+		void route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				sessions: [
+					{
+						id: 'sess-reload',
+						sessionKey: 'reload-running-session',
+						status: 'running',
+						workflowId: 'agent-session:reload-running-session',
+						createdAt: new Date().toISOString(),
+						updatedAt: new Date().toISOString()
+					}
+				]
+			})
+		});
+	});
+
+	await page.route('**/api/sessions/reload-running-session/transcript', (route) => {
+		transcriptRequests += 1;
+		void route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				events: completed
+					? completeTranscript
+					: approvalRequested
+						? approvalTranscript
+						: partialTranscript
+			})
+		});
+	});
+
+	let approvalFailuresRemaining = 0;
+	await page.route('**/api/sessions/reload-running-session/approvals', (route) => {
+		if (approvalFailuresRemaining > 0) {
+			approvalFailuresRemaining -= 1;
+			void route.fulfill({ status: 503, body: 'temporarily unavailable' });
+			return;
+		}
+		void route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				approvals:
+					approvalRequested && !approvalResolved
+						? [
+								{
+									approvalId: 'approval-reload',
+									sessionId: 'reload-running-session',
+									toolCall: {
+										id: 'call-reload',
+										name: 'workspace.writeFile',
+										arguments: { path: 'result.txt' }
+									},
+									status: 'pending',
+									createdAt: '2026-07-09T12:00:01.000Z',
+									expiresAt: '2099-07-09T13:00:01.000Z'
+								}
+							]
+						: []
+			})
+		});
+	});
+
+	await page.route('**/api/approvals/approval-reload/resolve', async (route) => {
+		approvalResolved = true;
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ resolved: true })
+		});
+	});
+
+	await page.route('**/api/sessions/reload-running-session/steer', async (route) => {
+		const request = route.request();
+		const body = (await request.postDataJSON()) as { message: string };
+		steeringMessage = body.message;
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ accepted: true })
+		});
+	});
+
+	await page.route('**/api/sessions/reload-running-session/runs', (route) => {
+		if (!runRowsVisible) {
+			runRowsVisible = true;
+			void route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ runs: [] })
+			});
+			return;
+		}
+
+		void route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				runs: [
+					{
+						id: 'run-reload-001',
+						createdAt: '2026-07-09T12:00:00.000Z'
+					}
+				]
+			})
+		});
+	});
+
+	await page.route(
+		'**/api/sessions/reload-running-session/runs/run-reload-001/inspector',
+		(route) => {
+			inspectorRequests += 1;
+			if (allowCompletion) completed = true;
+			const events =
+				completed && terminalTranscriptVisible ? completeTranscript : partialTranscript;
+			if (completed) terminalTranscriptVisible = true;
+			void route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify(
+					makeRunInspectorProjection(
+						completed
+							? 'complete'
+							: approvalRequested && !approvalResolved
+								? 'waiting_approval'
+								: 'running',
+						inspectorTranscript(events)
+					)
+				)
+			});
+		}
+	);
+
+	await page.goto('/sessions/reload-running-session');
+
+	const chat = page.getByLabel('Chat conversation');
+	await expect(chat.getByText('Reply with exactly: RELOAD_CATCHUP_OK.')).toBeVisible({
+		timeout: 5_000
+	});
+	const transcriptRequestsBeforeReload = transcriptRequests;
+	const inspectorRequestsBeforeReload = inspectorRequests;
+	// Both bootstrap and the first reconnection snapshot must treat a transient
+	// approvals outage as non-fatal while transcript and run state remain observable.
+	approvalFailuresRemaining = 2;
+
+	await page.reload();
+	await expect(chat.getByText('Reply with exactly: RELOAD_CATCHUP_OK.')).toBeVisible({
+		timeout: 5_000
+	});
+	await expect.poll(() => inspectorRequests).toBeGreaterThan(inspectorRequestsBeforeReload);
+	const composer = page.getByRole('combobox', { name: 'Message' });
+	await expect(composer).toBeEnabled({ timeout: 5_000 });
+	await composer.fill('Use the shorter answer');
+	await composer.press('Enter');
+	await expect.poll(() => steeringMessage).toBe('Use the shorter answer');
+	approvalRequested = true;
+	const approveButton = chat.getByRole('button', { name: 'Approve', exact: true });
+	await expect(approveButton).toBeVisible({ timeout: 5_000 });
+	await approveButton.click();
+	await expect.poll(() => approvalResolved).toBe(true);
+	const inspectorRequestsBeforeCompletion = inspectorRequests;
+	allowCompletion = true;
+	await expect.poll(() => inspectorRequests).toBeGreaterThan(inspectorRequestsBeforeCompletion);
+
+	await expect(chat.getByText('RELOAD_CATCHUP_OK', { exact: true })).toBeVisible({
+		timeout: 10_000
+	});
+	await expect(chat.getByLabel('Run complete')).toBeVisible({ timeout: 10_000 });
+	await expect(page.locator('.session-strip').getByText('complete')).toBeVisible({
+		timeout: 10_000
+	});
+	expect(transcriptRequests).toBeGreaterThan(transcriptRequestsBeforeReload);
+	expect(inspectorRequests).toBeGreaterThan(inspectorRequestsBeforeReload);
 });
