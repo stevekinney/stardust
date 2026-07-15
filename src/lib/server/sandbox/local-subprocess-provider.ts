@@ -1,9 +1,10 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { and, eq } from 'drizzle-orm';
+import { WORKSPACE_ROOT, resolveLocalPath } from '../config';
 import type { DatabaseClient } from '../db';
 import { sandboxCommands, sandboxes, sandboxSnapshots } from '../db';
 import {
@@ -69,9 +70,7 @@ export class LocalSubprocessSandboxProvider implements SandboxProvider {
 	private readonly trackedProcesses = new Map<string, TrackedProcess>();
 
 	constructor(options: LocalSubprocessSandboxProviderOptions = {}) {
-		this.workspaceRoot = resolve(
-			options.workspaceRoot ?? join(homedir(), '.stardust', 'workspaces')
-		);
+		this.workspaceRoot = resolveLocalPath(options.workspaceRoot ?? WORKSPACE_ROOT);
 		this.database = options.database;
 		this.commandTimeoutMs = options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
 		this.outputCaptureBytes = options.outputCaptureBytes ?? DEFAULT_OUTPUT_CAPTURE_BYTES;

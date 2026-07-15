@@ -72,6 +72,7 @@ Configuration is environment variables, read from `process.env`. Copy `.env.exam
 | `TEMPORAL_WEB_PORT`        | `8233`                         | Port for the Temporal Web UI.                                                                                      |
 | `DATABASE_URL`             | `file:~/.stardust/stardust.db` | SQLite database path. A leading `~` is expanded to your home directory.                                            |
 | `ARTIFACT_DIR`             | `~/.stardust/artifacts`        | Root directory for spilled tool-output artifacts.                                                                  |
+| `WORKSPACE_ROOT`           | `~/.stardust/workspaces`       | Root directory for local subprocess session workspaces.                                                            |
 | `ARTIFACT_TOKEN_SECRET`    | `stardust-local-dev-secret`    | HMAC secret for local artifact download tokens. Override before exposing the app.                                  |
 | `TOOL_RESULT_INLINE_LIMIT` | `8000`                         | Byte threshold above which tool output is spilled to an artifact.                                                  |
 | `SANDBOX_PROVIDER`         | `local-subprocess`             | Sandbox provider for tool execution. Only `local-subprocess` exists in the POC.                                    |

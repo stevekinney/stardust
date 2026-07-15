@@ -4,6 +4,7 @@
 	import ConfirmDialog from '@lostgradient/cinder/confirm-dialog';
 	import NumberInput from '@lostgradient/cinder/number-input';
 	import Select from '@lostgradient/cinder/select';
+	import type { PageProps } from './$types';
 
 	type Theme = 'system' | 'light' | 'dark';
 
@@ -30,6 +31,8 @@
 		{ value: 'light', label: 'Light' },
 		{ value: 'dark', label: 'Dark' }
 	];
+
+	let { data }: PageProps = $props();
 
 	function loadSettings() {
 		if (typeof window === 'undefined') {
@@ -175,22 +178,16 @@
 			<section class="section">
 				<div class="section-title">Local data</div>
 				<div class="section-desc">
-					Everything Stardust stores lives under <span class="mono">~/.stardust/</span>. Nothing is
-					sent anywhere but the model provider.
+					Stardust stores local data in the paths below. Nothing is sent anywhere but the model
+					provider.
 				</div>
 				<div class="paths">
-					<div class="path-row">
-						<span class="path-label">Database</span>
-						<span class="path-value">~/.stardust/stardust.db</span>
-					</div>
-					<div class="path-row">
-						<span class="path-label">Artifacts</span>
-						<span class="path-value">~/.stardust/artifacts</span>
-					</div>
-					<div class="path-row">
-						<span class="path-label">Workspaces</span>
-						<span class="path-value">~/.stardust/ws</span>
-					</div>
+					{#each data.localDataPaths as path (path.label)}
+						<div class="path-row">
+							<span class="path-label">{path.label}</span>
+							<span class="path-value">{path.value}</span>
+						</div>
+					{/each}
 				</div>
 				<div class="danger-zone">
 					<svg
@@ -290,10 +287,6 @@
 	.divider {
 		height: 1px;
 		background: var(--cinder-border);
-	}
-
-	.mono {
-		font-family: var(--cinder-font-mono);
 	}
 
 	.paths {
