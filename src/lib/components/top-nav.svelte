@@ -135,7 +135,7 @@
 					<path d="m21 21-4.3-4.3" />
 				</svg>
 				<span class="palette-hint">Search or run a command…</span>
-				<Kbd label="⌘K" size="sm" />
+				<Kbd class="palette-shortcut" label="⌘K" size="sm" />
 			</button>
 		{/if}
 		<HealthPopover {health} />
@@ -248,7 +248,7 @@
 		}
 
 		.palette-hint,
-		.palette-trigger :global(.cinder-kbd) {
+		.palette-trigger :global(.palette-shortcut) {
 			display: none;
 		}
 	}
