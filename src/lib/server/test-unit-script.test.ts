@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
 	createListCommand,
+	createMergeArguments,
 	createMergeCommand,
+	createProjectArguments,
 	createProjectCommand,
 	hasCoverageArgument,
+	hasReporterOutputArgument,
 	hasTestSelectionArgument,
 	normalizeArguments,
 	unitTestProjects
@@ -61,12 +64,15 @@ describe('unit test script commands', () => {
 	it('detects coverage requests', () => {
 		expect(hasCoverageArgument(['--coverage'])).toBe(true);
 		expect(hasCoverageArgument(['--coverage.enabled=true'])).toBe(true);
+		expect(hasCoverageArgument(['--coverage=false'])).toBe(false);
+		expect(hasCoverageArgument(['--coverage', '--coverage.enabled=false'])).toBe(false);
 		expect(hasCoverageArgument(['run-pane.svelte.test.ts'])).toBe(false);
 	});
 
 	it('distinguishes test selection arguments from run options', () => {
 		expect(hasTestSelectionArgument(['src/lib/server/test-unit-script.test.ts'])).toBe(true);
 		expect(hasTestSelectionArgument(['--testNamePattern=unit test script'])).toBe(true);
+		expect(hasTestSelectionArgument(['--changed=main'])).toBe(true);
 		expect(hasTestSelectionArgument(['--coverage'])).toBe(false);
 	});
 
@@ -92,12 +98,37 @@ describe('unit test script commands', () => {
 			'--reporter=blob',
 			'--outputFile=.vitest-reports-123/server.json'
 		]);
-		expect(createMergeCommand('.vitest-reports-123')).toEqual([
+		expect(createMergeCommand('.vitest-reports-123', ['--coverage'])).toEqual([
 			'bunx',
 			'vitest',
 			'run',
 			'--merge-reports=.vitest-reports-123',
 			'--coverage'
 		]);
+	});
+
+	it('applies file-backed reporters only to the aggregate merge', () => {
+		const argumentsToForward = ['--reporter=json', '--outputFile', 'results.json'];
+		expect(hasReporterOutputArgument(argumentsToForward)).toBe(true);
+		expect(createProjectArguments(argumentsToForward)).toEqual([]);
+		expect(createMergeArguments(argumentsToForward)).toEqual(argumentsToForward);
+		expect(createMergeCommand('.vitest-reports-123', argumentsToForward)).toEqual([
+			'bunx',
+			'vitest',
+			'run',
+			'--merge-reports=.vitest-reports-123',
+			...argumentsToForward
+		]);
+	});
+
+	it('forwards aggregate coverage options to the merge', () => {
+		const argumentsToForward = [
+			'--coverage',
+			'--coverage.reporter=json',
+			'--coverage.reportsDirectory=tmp/coverage',
+			'--coverage.thresholds.lines=90',
+			'run-pane.svelte.test.ts'
+		];
+		expect(createMergeArguments(argumentsToForward)).toEqual(argumentsToForward.slice(0, 4));
 	});
 });
