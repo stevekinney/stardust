@@ -47,7 +47,36 @@ function mockEndpoints(approvals: ApprovalEntry[], candidates: InboxMemoryCandid
 
 describe('InboxStore', () => {
 	afterEach(() => {
+		vi.useRealTimers();
 		vi.unstubAllGlobals();
+	});
+
+	it('does not fetch or start polling when constructed', () => {
+		vi.useFakeTimers();
+		const fetch = vi.fn();
+		vi.stubGlobal('fetch', fetch);
+
+		new InboxStore();
+
+		expect(fetch).not.toHaveBeenCalled();
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it('refreshes immediately while polling and stops after cleanup', async () => {
+		vi.useFakeTimers();
+		mockEndpoints([], []);
+		const store = new InboxStore();
+
+		const stopPolling = store.startPolling();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(fetch).toHaveBeenCalledTimes(2);
+
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(fetch).toHaveBeenCalledTimes(4);
+
+		stopPolling();
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(fetch).toHaveBeenCalledTimes(4);
 	});
 
 	it('counts pending approvals and candidates after a refresh', async () => {

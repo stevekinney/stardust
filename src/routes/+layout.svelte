@@ -40,6 +40,7 @@
 	import KeyboardShortcutsDialog from '$lib/components/keyboard-shortcuts-dialog.svelte';
 	import TopNav from '$lib/components/top-nav.svelte';
 	import favicon from '$lib/assets/favicon.svg';
+	import { inbox } from '$lib/inbox.svelte';
 	import type { HealthSnapshot } from '$lib/types';
 
 	const HEALTH_POLL_INTERVAL_MS = 30_000;
@@ -53,8 +54,12 @@
 	onMount(() => {
 		document.documentElement.setAttribute('data-theme', 'dark');
 		void loadHealth();
-		const interval = setInterval(() => void loadHealth(), HEALTH_POLL_INTERVAL_MS);
-		return () => clearInterval(interval);
+		const healthInterval = setInterval(() => void loadHealth(), HEALTH_POLL_INTERVAL_MS);
+		const stopInboxPolling = inbox.startPolling();
+		return () => {
+			clearInterval(healthInterval);
+			stopInboxPolling();
+		};
 	});
 
 	async function loadHealth() {

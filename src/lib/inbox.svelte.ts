@@ -4,21 +4,13 @@ const POLL_INTERVAL_MS = 10_000;
 
 /**
  * Shared reactive inbox state: pending approvals and unconfirmed memory
- * candidates across every session. Polls the same endpoints on the same 10s
- * cadence the old approvals page used. Consumed by the top-nav badge and the
- * inbox page.
+ * candidates across every session. Consumed by the top-nav badge and the inbox
+ * page. The root layout owns its polling lifecycle.
  */
 export class InboxStore {
 	approvals = $state.raw<ApprovalEntry[]>([]);
 	candidates = $state.raw<InboxMemoryCandidate[]>([]);
 	loaded = $state(false);
-
-	constructor() {
-		if (typeof window !== 'undefined') {
-			void this.refresh();
-			setInterval(() => void this.refresh(), POLL_INTERVAL_MS);
-		}
-	}
 
 	get pendingApprovals(): ApprovalEntry[] {
 		return this.approvals.filter((approval) => approval.status === 'pending');
@@ -34,6 +26,13 @@ export class InboxStore {
 		if (approvals !== null) this.approvals = approvals;
 		if (candidates !== null) this.candidates = candidates;
 		this.loaded = true;
+	}
+
+	/** Refresh immediately, then poll until the returned cleanup function runs. */
+	startPolling(): () => void {
+		void this.refresh();
+		const interval = setInterval(() => void this.refresh(), POLL_INTERVAL_MS);
+		return () => clearInterval(interval);
 	}
 }
 
