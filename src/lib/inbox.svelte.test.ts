@@ -47,7 +47,100 @@ function mockEndpoints(approvals: ApprovalEntry[], candidates: InboxMemoryCandid
 
 describe('InboxStore', () => {
 	afterEach(() => {
+		vi.useRealTimers();
 		vi.unstubAllGlobals();
+	});
+
+	it('does not fetch or start polling when constructed', () => {
+		vi.useFakeTimers();
+		const fetch = vi.fn();
+		vi.stubGlobal('fetch', fetch);
+
+		new InboxStore();
+
+		expect(fetch).not.toHaveBeenCalled();
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it('refreshes immediately while polling and stops after cleanup', async () => {
+		vi.useFakeTimers();
+		mockEndpoints([], []);
+		const store = new InboxStore();
+
+		const stopPolling = store.startPolling();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(fetch).toHaveBeenCalledTimes(2);
+
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(fetch).toHaveBeenCalledTimes(4);
+
+		stopPolling();
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(fetch).toHaveBeenCalledTimes(4);
+	});
+
+	it('waits for a slow refresh before scheduling the next poll', async () => {
+		vi.useFakeTimers();
+		let finishFirstRefresh: () => void = () => undefined;
+		const firstRefresh = new Promise<void>((resolve) => {
+			finishFirstRefresh = resolve;
+		});
+		const fetch = vi.fn(async (input: RequestInfo | URL) => {
+			if (fetch.mock.calls.length <= 2) await firstRefresh;
+			const url = String(input);
+			if (url.endsWith('/api/approvals')) {
+				return new Response(JSON.stringify({ approvals: [] }), { status: 200 });
+			}
+			return new Response(JSON.stringify({ notes: [], candidates: [] }), { status: 200 });
+		});
+		vi.stubGlobal('fetch', fetch);
+		const store = new InboxStore();
+
+		const stopPolling = store.startPolling();
+		expect(fetch).toHaveBeenCalledTimes(2);
+
+		await vi.advanceTimersByTimeAsync(30_000);
+		expect(fetch).toHaveBeenCalledTimes(2);
+
+		finishFirstRefresh();
+		await vi.advanceTimersByTimeAsync(0);
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(fetch).toHaveBeenCalledTimes(4);
+
+		stopPolling();
+		stopPolling();
+		await vi.advanceTimersByTimeAsync(20_000);
+		expect(fetch).toHaveBeenCalledTimes(4);
+	});
+
+	it('aborts an active refresh when polling stops', async () => {
+		vi.useFakeTimers();
+		const signals: AbortSignal[] = [];
+		vi.stubGlobal(
+			'fetch',
+			vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+				const signal = init?.signal;
+				if (!signal) return Promise.reject(new Error('Expected an abort signal'));
+				signals.push(signal);
+				return new Promise<Response>((_resolve, reject) => {
+					signal.addEventListener(
+						'abort',
+						() => reject(new DOMException('The operation was aborted', 'AbortError')),
+						{ once: true }
+					);
+				});
+			})
+		);
+		const store = new InboxStore();
+
+		const stopPolling = store.startPolling();
+		expect(signals).toHaveLength(2);
+		expect(signals.every((signal) => !signal.aborted)).toBe(true);
+
+		stopPolling();
+		expect(signals.every((signal) => signal.aborted)).toBe(true);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(vi.getTimerCount()).toBe(0);
 	});
 
 	it('counts pending approvals and candidates after a refresh', async () => {
