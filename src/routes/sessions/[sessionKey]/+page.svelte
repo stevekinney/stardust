@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { afterNavigate, goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { page as currentPage } from '$app/state';
+	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import Badge from '@lostgradient/cinder/badge';
 	import SegmentedControl from '@lostgradient/cinder/segmented-control';
 	import Segment from '@lostgradient/cinder/segment';
@@ -192,6 +194,21 @@
 			// Refresh the durable transcript so the next turn seeds from complete history
 			// and the Canonical view reflects this turn. Live mode is preserved.
 			await loadTranscript();
+			if (currentPage.url.searchParams.get('fresh') === '1') {
+				const searchParams = new SvelteURLSearchParams(currentPage.url.searchParams);
+				searchParams.delete('fresh');
+				const nextQueryString = searchParams.toString();
+				await goto(
+					resolve(
+						`/sessions/${encodeURIComponent(sessionKey)}${nextQueryString ? `?${nextQueryString}` : ''}`
+					),
+					{
+						replaceState: true,
+						noScroll: true,
+						keepFocus: true
+					}
+				);
+			}
 		} catch (caught) {
 			errorMessage = caught instanceof Error ? caught.message : 'Unknown error';
 		} finally {
