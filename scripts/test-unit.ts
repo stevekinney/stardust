@@ -247,6 +247,7 @@ export function runSerializedCommands(
 	execute: (command: readonly string[]) => unknown = runCommand
 ): void {
 	let firstProjectFailure: unknown;
+	let mergeFailure: unknown;
 
 	for (const command of projectCommands) {
 		try {
@@ -256,8 +257,21 @@ export function runSerializedCommands(
 		}
 	}
 
-	if (mergeCommand) execute(mergeCommand);
+	if (mergeCommand) {
+		try {
+			execute(mergeCommand);
+		} catch (error) {
+			mergeFailure = error;
+		}
+	}
+	if (firstProjectFailure && mergeFailure) {
+		throw new AggregateError(
+			[firstProjectFailure, mergeFailure],
+			'Unit tests and report merging both failed.'
+		);
+	}
 	if (firstProjectFailure) throw firstProjectFailure;
+	if (mergeFailure) throw mergeFailure;
 }
 
 if (import.meta.main) {

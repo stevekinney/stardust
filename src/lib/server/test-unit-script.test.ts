@@ -211,4 +211,21 @@ describe('unit test script commands', () => {
 		).toThrow(projectFailure);
 		expect(calls).toEqual([['client'], ['server'], ['workflows'], ['merge']]);
 	});
+
+	it('preserves project and merge failures when both phases fail', () => {
+		const projectFailure = new Error('project failed');
+		const mergeFailure = new Error('merge failed');
+		const execute = (command: readonly string[]) => {
+			if (command[0] === 'client') throw projectFailure;
+			if (command[0] === 'merge') throw mergeFailure;
+		};
+
+		try {
+			runSerializedCommands([['client'], ['server']], ['merge'], execute);
+			expect.unreachable('Expected serialized commands to fail.');
+		} catch (error) {
+			expect(error).toBeInstanceOf(AggregateError);
+			expect((error as AggregateError).errors).toEqual([projectFailure, mergeFailure]);
+		}
+	});
 });
