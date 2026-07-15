@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	createListCommand,
 	createProjectCommand,
+	normalizeArguments,
 	unitTestProjects
 } from '../../../scripts/test-unit';
 
@@ -37,6 +38,13 @@ describe('unit test script commands', () => {
 			'run',
 			'--project',
 			'client'
+		]);
+	});
+
+	it('removes the legacy run flag that the script supplies itself', () => {
+		expect(normalizeArguments(['--run', '--coverage', 'run-pane.svelte.test.ts'])).toEqual([
+			'--coverage',
+			'run-pane.svelte.test.ts'
 		]);
 	});
 });

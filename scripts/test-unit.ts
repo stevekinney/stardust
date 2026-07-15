@@ -2,6 +2,11 @@ import { spawnSync } from 'node:child_process';
 
 export const unitTestProjects = ['client', 'server', 'workflows'] as const;
 
+/** Remove flags that the isolated project runner supplies itself. */
+export function normalizeArguments(argumentsToForward: readonly string[]): string[] {
+	return argumentsToForward.filter((argument) => argument !== '--run');
+}
+
 /** Build the command that verifies a targeted invocation matches at least one test. */
 export function createListCommand(
 	project: (typeof unitTestProjects)[number],
@@ -41,7 +46,7 @@ function runCommand(command: readonly string[], captureOutput = false): string {
 }
 
 if (import.meta.main) {
-	const argumentsToForward = process.argv.slice(2);
+	const argumentsToForward = normalizeArguments(process.argv.slice(2));
 
 	if (argumentsToForward.length > 0) {
 		const hasMatchingTest = unitTestProjects.some(
