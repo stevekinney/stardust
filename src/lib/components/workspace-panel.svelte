@@ -390,10 +390,13 @@
 								<span class="subtle-text artifact-mime">{artifact.mimeType}</span>
 								<span class="subtle-text artifact-size">{formatSize(artifact.sizeBytes)}</span>
 								<!-- eslint-disable svelte/no-navigation-without-resolve -- tokenized download URL from the artifact store, not an app route -->
-								<a
+								<Button
 									href={artifact.downloadUrl}
 									download={artifactFilename(artifact.objectKey)}
-									class="download-link"
+									variant="ghost"
+									size="xs"
+									iconOnly
+									label="Download {artifactFilename(artifact.objectKey)}"
 									aria-label="Download {artifactFilename(artifact.objectKey)}"
 								>
 									<!-- eslint-enable svelte/no-navigation-without-resolve -->
@@ -411,7 +414,7 @@
 										<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
 										<path d="m7 10 5 5 5-5" />
 									</svg>
-								</a>
+								</Button>
 							</div>
 						{/each}
 					</div>
@@ -774,21 +777,6 @@
 		color: var(--cinder-text-subtle);
 		font-size: 10px;
 		white-space: nowrap;
-	}
-
-	.download-link {
-		background: none;
-		border: none;
-		cursor: pointer;
-		padding: 0;
-		color: var(--cinder-text-subtle);
-		display: flex;
-		align-items: center;
-		flex-shrink: 0;
-	}
-
-	.download-link:hover {
-		color: var(--cinder-text);
 	}
 
 	/* Shared utilities */

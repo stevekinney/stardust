@@ -147,10 +147,8 @@ describe('WorkspacePanel', () => {
 
 		expect(document.body.textContent).toContain('output.json');
 		expect(document.body.textContent).toContain('application/json');
-		expect(document.querySelector('a[aria-label="Download output.json"]')).toHaveAttribute(
-			'href',
-			sampleArtifact.downloadUrl
-		);
+		const downloadLink = document.querySelector('a[aria-label="Download output.json"]');
+		expect(downloadLink?.getAttribute('href')).toBe(sampleArtifact.downloadUrl);
 
 		unmount(component);
 	});
