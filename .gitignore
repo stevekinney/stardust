@@ -7,6 +7,9 @@ node_modules
 .wrangler
 /.svelte-kit
 /build
+/coverage
+/.vitest-reports-*
+/.vitest-reports/
 
 # OS
 .DS_Store

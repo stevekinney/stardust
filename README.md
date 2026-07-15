@@ -138,7 +138,7 @@ bun run format:check
 bun run lint
 bun run typecheck
 bun run test           # unit (Vitest) + end-to-end (Playwright)
-bun run test:unit      # unit only; add `-- --run` for a single pass
+bun run test:unit      # unit only; runs once by default
 bun run build
 ```
 

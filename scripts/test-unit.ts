@@ -1,0 +1,475 @@
+import { spawnSync } from 'node:child_process';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { basename, dirname, extname, join } from 'node:path';
+import { parseCLI } from 'vitest/node';
+
+export const unitTestProjects = ['client', 'server', 'workflows'] as const;
+
+/** Remove flags that the isolated project runner supplies itself. */
+export function normalizeArguments(argumentsToForward: readonly string[]): string[] {
+	const normalizedArguments: string[] = [];
+
+	for (let index = 0; index < argumentsToForward.length; index += 1) {
+		const argument = argumentsToForward[index];
+		if (argument === '--run') continue;
+		if (argument === '--bail') {
+			if (/^\d+$/.test(argumentsToForward[index + 1] ?? '')) index += 1;
+			continue;
+		}
+		if (argument?.startsWith('--bail=')) continue;
+		if (argument === '--project') {
+			index += 1;
+			continue;
+		}
+		if (argument?.startsWith('--project=')) continue;
+		if (argument === '--test-name-pattern') {
+			normalizedArguments.push('--testNamePattern');
+			continue;
+		}
+		if (argument?.startsWith('--test-name-pattern=')) {
+			normalizedArguments.push(argument.replace('--test-name-pattern=', '--testNamePattern='));
+			continue;
+		}
+		if (argument === '--output-file') {
+			normalizedArguments.push('--outputFile');
+			continue;
+		}
+		if (argument?.startsWith('--output-file.')) {
+			normalizedArguments.push(argument.replace('--output-file.', '--outputFile.'));
+			continue;
+		}
+		if (argument?.startsWith('--output-file=')) {
+			normalizedArguments.push(argument.replace('--output-file=', '--outputFile='));
+			continue;
+		}
+		if (argument) normalizedArguments.push(argument);
+	}
+
+	return normalizedArguments;
+}
+
+/** Return whether a caller requested Vitest coverage collection. */
+export function hasCoverageArgument(argumentsToForward: readonly string[]): boolean {
+	let coverageEnabled = false;
+
+	for (let index = 0; index < argumentsToForward.length; index += 1) {
+		const argument = argumentsToForward[index];
+		if (argument === '--coverage' || argument === '--coverage.enabled') coverageEnabled = true;
+		if (argument === '--coverage=true' || argument === '--coverage.enabled=true') {
+			coverageEnabled = true;
+		}
+		if (argument === '--coverage=false' || argument === '--coverage.enabled=false') {
+			coverageEnabled = false;
+		}
+		if (argument === '--coverage.enabled' && argumentsToForward[index + 1] === 'false') {
+			coverageEnabled = false;
+		}
+	}
+
+	return coverageEnabled;
+}
+
+/** Return whether caller arguments narrow which tests Vitest should execute. */
+export function hasTestSelectionArgument(argumentsToForward: readonly string[]): boolean {
+	const { filter, options } = parseCLI(['vitest', 'run', ...argumentsToForward]);
+	return (
+		filter.length > 0 ||
+		options.testNamePattern !== undefined ||
+		options.changed !== undefined ||
+		options.related !== undefined ||
+		options.shard !== undefined ||
+		options.dir !== undefined ||
+		options.include !== undefined ||
+		options.exclude !== undefined
+	);
+}
+
+/** Return the cross-project failure budget requested through Vitest's bail option. */
+export function getBailLimit(argumentsToForward: readonly string[]): number | undefined {
+	const { bail } = parseCLI(['vitest', 'run', ...argumentsToForward]).options as {
+		bail?: number | boolean;
+	};
+	if (bail === true) return 1;
+	return typeof bail === 'number' && bail > 0 ? bail : undefined;
+}
+
+/** Return whether an empty changed/related selection is a valid no-op. */
+export function allowsNoMatchedTests(argumentsToForward: readonly string[]): boolean {
+	const { options } = parseCLI(['vitest', 'run', ...argumentsToForward]);
+	return options.changed !== undefined || options.related !== undefined;
+}
+
+/** Reject modes that cannot advance through synchronous project processes. */
+export function assertSerializedModeSupported(argumentsToForward: readonly string[]): void {
+	const { watch } = parseCLI(['vitest', 'run', ...argumentsToForward]).options;
+	if (watch) throw new Error('Watch mode is not supported by the serialized unit-test runner.');
+}
+
+function isReporterArgument(argument: string): boolean {
+	return (
+		argument === '--reporter' ||
+		argument.startsWith('--reporter=') ||
+		argument === '--outputFile' ||
+		argument.startsWith('--outputFile=') ||
+		argument.startsWith('--outputFile.')
+	);
+}
+
+/** Return whether explicit reporter output must be aggregated across projects. */
+export function hasReporterArgument(argumentsToForward: readonly string[]): boolean {
+	return argumentsToForward.some((argument) => isReporterArgument(argument));
+}
+
+function getReporterArguments(argumentsToForward: readonly string[]): string[] {
+	const options = parseCLI(['vitest', 'run', ...argumentsToForward]).options as {
+		reporter?: string[];
+		reporters?: string[];
+	};
+	return options.reporter ?? options.reporters ?? [];
+}
+
+/** Return whether blob is one of the explicitly requested reporters. */
+export function hasBlobReporterArgument(argumentsToForward: readonly string[]): boolean {
+	return getReporterArguments(argumentsToForward).includes('blob');
+}
+
+/** Return whether blob is the only explicitly requested reporter. */
+export function hasOnlyBlobReporterArgument(argumentsToForward: readonly string[]): boolean {
+	const reporters = getReporterArguments(argumentsToForward);
+	return reporters?.length === 1 && reporters[0] === 'blob';
+}
+
+/** Return the caller-selected blob output file, if one was provided. */
+export function getBlobOutputFile(argumentsToForward: readonly string[]): string | undefined {
+	const { outputFile } = parseCLI(['vitest', 'run', ...argumentsToForward]).options as {
+		outputFile?: string | Record<string, string>;
+	};
+	return typeof outputFile === 'string' ? outputFile : outputFile?.blob;
+}
+
+/** Derive one collision-free blob filename for an isolated project. */
+export function createBlobOutputFile(
+	outputFile: string,
+	project: (typeof unitTestProjects)[number]
+): string {
+	const extension = extname(outputFile);
+	const filename = basename(outputFile, extension);
+	return join(dirname(outputFile), `${filename}-${project}${extension}`);
+}
+
+function preserveBlobReports(blobReportsDirectory: string, outputFile: string): void {
+	for (const project of unitTestProjects) {
+		const source = join(blobReportsDirectory, `${project}.json`);
+		if (!existsSync(source)) continue;
+		const destination = createBlobOutputFile(outputFile, project);
+		mkdirSync(dirname(destination), { recursive: true });
+		copyFileSync(source, destination);
+	}
+}
+
+function isBlobReporterArgument(argument: string, nextArgument?: string): boolean {
+	return argument === '--reporter=blob' || (argument === '--reporter' && nextArgument === 'blob');
+}
+
+function hasSeparateReporterValue(argument: string, nextArgument?: string): boolean {
+	return (
+		(argument === '--reporter' ||
+			(argument.startsWith('--outputFile') && !argument.includes('='))) &&
+		nextArgument !== undefined &&
+		!nextArgument.startsWith('-')
+	);
+}
+
+function isAggregateCoverageArgument(argument: string): boolean {
+	return (
+		argument === '--coverage.reporter' ||
+		argument === '--coverage.reportsDirectory' ||
+		argument.startsWith('--coverage.reporter=') ||
+		argument.startsWith('--coverage.reportsDirectory=') ||
+		argument.startsWith('--coverage.thresholds.')
+	);
+}
+
+/** Remove reporter arguments that must only be applied to the merged report. */
+export function createProjectArguments(argumentsToForward: readonly string[]): string[] {
+	const projectArguments: string[] = [];
+
+	for (let index = 0; index < argumentsToForward.length; index += 1) {
+		const argument = argumentsToForward[index];
+		if (!argument) continue;
+		if (hasSeparateReporterValue(argument, argumentsToForward[index + 1])) {
+			index += 1;
+			continue;
+		}
+		if (isReporterArgument(argument)) continue;
+		if (isAggregateCoverageArgument(argument)) {
+			if (!argument.includes('=') && argumentsToForward[index + 1]?.startsWith('-') === false) {
+				index += 1;
+			}
+			continue;
+		}
+		projectArguments.push(argument);
+	}
+
+	return projectArguments;
+}
+
+/** Keep coverage and reporter arguments for the one aggregate merge process. */
+export function createMergeArguments(argumentsToForward: readonly string[]): string[] {
+	const mergeArguments: string[] = [];
+
+	for (let index = 0; index < argumentsToForward.length; index += 1) {
+		const argument = argumentsToForward[index];
+		if (!argument) continue;
+		const nextArgument = argumentsToForward[index + 1];
+		if (isBlobReporterArgument(argument, nextArgument)) {
+			if (argument === '--reporter') index += 1;
+			continue;
+		}
+		const shouldMerge = argument.startsWith('--coverage') || isReporterArgument(argument);
+		if (!shouldMerge) continue;
+
+		mergeArguments.push(argument);
+		const hasSeparateValue =
+			(hasSeparateReporterValue(argument, nextArgument) ||
+				(argument.startsWith('--coverage.') && !argument.includes('='))) &&
+			nextArgument !== undefined &&
+			!nextArgument.startsWith('-');
+		if (hasSeparateValue) {
+			index += 1;
+			mergeArguments.push(argumentsToForward[index]!);
+		}
+	}
+
+	return mergeArguments;
+}
+
+/** Build the command that verifies a targeted invocation matches at least one test. */
+export function createListCommand(
+	project: (typeof unitTestProjects)[number],
+	argumentsToForward: readonly string[]
+): string[] {
+	return [
+		'bunx',
+		'vitest',
+		'list',
+		'--project',
+		project,
+		'--passWithNoTests',
+		...argumentsToForward
+	];
+}
+
+/** Build one isolated Vitest project command while preserving caller arguments. */
+export function createProjectCommand(
+	project: (typeof unitTestProjects)[number],
+	argumentsToForward: readonly string[],
+	blobReportsDirectory?: string
+): string[] {
+	const hasTestSelection = hasTestSelectionArgument(argumentsToForward);
+
+	return [
+		'bunx',
+		'vitest',
+		'run',
+		'--project',
+		project,
+		...(hasTestSelection ? ['--passWithNoTests'] : []),
+		...argumentsToForward,
+		...(blobReportsDirectory
+			? ['--reporter=blob', `--outputFile=${blobReportsDirectory}/${project}.json`]
+			: [])
+	];
+}
+
+/** Build the command that merges per-project blob reports and their coverage data. */
+export function createMergeCommand(
+	blobReportsDirectory: string,
+	argumentsToForward: readonly string[]
+): string[] {
+	return [
+		'bunx',
+		'vitest',
+		'run',
+		`--merge-reports=${blobReportsDirectory}`,
+		...createMergeArguments(argumentsToForward)
+	];
+}
+
+export function assertCommandSucceeded(status: number | null): void {
+	if (status !== 0) throw new Error(`Test command failed with status ${status ?? 1}.`);
+}
+
+function runCommand(command: readonly string[], captureOutput = false): string {
+	const [executable, ...argumentsToPass] = command;
+	if (!executable) throw new Error('A command executable is required.');
+
+	const result = spawnSync(executable, argumentsToPass, {
+		stdio: captureOutput ? ['inherit', 'pipe', 'inherit'] : 'inherit',
+		encoding: 'utf8'
+	});
+	if (result.error) throw result.error;
+	assertCommandSucceeded(result.status);
+
+	return result.stdout ?? '';
+}
+
+export function createBailCommand(
+	command: readonly string[],
+	remainingFailures: number,
+	resultsFile: string
+): string[] {
+	const hasBlobReporter = command.includes('--reporter=blob');
+	return [
+		...command,
+		`--bail=${remainingFailures}`,
+		...(hasBlobReporter ? [] : ['--reporter=default']),
+		'--reporter=json',
+		`--outputFile.json=${resultsFile}`
+	];
+}
+
+export function readFailedTestCount(resultsFile: string): number {
+	const results = JSON.parse(readFileSync(resultsFile, 'utf8')) as { numFailedTests?: unknown };
+	if (!Number.isInteger(results.numFailedTests) || (results.numFailedTests as number) < 0) {
+		throw new Error(`Invalid Vitest failure count in ${resultsFile}.`);
+	}
+	return results.numFailedTests as number;
+}
+
+export interface BailConfiguration {
+	limit: number;
+	prepareCommand: (
+		command: readonly string[],
+		remainingFailures: number,
+		projectIndex: number
+	) => readonly string[];
+	getFailedTestCount: (projectIndex: number) => number;
+}
+
+/** Run every isolated project, merge reports, then propagate the first project failure. */
+export function runSerializedCommands(
+	projectCommands: readonly (readonly string[])[],
+	mergeCommand: readonly string[] | undefined,
+	execute: (command: readonly string[]) => unknown = runCommand,
+	bail?: BailConfiguration
+): void {
+	let firstProjectFailure: unknown;
+	let bailFailure: unknown;
+	let mergeFailure: unknown;
+	let remainingFailures = bail?.limit;
+
+	for (const [projectIndex, command] of projectCommands.entries()) {
+		try {
+			execute(
+				bail && remainingFailures !== undefined
+					? bail.prepareCommand(command, remainingFailures, projectIndex)
+					: command
+			);
+		} catch (error) {
+			firstProjectFailure ??= error;
+		}
+
+		if (bail && remainingFailures !== undefined) {
+			try {
+				remainingFailures -= bail.getFailedTestCount(projectIndex);
+			} catch (error) {
+				bailFailure ??= error;
+				break;
+			}
+			if (remainingFailures <= 0) break;
+		}
+	}
+
+	if (mergeCommand) {
+		try {
+			execute(mergeCommand);
+		} catch (error) {
+			mergeFailure = error;
+		}
+	}
+	const failures = [firstProjectFailure, bailFailure, mergeFailure].filter(
+		(failure) => failure !== undefined
+	);
+	if (failures.length > 1) {
+		throw new AggregateError(failures, 'Multiple serialized unit-test phases failed.');
+	}
+	if (firstProjectFailure) throw firstProjectFailure;
+	if (bailFailure) throw bailFailure;
+	if (mergeFailure) throw mergeFailure;
+}
+
+if (import.meta.main) {
+	const rawArguments = process.argv.slice(2);
+	assertSerializedModeSupported(rawArguments);
+	const bailLimit = getBailLimit(rawArguments);
+	const argumentsToForward = normalizeArguments(rawArguments);
+	const shouldPreserveBlobReports = hasBlobReporterArgument(argumentsToForward);
+	const customBlobOutputFile = shouldPreserveBlobReports
+		? getBlobOutputFile(argumentsToForward)
+		: undefined;
+	const shouldMergeReports =
+		hasCoverageArgument(argumentsToForward) ||
+		(hasReporterArgument(argumentsToForward) && !hasOnlyBlobReporterArgument(argumentsToForward));
+	const blobReportsDirectory = shouldPreserveBlobReports
+		? customBlobOutputFile
+			? `.vitest-reports-${process.pid}`
+			: '.vitest-reports'
+		: shouldMergeReports
+			? `.vitest-reports-${process.pid}`
+			: undefined;
+	const projectArguments = blobReportsDirectory
+		? createProjectArguments(argumentsToForward)
+		: argumentsToForward;
+	const bailResultsDirectory = bailLimit ? `.vitest-bail-results-${process.pid}` : undefined;
+	if (shouldPreserveBlobReports) {
+		rmSync(blobReportsDirectory!, { recursive: true, force: true });
+	}
+
+	if (hasTestSelectionArgument(projectArguments)) {
+		const hasMatchingTest = unitTestProjects.some(
+			(project) => runCommand(createListCommand(project, projectArguments), true).length > 0
+		);
+		if (!hasMatchingTest && !allowsNoMatchedTests(projectArguments)) {
+			console.error('No unit tests matched the provided arguments.');
+			process.exit(1);
+		}
+	}
+
+	try {
+		runSerializedCommands(
+			unitTestProjects.map((project) =>
+				createProjectCommand(project, projectArguments, blobReportsDirectory)
+			),
+			shouldMergeReports && blobReportsDirectory
+				? createMergeCommand(blobReportsDirectory, argumentsToForward)
+				: undefined,
+			runCommand,
+			bailLimit && bailResultsDirectory
+				? {
+						limit: bailLimit,
+						prepareCommand: (command, remainingFailures, projectIndex) =>
+							createBailCommand(
+								command,
+								remainingFailures,
+								join(bailResultsDirectory, `${unitTestProjects[projectIndex]}.json`)
+							),
+						getFailedTestCount: (projectIndex) =>
+							readFailedTestCount(
+								join(bailResultsDirectory, `${unitTestProjects[projectIndex]}.json`)
+							)
+					}
+				: undefined
+		);
+	} finally {
+		if (blobReportsDirectory && customBlobOutputFile) {
+			preserveBlobReports(blobReportsDirectory, customBlobOutputFile);
+		}
+		if (blobReportsDirectory && (!shouldPreserveBlobReports || customBlobOutputFile)) {
+			rmSync(blobReportsDirectory, { recursive: true, force: true });
+		}
+		if (bailResultsDirectory) {
+			rmSync(bailResultsDirectory, { recursive: true, force: true });
+		}
+	}
+}
