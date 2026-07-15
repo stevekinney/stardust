@@ -7,6 +7,7 @@
 	import '@lostgradient/cinder/button/styles';
 	import '@lostgradient/cinder/chat/styles';
 	import '@lostgradient/cinder/command-item/styles';
+	import '@lostgradient/cinder/command-menu/styles';
 	import '@lostgradient/cinder/command-palette/styles';
 	import '@lostgradient/cinder/confirm-dialog/styles';
 	import '@lostgradient/cinder/drawer/styles';

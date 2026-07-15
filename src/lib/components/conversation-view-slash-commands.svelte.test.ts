@@ -29,11 +29,15 @@ function pressKey(key: string): KeyboardEvent {
 }
 
 function palette(): HTMLElement | null {
-	return document.querySelector('.slash-palette');
+	return document.querySelector('[role="listbox"][aria-label="Slash commands"]');
 }
 
 function options(): HTMLElement[] {
-	return Array.from(document.querySelectorAll('[role="option"]'));
+	return Array.from(palette()?.querySelectorAll<HTMLElement>('[role="option"]') ?? []);
+}
+
+function optionName(option: Element | null): string | null | undefined {
+	return option?.getAttribute('aria-label')?.split(':', 1)[0];
 }
 
 const defaultProps = {
@@ -86,7 +90,7 @@ describe('ConversationView slash commands', () => {
 		);
 
 		typeInComposer('/stop');
-		const names = options().map((el) => el.querySelector('.slash-name')?.textContent);
+		const names = options().map((option) => optionName(option));
 		expect(names).toEqual(['/stop']);
 
 		unmount(component);
@@ -106,32 +110,34 @@ describe('ConversationView slash commands', () => {
 		unmount(component);
 	});
 
-	it('supports keyboard-only navigation and selection (ArrowDown + Enter, no mouse)', async () => {
+	it('supports keyboard-only navigation and selection without submitting the composer', async () => {
 		vi.stubGlobal(
 			'fetch',
 			vi.fn(async () => new Response(JSON.stringify({ tools: [] }), { status: 200 }))
 		);
+		const onSubmit = vi.fn();
 		const component = mount(ConversationView, {
 			target: document.body,
-			props: { ...defaultProps, events: [] }
+			props: { ...defaultProps, events: [], onSubmit }
 		});
 
 		typeInComposer('/');
 		const firstActive = () => document.querySelector('[aria-selected="true"]');
-		expect(firstActive()?.querySelector('.slash-name')?.textContent).toBe('/help');
+		expect(optionName(firstActive())).toBe('/help');
 
 		pressKey('ArrowDown');
-		expect(firstActive()?.querySelector('.slash-name')?.textContent).toBe('/new');
+		expect(optionName(firstActive())).toBe('/new');
 
 		pressKey('ArrowDown');
-		expect(firstActive()?.querySelector('.slash-name')?.textContent).toBe('/tools');
+		expect(optionName(firstActive())).toBe('/tools');
 
 		pressKey('ArrowUp');
-		expect(firstActive()?.querySelector('.slash-name')?.textContent).toBe('/new');
+		expect(optionName(firstActive())).toBe('/new');
 
 		const enterEvent = pressKey('Enter');
 		expect(enterEvent.defaultPrevented).toBe(true);
 		await vi.waitFor(() => expect(palette()).toBeNull());
+		expect(onSubmit).not.toHaveBeenCalled();
 
 		unmount(component);
 	});
@@ -163,12 +169,12 @@ describe('ConversationView slash commands', () => {
 		const input = composer();
 		expect(input.getAttribute('role')).toBe('combobox');
 		expect(input.getAttribute('aria-expanded')).toBe('true');
-		expect(input.getAttribute('aria-controls')).toBe('session-diag-slash-listbox');
+		expect(input.getAttribute('aria-controls')).toBe('session-diag-slash');
 		const activeOption = document.querySelector('[aria-selected="true"]');
 		expect(activeOption?.id).toBeTruthy();
 		expect(input.getAttribute('aria-activedescendant')).toBe(activeOption?.id);
 
-		const listbox = document.querySelector('#session-diag-slash-listbox');
+		const listbox = document.querySelector('#session-diag-slash');
 		expect(listbox).toBeInstanceOf(HTMLElement);
 		expect(listbox?.getAttribute('role')).toBe('listbox');
 
@@ -193,7 +199,7 @@ describe('ConversationView slash commands', () => {
 		unmount(component);
 	});
 
-	it('shows an unavailable reason instead of running /stop when no run is active', async () => {
+	it('keeps unavailable commands visible but non-activatable', async () => {
 		const onInterrupt = vi.fn();
 		const component = mount(ConversationView, {
 			target: document.body,
@@ -201,9 +207,34 @@ describe('ConversationView slash commands', () => {
 		});
 
 		typeInComposer('/stop');
-		pressKey('Enter');
-		await vi.waitFor(() => expect(document.body.textContent).toContain('No run in progress'));
+		const unavailableOption = options()[0];
+		expect(unavailableOption?.getAttribute('aria-disabled')).toBe('true');
+		expect(unavailableOption?.textContent).toContain('No run in progress');
+
+		const enterEvent = pressKey('Enter');
+		expect(enterEvent.defaultPrevented).toBe(true);
 		expect(onInterrupt).not.toHaveBeenCalled();
+		expect(palette()).toBeInstanceOf(HTMLElement);
+		expect(composer().value).toBe('/stop');
+
+		unmount(component);
+	});
+
+	it('selects an available command with a pointer without moving focus from the composer', async () => {
+		const onRetry = vi.fn();
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: { ...defaultProps, events: [], onRetry }
+		});
+
+		typeInComposer('/retry');
+		const retryOption = options()[0];
+		expect(optionName(retryOption)).toBe('/retry');
+		retryOption?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+		retryOption?.click();
+
+		await vi.waitFor(() => expect(onRetry).toHaveBeenCalledOnce());
+		expect(document.activeElement).toBe(composer());
 
 		unmount(component);
 	});
