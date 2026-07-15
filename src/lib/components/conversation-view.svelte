@@ -55,6 +55,9 @@
 	import Chat from '@lostgradient/cinder/chat';
 	import type { ChatSubmitEvent, Message } from '@lostgradient/cinder/chat';
 	import ApprovalCard from '@lostgradient/cinder/approval-card';
+	import CommandItem from '@lostgradient/cinder/command-item';
+	import CommandMenu from '@lostgradient/cinder/command-menu';
+	import type { CommandMenuState } from '@lostgradient/cinder/command-menu';
 	import {
 		applyNewStreamEvents,
 		createConversationBuilder,
@@ -70,7 +73,6 @@
 		type SlashCommand,
 		type SlashCommandContext
 	} from '$lib/slash-commands';
-	import SlashCommandPalette from './slash-command-palette.svelte';
 
 	type Props = {
 		sessionId: string;
@@ -172,16 +174,15 @@
 	let chatRef = $state<ReturnType<typeof Chat> | undefined>();
 	let slashOpen = $state(false);
 	let slashQuery = $state('');
-	let slashActiveIndex = $state(0);
+	let slashAnchor = $state<HTMLTextAreaElement | null>(null);
+	let slashCaretIndex = $state(0);
+	let slashActiveItemId = $state<string | null>(null);
 	let slashInfo = $state<{ title: string; lines: string[] } | null>(null);
 	let lastApprovalAnnouncement = '';
 
 	const filteredSlashCommands = $derived(filterSlashCommands(allSlashCommands, slashQuery));
-	const activeSlashCommand = $derived(filteredSlashCommands[slashActiveIndex]);
 	const composerAriaActiveDescendant = $derived(
-		slashOpen && activeSlashCommand
-			? `${slashListboxId}-option-${activeSlashCommand.id}`
-			: undefined
+		slashOpen ? (slashActiveItemId ?? undefined) : undefined
 	);
 
 	const slashContext = $derived<SlashCommandContext>({
@@ -215,14 +216,14 @@
 	function openSlash(): void {
 		slashOpen = true;
 		slashQuery = '';
-		slashActiveIndex = 0;
+		slashActiveItemId = null;
 		slashInfo = null;
 	}
 
 	function closeSlash(options: { clearText?: boolean; refocus?: boolean } = {}): void {
 		slashOpen = false;
 		slashQuery = '';
-		slashActiveIndex = 0;
+		slashActiveItemId = null;
 		if (options.clearText) chatRef?.clearInput();
 		if (options.refocus) chatRef?.focusInput();
 	}
@@ -249,11 +250,25 @@
 	 * (0.8.0+) — replaces the previous DOM-level manual `.value`/`.textContent`
 	 * read.
 	 */
-	function handleComposerInput(text: string): void {
+	function syncSlashAnchor(event?: Event): HTMLTextAreaElement | null {
+		const eventTarget = event?.currentTarget ?? event?.target;
+		const editor =
+			eventTarget instanceof HTMLTextAreaElement
+				? eventTarget
+				: (chatRef?.getEditorElement() ?? null);
+		if (!editor) return null;
+
+		slashAnchor = editor;
+		slashCaretIndex = editor.selectionStart;
+		return editor;
+	}
+
+	function handleComposerInput(text: string, event?: Event): void {
+		syncSlashAnchor(event);
 		if (slashOpen) {
 			if (isSlashTriggerText(text)) {
 				slashQuery = text.slice(1);
-				slashActiveIndex = 0;
+				slashActiveItemId = null;
 			} else {
 				closeSlash();
 			}
@@ -263,36 +278,27 @@
 		}
 	}
 
+	function handleComposerSelectionChange(event: Event): void {
+		syncSlashAnchor(event);
+	}
+
 	function handleComposerKeydown(event: KeyboardEvent): void {
 		if (!slashOpen) return;
-		switch (event.key) {
-			case 'ArrowDown':
-				event.preventDefault();
-				event.stopPropagation();
-				slashActiveIndex = Math.min(
-					slashActiveIndex + 1,
-					Math.max(filteredSlashCommands.length - 1, 0)
-				);
-				break;
-			case 'ArrowUp':
-				event.preventDefault();
-				event.stopPropagation();
-				slashActiveIndex = Math.max(slashActiveIndex - 1, 0);
-				break;
-			case 'Enter': {
-				event.preventDefault();
-				event.stopPropagation();
-				if (activeSlashCommand) void executeSlashCommand(activeSlashCommand);
-				break;
-			}
-			case 'Escape':
-				event.preventDefault();
-				event.stopPropagation();
-				closeSlash({ clearText: true, refocus: true });
-				break;
-			default:
-				break;
+
+		if (event.key === 'Escape') {
+			// CommandMenu owns dismissal. Stardust only preserves the existing
+			// composer contract that Escape also clears the slash prefix.
+			chatRef?.clearInput();
+		} else if (event.key === 'Enter' && slashActiveItemId === null) {
+			// CommandMenu intentionally leaves Enter alone when it has no enabled
+			// item. Consume it here so Chat does not submit an unavailable command.
+			event.preventDefault();
+			event.stopPropagation();
 		}
+	}
+
+	function handleSlashMenuState(state: CommandMenuState): void {
+		slashActiveItemId = state.activeItemId;
 	}
 
 	$effect(() => {
@@ -501,15 +507,40 @@
 
 <div class="conversation-chat" aria-label="Conversation">
 	<div class="slash-anchor">
-		{#if slashOpen}
-			<SlashCommandPalette
-				id={slashListboxId}
-				commands={filteredSlashCommands}
-				activeIndex={slashActiveIndex}
-				context={slashContext}
-				onselect={(command) => void executeSlashCommand(command)}
-			/>
-		{/if}
+		<CommandMenu
+			bind:open={slashOpen}
+			bind:query={slashQuery}
+			listboxId={slashListboxId}
+			anchor={slashAnchor}
+			caretIndex={slashCaretIndex}
+			placement="top-start"
+			label="Slash commands"
+			onselect={({ value }) => {
+				const command = allSlashCommands.find((candidate) => candidate.id === value);
+				if (command) void executeSlashCommand(command);
+			}}
+			ondismiss={closeSlash}
+			onstatechange={handleSlashMenuState}
+		>
+			{#snippet items()}
+				{#each filteredSlashCommands as command (command.id)}
+					{@const reason = command.unavailable(slashContext)}
+					<CommandItem
+						value={command.id}
+						description={reason ?? command.description}
+						accessibleLabel={`${command.name}: ${reason ?? command.description}`}
+						disabled={reason !== null}
+						selectionMode="parent"
+					>
+						{command.name}
+					</CommandItem>
+				{/each}
+			{/snippet}
+
+			{#snippet empty()}
+				No matching commands
+			{/snippet}
+		</CommandMenu>
 		{#if slashInfo}
 			<div class="slash-info" role="status">
 				<div class="slash-info-header">
@@ -553,9 +584,11 @@
 		onstopgenerating={handleStopGenerating}
 		oncomposerinput={handleComposerInput}
 		oncomposerkeydown={handleComposerKeydown}
+		oncomposerselectionchange={handleComposerSelectionChange}
+		oncomposerblur={() => closeSlash()}
 		composerRole="combobox"
 		composerAriaExpanded={slashOpen ? 'true' : 'false'}
-		composerAriaControls={slashOpen ? `${slashListboxId}-listbox` : undefined}
+		composerAriaControls={slashOpen ? slashListboxId : undefined}
 		{composerAriaActiveDescendant}
 		composerAriaAutocomplete={slashOpen ? 'list' : undefined}
 		row={stardustRow}
