@@ -84,7 +84,11 @@
 		reconnectionState.kind !== 'dormant' && reconnectionState.kind !== 'failed-unobservable'
 	);
 	const runActive = $derived(running || reconnectedRunActive);
-	const acceptsSteering = $derived(running || reconnectionState.kind === 'observing');
+	const acceptsSteering = $derived(
+		running ||
+			reconnectionState.kind === 'observing' ||
+			reconnectionState.kind === 'awaiting-approval'
+	);
 
 	const reconnection = new SessionReconnection({
 		readSnapshot: readReconnectionSnapshot,
@@ -624,7 +628,7 @@
 				{#if streamGapNotice}
 					<div class="stream-gap-notice" role="status">{streamGapNotice}</div>
 				{/if}
-				{#if runActive && acceptsSteering}
+				{#if runActive && acceptsSteering && pendingApproval === null}
 					<div class="steer-strip" role="status">
 						<StatusDot connectionState="connected" label="Streaming" showLabel={false} size="sm" />
 						<span>Streaming — anything you type steers the run</span>

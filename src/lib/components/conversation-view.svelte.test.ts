@@ -145,6 +145,36 @@ describe('ConversationView', () => {
 		unmount(component);
 	});
 
+	it('routes composer input to steering while a reconnected run waits for approval', async () => {
+		const onSubmit = vi.fn();
+		const onSteer = vi.fn();
+		const component = mount(ConversationView, {
+			target: document.body,
+			props: {
+				sessionId: 'approval-session',
+				events: [],
+				runActive: true,
+				acceptsSteering: true,
+				onSubmit,
+				onSteer,
+				pendingApproval: {
+					approvalId: 'approval-steer',
+					sessionId: 'approval-session',
+					toolCall: { id: 'call-1', name: 'workspace.writeFile', arguments: {} },
+					status: 'pending',
+					createdAt: '2026-07-15T12:00:00.000Z',
+					expiresAt: '2099-07-15T13:00:00.000Z'
+				}
+			}
+		});
+
+		submitComposerMessage('change the file name');
+		await vi.waitFor(() => expect(onSteer).toHaveBeenCalledWith('change the file name'));
+		expect(onSubmit).not.toHaveBeenCalled();
+
+		unmount(component);
+	});
+
 	it('renders lifecycle markers with custom row override', () => {
 		const events: StreamEvent[] = [makeEvent(1, 'lifecycle', { status: 'started' })];
 		const component = mount(ConversationView, {
