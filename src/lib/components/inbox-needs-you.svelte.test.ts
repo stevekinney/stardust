@@ -1,5 +1,6 @@
 import { mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { page } from 'vitest/browser';
 import InboxNeedsYou from './inbox-needs-you.svelte';
 import type { ApprovalEntry } from '$lib/types';
 
@@ -58,12 +59,8 @@ describe('InboxNeedsYou', () => {
 		editButton!.click();
 		await Promise.resolve();
 
-		const textarea = document.querySelector(
-			'.cinder-approval-card__editor textarea'
-		) as HTMLTextAreaElement | null;
-		expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
-		textarea!.value = JSON.stringify({ command: 'git push origin feature' });
-		textarea!.dispatchEvent(new Event('input', { bubbles: true }));
+		const textarea = page.getByLabelText('Edited arguments JSON');
+		await textarea.fill(JSON.stringify({ command: 'git push origin feature' }));
 
 		const confirmButton = Array.from(document.querySelectorAll('button')).find(
 			(button) => button.textContent?.trim() === 'Confirm edited approval'
