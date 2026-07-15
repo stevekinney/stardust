@@ -23,7 +23,7 @@
 		"demo:schedule": "tsx scripts/devtools/demo.ts schedule",
 		"demo:crash": "tsx scripts/devtools/demo.ts crash",
 		"demo:smoke": "tsx scripts/devtools/demo.ts smoke",
-		"test:unit": "vitest run --project client && vitest run --project server && vitest run --project workflows",
+		"test:unit": "bun scripts/test-unit.ts",
 		"test:bundle": "vitest run --project bundle",
 		"test:a11y": "vitest run --project client src/lib/components/conversation-view-accessibility.svelte.test.ts",
 		"test": "bun run test:unit && bun run test:bundle && bun run test:a11y && bun run test:e2e",
