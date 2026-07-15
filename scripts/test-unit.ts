@@ -3,14 +3,11 @@ import { spawnSync } from 'node:child_process';
 export const unitTestProjects = ['client', 'server', 'workflows'] as const;
 
 /** Build the command that verifies a targeted invocation matches at least one test. */
-export function createListCommand(argumentsToForward: readonly string[]): string[] {
-	return [
-		'bunx',
-		'vitest',
-		'list',
-		...unitTestProjects.flatMap((project) => ['--project', project]),
-		...argumentsToForward
-	];
+export function createListCommand(
+	project: (typeof unitTestProjects)[number],
+	argumentsToForward: readonly string[]
+): string[] {
+	return ['bunx', 'vitest', 'list', '--project', project, ...argumentsToForward];
 }
 
 /** Build one isolated Vitest project command while preserving caller arguments. */
@@ -47,8 +44,10 @@ if (import.meta.main) {
 	const argumentsToForward = process.argv.slice(2);
 
 	if (argumentsToForward.length > 0) {
-		const matchingTests = runCommand(createListCommand(argumentsToForward), true);
-		if (matchingTests.length === 0) {
+		const hasMatchingTest = unitTestProjects.some(
+			(project) => runCommand(createListCommand(project, argumentsToForward), true).length > 0
+		);
+		if (!hasMatchingTest) {
 			console.error('No unit tests matched the provided arguments.');
 			process.exit(1);
 		}

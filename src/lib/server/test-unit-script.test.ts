@@ -6,17 +6,13 @@ import {
 } from '../../../scripts/test-unit';
 
 describe('unit test script commands', () => {
-	it('checks targeted arguments across every project', () => {
-		expect(createListCommand(['run-pane.svelte.test.ts'])).toEqual([
+	it('checks targeted arguments within one isolated project', () => {
+		expect(createListCommand('client', ['run-pane.svelte.test.ts'])).toEqual([
 			'bunx',
 			'vitest',
 			'list',
 			'--project',
 			'client',
-			'--project',
-			'server',
-			'--project',
-			'workflows',
 			'run-pane.svelte.test.ts'
 		]);
 	});
