@@ -54,16 +54,16 @@ describe('ApprovalCenter', () => {
 			props: { approvals }
 		});
 
-		const approvalCenter = document.querySelector('[aria-labelledby="approval-center-heading"]');
-		expect(approvalCenter).not.toBeNull();
-		const approvalCards = Array.from(approvalCenter!.querySelectorAll('article[aria-labelledby]'));
+		const approvalList = document.querySelector('.approval-list');
+		expect(approvalList).not.toBeNull();
+		const approvalCards = Array.from(approvalList!.querySelectorAll('[aria-labelledby]'));
 		expect(approvalCards).toHaveLength(2);
 		for (const approvalCard of approvalCards) {
 			const titleId = approvalCard.getAttribute('aria-labelledby');
 			if (!titleId) throw new Error('Expected approval card to have an accessible title');
-			expect(document.getElementById(titleId)?.textContent).toContain(
-				'Approval required for workspace.writeFile'
-			);
+			const title = document.getElementById(titleId);
+			if (!title) throw new Error(`Expected approval card title element #${titleId}`);
+			expect(title.textContent).toContain('Approval required for workspace.writeFile');
 		}
 		expect(document.body.textContent).toContain('workspace.writeFile');
 
