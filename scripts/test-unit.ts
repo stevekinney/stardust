@@ -28,6 +28,10 @@ export function normalizeArguments(argumentsToForward: readonly string[]): strin
 			normalizedArguments.push('--outputFile');
 			continue;
 		}
+		if (argument?.startsWith('--output-file.')) {
+			normalizedArguments.push(argument.replace('--output-file.', '--outputFile.'));
+			continue;
+		}
 		if (argument?.startsWith('--output-file=')) {
 			normalizedArguments.push(argument.replace('--output-file=', '--outputFile='));
 			continue;
@@ -66,7 +70,8 @@ export function hasTestSelectionArgument(argumentsToForward: readonly string[]):
 		filter.length > 0 ||
 		options.testNamePattern !== undefined ||
 		options.changed !== undefined ||
-		options.related !== undefined
+		options.related !== undefined ||
+		options.shard !== undefined
 	);
 }
 
@@ -85,6 +90,38 @@ export function hasReporterArgument(argumentsToForward: readonly string[]): bool
 	return argumentsToForward.some((argument) => isReporterArgument(argument));
 }
 
+function getReporterArguments(argumentsToForward: readonly string[]): string[] {
+	const options = parseCLI(['vitest', 'run', ...argumentsToForward]).options as {
+		reporter?: string[];
+		reporters?: string[];
+	};
+	return options.reporter ?? options.reporters ?? [];
+}
+
+/** Return whether blob is one of the explicitly requested reporters. */
+export function hasBlobReporterArgument(argumentsToForward: readonly string[]): boolean {
+	return getReporterArguments(argumentsToForward).includes('blob');
+}
+
+/** Return whether blob is the only explicitly requested reporter. */
+export function hasOnlyBlobReporterArgument(argumentsToForward: readonly string[]): boolean {
+	const reporters = getReporterArguments(argumentsToForward);
+	return reporters?.length === 1 && reporters[0] === 'blob';
+}
+
+function isBlobReporterArgument(argument: string, nextArgument?: string): boolean {
+	return argument === '--reporter=blob' || (argument === '--reporter' && nextArgument === 'blob');
+}
+
+function hasSeparateReporterValue(argument: string, nextArgument?: string): boolean {
+	return (
+		(argument === '--reporter' ||
+			(argument.startsWith('--outputFile') && !argument.includes('='))) &&
+		nextArgument !== undefined &&
+		!nextArgument.startsWith('-')
+	);
+}
+
 /** Remove reporter arguments that must only be applied to the merged report. */
 export function createProjectArguments(argumentsToForward: readonly string[]): string[] {
 	const projectArguments: string[] = [];
@@ -92,7 +129,7 @@ export function createProjectArguments(argumentsToForward: readonly string[]): s
 	for (let index = 0; index < argumentsToForward.length; index += 1) {
 		const argument = argumentsToForward[index];
 		if (!argument) continue;
-		if (argument === '--reporter' || argument === '--outputFile') {
+		if (hasSeparateReporterValue(argument, argumentsToForward[index + 1])) {
 			index += 1;
 			continue;
 		}
@@ -110,14 +147,17 @@ export function createMergeArguments(argumentsToForward: readonly string[]): str
 	for (let index = 0; index < argumentsToForward.length; index += 1) {
 		const argument = argumentsToForward[index];
 		if (!argument) continue;
+		const nextArgument = argumentsToForward[index + 1];
+		if (isBlobReporterArgument(argument, nextArgument)) {
+			if (argument === '--reporter') index += 1;
+			continue;
+		}
 		const shouldMerge = argument.startsWith('--coverage') || isReporterArgument(argument);
 		if (!shouldMerge) continue;
 
 		mergeArguments.push(argument);
-		const nextArgument = argumentsToForward[index + 1];
 		const hasSeparateValue =
-			(argument === '--reporter' ||
-				argument === '--outputFile' ||
+			(hasSeparateReporterValue(argument, nextArgument) ||
 				(argument.startsWith('--coverage.') && !argument.includes('='))) &&
 			nextArgument !== undefined &&
 			!nextArgument.startsWith('-');
@@ -200,14 +240,43 @@ function runCommand(command: readonly string[], captureOutput = false): string {
 	return result.stdout ?? '';
 }
 
+/** Run every isolated project, merge reports, then propagate the first project failure. */
+export function runSerializedCommands(
+	projectCommands: readonly (readonly string[])[],
+	mergeCommand: readonly string[] | undefined,
+	execute: (command: readonly string[]) => unknown = runCommand
+): void {
+	let firstProjectFailure: unknown;
+
+	for (const command of projectCommands) {
+		try {
+			execute(command);
+		} catch (error) {
+			firstProjectFailure ??= error;
+		}
+	}
+
+	if (mergeCommand) execute(mergeCommand);
+	if (firstProjectFailure) throw firstProjectFailure;
+}
+
 if (import.meta.main) {
 	const argumentsToForward = normalizeArguments(process.argv.slice(2));
+	const shouldPreserveBlobReports = hasBlobReporterArgument(argumentsToForward);
 	const shouldMergeReports =
-		hasCoverageArgument(argumentsToForward) || hasReporterArgument(argumentsToForward);
-	const blobReportsDirectory = shouldMergeReports ? `.vitest-reports-${process.pid}` : undefined;
+		hasCoverageArgument(argumentsToForward) ||
+		(hasReporterArgument(argumentsToForward) && !hasOnlyBlobReporterArgument(argumentsToForward));
+	const blobReportsDirectory = shouldPreserveBlobReports
+		? '.vitest-reports'
+		: shouldMergeReports
+			? `.vitest-reports-${process.pid}`
+			: undefined;
 	const projectArguments = blobReportsDirectory
 		? createProjectArguments(argumentsToForward)
 		: argumentsToForward;
+	if (shouldPreserveBlobReports) {
+		rmSync(blobReportsDirectory!, { recursive: true, force: true });
+	}
 
 	if (hasTestSelectionArgument(projectArguments)) {
 		const hasMatchingTest = unitTestProjects.some(
@@ -220,14 +289,17 @@ if (import.meta.main) {
 	}
 
 	try {
-		for (const project of unitTestProjects) {
-			runCommand(createProjectCommand(project, projectArguments, blobReportsDirectory));
-		}
-
-		if (blobReportsDirectory) {
-			runCommand(createMergeCommand(blobReportsDirectory, argumentsToForward));
-		}
+		runSerializedCommands(
+			unitTestProjects.map((project) =>
+				createProjectCommand(project, projectArguments, blobReportsDirectory)
+			),
+			shouldMergeReports && blobReportsDirectory
+				? createMergeCommand(blobReportsDirectory, argumentsToForward)
+				: undefined
+		);
 	} finally {
-		if (blobReportsDirectory) rmSync(blobReportsDirectory, { recursive: true, force: true });
+		if (blobReportsDirectory && !shouldPreserveBlobReports) {
+			rmSync(blobReportsDirectory, { recursive: true, force: true });
+		}
 	}
 }

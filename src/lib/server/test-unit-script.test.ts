@@ -6,10 +6,13 @@ import {
 	createMergeCommand,
 	createProjectArguments,
 	createProjectCommand,
+	hasBlobReporterArgument,
 	hasCoverageArgument,
+	hasOnlyBlobReporterArgument,
 	hasReporterArgument,
 	hasTestSelectionArgument,
 	normalizeArguments,
+	runSerializedCommands,
 	unitTestProjects
 } from '../../../scripts/test-unit';
 
@@ -70,8 +73,20 @@ describe('unit test script commands', () => {
 
 	it('normalizes supported kebab-case Vitest aliases', () => {
 		expect(
-			normalizeArguments(['--test-name-pattern=unit test script', '--output-file', 'results.json'])
-		).toEqual(['--testNamePattern=unit test script', '--outputFile', 'results.json']);
+			normalizeArguments([
+				'--test-name-pattern=unit test script',
+				'--output-file',
+				'results.json',
+				'--output-file.junit',
+				'junit.xml'
+			])
+		).toEqual([
+			'--testNamePattern=unit test script',
+			'--outputFile',
+			'results.json',
+			'--outputFile.junit',
+			'junit.xml'
+		]);
 	});
 
 	it('detects coverage requests', () => {
@@ -92,6 +107,7 @@ describe('unit test script commands', () => {
 		expect(hasTestSelectionArgument(['--coverage.reporter', 'lcov'])).toBe(false);
 		expect(hasTestSelectionArgument(['--coverage.reportsDirectory', 'tmp/coverage'])).toBe(false);
 		expect(hasTestSelectionArgument(['--maxWorkers', '2'])).toBe(false);
+		expect(hasTestSelectionArgument(['--shard=5/5'])).toBe(true);
 	});
 
 	it('keeps coverage-only project runs strict', () => {
@@ -145,6 +161,21 @@ describe('unit test script commands', () => {
 		expect(createMergeArguments(['--reporter=json'])).toEqual(['--reporter=json']);
 	});
 
+	it('keeps a blob-only reporter out of the unsupported merge path', () => {
+		expect(hasBlobReporterArgument(['--reporter=blob'])).toBe(true);
+		expect(hasOnlyBlobReporterArgument(['--reporter=blob'])).toBe(true);
+		expect(hasOnlyBlobReporterArgument(['--reporter=blob', '--reporter=json'])).toBe(false);
+		expect(createMergeArguments(['--reporter=blob', '--reporter=json'])).toEqual([
+			'--reporter=json'
+		]);
+	});
+
+	it('removes dotted output file values from isolated projects', () => {
+		const argumentsToForward = ['--reporter=junit', '--outputFile.junit', 'junit.xml'];
+		expect(createProjectArguments(argumentsToForward)).toEqual([]);
+		expect(createMergeArguments(argumentsToForward)).toEqual(argumentsToForward);
+	});
+
 	it('forwards aggregate coverage options to the merge', () => {
 		const argumentsToForward = [
 			'--coverage',
@@ -165,5 +196,19 @@ describe('unit test script commands', () => {
 			'tmp/coverage'
 		];
 		expect(createMergeArguments(argumentsToForward)).toEqual(argumentsToForward);
+	});
+
+	it('runs every project and merges reports before propagating a project failure', () => {
+		const calls: string[][] = [];
+		const projectFailure = new Error('project failed');
+		const execute = (command: readonly string[]) => {
+			calls.push([...command]);
+			if (command[0] === 'client') throw projectFailure;
+		};
+
+		expect(() =>
+			runSerializedCommands([['client'], ['server'], ['workflows']], ['merge'], execute)
+		).toThrow(projectFailure);
+		expect(calls).toEqual([['client'], ['server'], ['workflows'], ['merge']]);
 	});
 });
