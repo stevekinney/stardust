@@ -98,7 +98,7 @@ describe('RunPane', () => {
 		document.body.innerHTML = '';
 	});
 
-	it('uses Cinder Tabs fill mode for the bounded inspector layout', () => {
+	it('marks the filled tabs boundary with an app-owned layout class', () => {
 		vi.spyOn(globalThis, 'fetch').mockResolvedValue(
 			new Response(
 				JSON.stringify({
@@ -124,7 +124,12 @@ describe('RunPane', () => {
 			}
 		});
 
-		expect(document.querySelector('[data-cinder-fill]')).toBeInstanceOf(HTMLElement);
+		const filledTabs = document.querySelector('.run-pane-fill');
+		expect(filledTabs).toBeInstanceOf(HTMLElement);
+		const filledTabsStyle = getComputedStyle(filledTabs!);
+		expect(filledTabsStyle.flexGrow).toBe('1');
+		expect(filledTabsStyle.minHeight).toBe('0px');
+		expect(filledTabsStyle.overflow).toBe('hidden');
 
 		unmount(component);
 	});

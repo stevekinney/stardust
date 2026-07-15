@@ -3,8 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import TopNavRouteChangeHarness from './top-nav-route-change-harness.svelte';
 import TopNav from './top-nav.svelte';
 
-const getNavigationItem = (href: string) =>
-	document.querySelector<HTMLAnchorElement>(`a[data-cinder-navigation-item][href="${href}"]`);
+const getPrimaryNavigation = () => document.querySelector('nav[aria-label="Primary"]');
+
+const getNavigationItems = (container: ParentNode = document) =>
+	Array.from(container.querySelectorAll<HTMLAnchorElement>('a[href]:not([aria-label])'));
+
+const getNavigationItem = (href: string, container: ParentNode = document) =>
+	getNavigationItems(container).find((link) => link.getAttribute('href') === href) ?? null;
 
 const activateNavigationItem = (link: HTMLAnchorElement, init?: MouseEventInit) => {
 	document.addEventListener('click', (event) => event.preventDefault(), { once: true });
@@ -22,12 +27,10 @@ describe('TopNav', () => {
 			props: { currentPath: '/' }
 		});
 
-		const nav = document.querySelector('nav[aria-label="Primary"]');
+		const nav = getPrimaryNavigation();
 		expect(nav).not.toBeNull();
 
-		const labels = Array.from(nav!.querySelectorAll('a[data-cinder-navigation-item]')).map((link) =>
-			link.textContent?.trim()
-		);
+		const labels = getNavigationItems(nav!).map((link) => link.textContent?.trim());
 		expect(labels).toEqual(['Sessions', 'Inbox', 'Schedules', 'Artifacts', 'Insights']);
 
 		unmount(component);
@@ -39,7 +42,7 @@ describe('TopNav', () => {
 			props: { currentPath: '/schedules' }
 		});
 
-		const active = document.querySelector('[data-cinder-navigation-item][aria-current]');
+		const active = getPrimaryNavigation()?.querySelector('a[aria-current]');
 		expect(active).not.toBeNull();
 		expect(active!.textContent?.trim()).toBe('Schedules');
 
@@ -52,7 +55,7 @@ describe('TopNav', () => {
 			props: { currentPath: '/sessions/ses-7af3' }
 		});
 
-		const active = document.querySelector('[data-cinder-navigation-item][aria-current]');
+		const active = getPrimaryNavigation()?.querySelector('a[aria-current]');
 		expect(active!.textContent?.trim()).toBe('Sessions');
 
 		unmount(component);
@@ -91,11 +94,9 @@ describe('TopNav', () => {
 	});
 
 	// Regression: the nav overflows onto the search/health/settings controls at
-	// narrow container widths. Cinder's NavigationBar collapses the tab list
-	// behind a menu toggle to prevent that, but only if the bar opts in via a
-	// `menuToggle` snippet and forwards the `variant` it hands the `items`
-	// snippet — both were previously missing.
-	it('opens the mobile tab list from the menu toggle with the mobile variant applied', async () => {
+	// narrow container widths. Verify the collapsed menu opens and exposes every
+	// primary destination through the public navigation contract.
+	it('opens the mobile tab list with every primary navigation destination', async () => {
 		const component = mount(TopNav, {
 			target: document.body,
 			props: { currentPath: '/' }
@@ -108,11 +109,12 @@ describe('TopNav', () => {
 		(toggle as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(toggle!.getAttribute('aria-expanded')).toBe('true'));
 
-		const items = document.querySelectorAll('a[data-cinder-navigation-item]');
-		expect(items).toHaveLength(5);
-		for (const item of items) {
-			expect(item.getAttribute('data-variant')).toBe('mobile');
-		}
+		const controlledMenuId = toggle!.getAttribute('aria-controls');
+		if (!controlledMenuId) throw new Error('Expected navigation toggle to control the mobile menu');
+		const mobileMenu = document.getElementById(controlledMenuId);
+		expect(mobileMenu).not.toBeNull();
+		const destinations = getNavigationItems(mobileMenu!).map((link) => link.getAttribute('href'));
+		expect(destinations).toEqual(['/', '/inbox', '/schedules', '/artifacts', '/insights']);
 
 		unmount(component);
 	});

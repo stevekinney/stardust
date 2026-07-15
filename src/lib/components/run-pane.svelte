@@ -91,7 +91,7 @@
 		<ReplayScrubber {maxSequence} {cursor} {onScrub} {cursorSummary} />
 	{/if}
 
-	<Tabs bind:value={mode} fill>
+	<Tabs bind:value={mode} fill class="run-pane-fill">
 		<div class="mode-bar">
 			<TabList label="Run inspector view">
 				<Tab value="timeline">Timeline</Tab>
@@ -225,6 +225,12 @@
 		gap: 8px;
 		padding: 8px 16px;
 		border-bottom: 1px solid var(--cinder-border-muted);
+	}
+
+	:global(.run-pane-fill) {
+		flex: 1;
+		min-height: 0;
+		overflow: hidden;
 	}
 
 	.mode-hint {
