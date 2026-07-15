@@ -65,6 +65,9 @@ export default defineConfig({
 					include: ['src/**/*.{test,spec}.{js,ts}'],
 					exclude: [
 						'src/**/*.svelte.{test,spec}.{js,ts}',
+						// This test runs a production build, which rewrites `.svelte-kit`.
+						// Run it after projects that serve from the same directory have stopped.
+						'src/no-secrets-in-bundle.test.ts',
 						// Workflow tests run serially in the dedicated `workflows` project below.
 						'src/workflows/*.workflow.test.ts'
 					]
@@ -91,6 +94,17 @@ export default defineConfig({
 					testTimeout: 60_000,
 					hookTimeout: 60_000,
 					include: ['src/workflows/*.workflow.test.ts']
+				}
+			},
+
+			// A production build replaces `.svelte-kit`, so package scripts run this
+			// project in a separate Vitest process after the other projects have exited.
+			{
+				extends: './vite.config.ts',
+				test: {
+					name: 'bundle',
+					environment: 'node',
+					include: ['src/no-secrets-in-bundle.test.ts']
 				}
 			}
 		]
