@@ -30,7 +30,7 @@ The current design handoff is `Stardust Console v2.dc.html` (1384 lines) — the
 
 ## Cinder Design System
 
-Uses `@lostgradient/cinder 0.9.0`. Key components and their imports:
+Uses the checked-in `@lostgradient/cinder@0.13.0` baseline declared in `package.json` and locked in `bun.lock`. Key components and their imports:
 
 ```ts
 import Badge from '@lostgradient/cinder/badge';
@@ -48,7 +48,7 @@ import FacetedFilterBar from '@lostgradient/cinder/faceted-filter-bar';
 
 `src/routes/+layout.svelte` imports `@lostgradient/cinder/styles` plus per-component style sidecars. Do not switch back to `@lostgradient/cinder/styles/all` for production paths.
 
-**Upstream issues:** `@lostgradient/*` packages are ours (repo: `stevekinney/cinder`). If you hit a bug, missing export, or need a new feature in Cinder, file a ticket on that repo with `gh issue create --repo stevekinney/cinder` including a clear repro or spec. Do not work around it silently, vendor a fork, or patch locally. Source map warnings during tests are the known Cinder issue #562—don't file a duplicate.
+**Upstream issues:** `@lostgradient/*` packages are ours (repo: `stevekinney/cinder`). If you hit a bug, missing export, or need a new feature in Cinder, file a ticket on that repo with `gh issue create --repo stevekinney/cinder` including a clear repro or spec. Do not work around it silently, vendor a fork, or patch locally.
 
 **Icons:** The design uses `lucide-icon` elements. In Svelte, render these as inline `<svg>` elements (the codebase already does this everywhere—don't add a Lucide dependency).
 
